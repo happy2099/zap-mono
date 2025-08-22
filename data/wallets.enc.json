@@ -1,0 +1,25 @@
+{
+  "user_wallets": {
+    "6032767351": {
+      "trading": [
+        {
+          "id": "7102bcd3-f684-4580-b224-1316efc7c959",
+          "label": "zap",
+          "publicKey": "HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS",
+          "encryptedPrivateKey": {
+            "encrypted": "bdc67ac11dbced9af62b83c17748283f88c672fc5954e42863f6bb93b5259ba6d2d3d15924480eff7372fd2f12954491346920a2ef99e438047fcc3ff9200bc824952a379e68d808376d6ffe8e60665f378ded2afe2ee1c7",
+            "iv": "7869c94d237ba8596571aa25",
+            "salt": "8686cb1777c876429ac914ef2f9954c2",
+            "authTag": "94247daf1347092de4aea09cd273f103"
+          },
+          "category": "trading",
+          "ownerChatId": "6032767351",
+          "balance": 0,
+          "createdAt": 1752994434055,
+          "lastBalanceUpdate": 1755891260623
+        }
+      ],
+      "withdrawal": []
+    }
+  }
+}

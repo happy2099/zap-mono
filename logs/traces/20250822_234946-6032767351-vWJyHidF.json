@@ -1,0 +1,121 @@
+{
+  "traceVersion": "1.1",
+  "signature": "vWJyHidF2Aa7e6D17Fjn5Axqtt2L2NvyUvbYVeRACTBQKtEzEx6QhzWnG7HLGKHwEBUbNJ4cVXbZhSmZo488X9P",
+  "traderWallet": "EKDDjxzJ39Bjkr47NiARGJDKFVxiiV9WNJ5XbtEhPEXP",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-22T18:19:46.315Z",
+  "steps": [
+    {
+      "step": "step2_transactionData",
+      "timestamp": "2025-08-22T18:19:47.088Z",
+      "rawTransaction": {
+        "blockTime": 1755886733,
+        "meta": {
+          "computeUnitsConsumed": 450,
+          "costUnits": 1784,
+          "err": null,
+          "fee": 5100,
+          "innerInstructions": [],
+          "logMessages": [
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success"
+          ],
+          "postBalances": [
+            1958757,
+            9972523512,
+            1,
+            1
+          ],
+          "postTokenBalances": [],
+          "preBalances": [
+            1963926,
+            9972523443,
+            1,
+            1
+          ],
+          "preTokenBalances": [],
+          "rewards": [],
+          "status": {
+            "Ok": null
+          }
+        },
+        "slot": 361809328,
+        "transaction": {
+          "message": {
+            "accountKeys": [
+              {
+                "pubkey": "FdrX4nGTWyJh5m4biV6w4khkGTsEWpUCZnY3CbGRqGh9",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "EKDDjxzJ39Bjkr47NiARGJDKFVxiiV9WNJ5XbtEhPEXP",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "11111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "ComputeBudget111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              }
+            ],
+            "instructions": [
+              {
+                "accounts": [],
+                "data": "3gJqkocMWaMm",
+                "programId": "ComputeBudget111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "accounts": [],
+                "data": "L22o7M",
+                "programId": "ComputeBudget111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "EKDDjxzJ39Bjkr47NiARGJDKFVxiiV9WNJ5XbtEhPEXP",
+                    "lamports": 69,
+                    "source": "FdrX4nGTWyJh5m4biV6w4khkGTsEWpUCZnY3CbGRqGh9"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              }
+            ],
+            "recentBlockhash": "6YMb5Wvb51R22gGZVuKW9f4havZCc7TLcQ2kfGCv4zFK"
+          },
+          "signatures": [
+            "vWJyHidF2Aa7e6D17Fjn5Axqtt2L2NvyUvbYVeRACTBQKtEzEx6QhzWnG7HLGKHwEBUbNJ4cVXbZhSmZo488X9P"
+          ]
+        },
+        "version": "legacy"
+      }
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-22T18:19:47.099Z",
+      "isCopyable": false,
+      "reason": "Balance change analysis did not detect a valid swap."
+    }
+  ],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Analysis Aborted: Balance change analysis did not detect a valid swap.",
+  "timestamp_end": "2025-08-22T18:19:47.121Z"
+}

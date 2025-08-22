@@ -1,0 +1,93 @@
+{
+  "version": "4.0.0",
+  "name": "raydium_amm",
+  "instructions": [
+    {
+      "name": "initialize",
+      "accounts": [
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "rent", "isMut": false, "isSigner": false },
+        { "name": "amm", "isMut": true, "isSigner": false },
+        { "name": "ammAuthority", "isMut": false, "isSigner": false },
+        { "name": "ammOpenOrders", "isMut": true, "isSigner": false },
+        { "name": "ammLpMint", "isMut": true, "isSigner": false },
+        { "name": "coinMint", "isMut": false, "isSigner": false },
+        { "name": "pcMint", "isMut": false, "isSigner": false },
+        { "name": "poolCoinTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "poolPcTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "poolWithdrawQueue", "isMut": true, "isSigner": false },
+        { "name": "poolTargetOrders", "isMut": true, "isSigner": false },
+        { "name": "poolLpTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "poolTempLpTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "serumProgram", "isMut": false, "isSigner": false },
+        { "name": "serumMarket", "isMut": true, "isSigner": false },
+        { "name": "userWallet", "isMut": true, "isSigner": true }
+      ],
+      "args": [{ "name": "nonce", "type": "u8" }]
+    },
+    {
+      "name": "swapBaseIn",
+      "accounts": [
+        { "name": "tokenProgram", "isMut": false, "isSigner": false },
+        { "name": "amm", "isMut": true, "isSigner": false },
+        { "name": "ammAuthority", "isMut": false, "isSigner": false },
+        { "name": "ammOpenOrders", "isMut": true, "isSigner": false },
+        { "name": "ammTargetOrders", "isMut": true, "isSigner": false },
+        { "name": "poolCoinTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "poolPcTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "serumProgram", "isMut": false, "isSigner": false },
+        { "name": "serumMarket", "isMut": true, "isSigner": false },
+        { "name": "serumBids", "isMut": true, "isSigner": false },
+        { "name": "serumAsks", "isMut": true, "isSigner": false },
+        { "name": "serumEventQueue", "isMut": true, "isSigner": false },
+        { "name": "serumCoinVault", "isMut": true, "isSigner": false },
+        { "name": "serumPcVault", "isMut": true, "isSigner": false },
+        { "name": "serumVaultSigner", "isMut": false, "isSigner": false },
+        { "name": "userSourceTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "userDestinationTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "userOwner", "isMut": false, "isSigner": true }
+      ],
+      "args": [
+        { "name": "amountIn", "type": "u64" },
+        { "name": "minimumAmountOut", "type": "u64" }
+      ]
+    }
+  ],
+  "accounts": [
+    {
+      "name": "Amm",
+      "type": {
+        "kind": "struct",
+        "fields": [
+          { "name": "status", "type": "u64" },
+          { "name": "nonce", "type": "u64" },
+          { "name": "orderNum", "type": "u64" },
+          { "name": "depth", "type": "u64" },
+          { "name": "coinDecimals", "type": "u64" },
+          { "name": "pcDecimals", "type": "u64" },
+          { "name": "state", "type": "u64" },
+          { "name": "resetFlag", "type": "u64" },
+          { "name": "minSize", "type": "u64" },
+          { "name": "volMaxCutRatio", "type": "u64" },
+          { "name": "amountWaveRatio", "type": "u64" },
+          { "name": "coinLotSize", "type": "u64" },
+          { "name": "pcLotSize", "type": "u64" },
+          { "name": "minPriceMultiplier", "type": "u64" },
+          { "name": "maxPriceMultiplier", "type": "u64" },
+          { "name": "systemDecimals", "type": "u64" },
+          { "name": "fees", "type": { "defined": "Fees" } },
+          { "name": "outPut", "type": { "defined": "u128" } },
+          { "name": "tokenCoin", "type": "publicKey" },
+          { "name": "tokenPc", "type": "publicKey" },
+          { "name": "coinMint", "type": "publicKey" },
+          { "name": "pcMint", "type": "publicKey" },
+          { "name": "lpMint", "type": "publicKey" },
+          { "name": "ammOpenOrders", "type": "publicKey" },
+          { "name": "ammTargetOrders", "type": "publicKey" },
+          { "name": "ammOwner", "type": "publicKey" },
+          { "name": "serum", "type": "publicKey" }
+        ]
+      }
+    }
+  ]
+}

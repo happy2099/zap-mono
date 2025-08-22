@@ -1,0 +1,120 @@
+{
+  "traceVersion": "1.1",
+  "signature": "C4LvAtRnFDxp2xwFo6ob79E1VqzdbdTUNnETUtHvpHbQXL7uLQLdSXjUDmLPQ9xtYzhiG9eWAEkXPDac9mL8GfF",
+  "traderWallet": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-22T18:23:27.222Z",
+  "steps": [
+    {
+      "step": "step2_transactionData",
+      "timestamp": "2025-08-22T18:23:27.839Z",
+      "rawTransaction": {
+        "blockTime": 1755886987,
+        "meta": {
+          "computeUnitsConsumed": 300,
+          "costUnits": 1934,
+          "err": null,
+          "fee": 5000,
+          "innerInstructions": [],
+          "logMessages": [
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success"
+          ],
+          "postBalances": [
+            0,
+            464608547854,
+            52925940418,
+            1
+          ],
+          "postTokenBalances": [],
+          "preBalances": [
+            950000,
+            464608537854,
+            52925005418,
+            1
+          ],
+          "preTokenBalances": [],
+          "rewards": [],
+          "status": {
+            "Ok": null
+          }
+        },
+        "slot": 361809975,
+        "transaction": {
+          "message": {
+            "accountKeys": [
+              {
+                "pubkey": "4Tu4bx36rY9TMitePTWYMNhHPabyRqv6nMfUfS5GLBZT",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "G2fbcmjMAuwaAaJjJdohc7hk7Df2raM6tpKAvwUVVran",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "11111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              }
+            ],
+            "instructions": [
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+                    "lamports": 10000,
+                    "source": "4Tu4bx36rY9TMitePTWYMNhHPabyRqv6nMfUfS5GLBZT"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "G2fbcmjMAuwaAaJjJdohc7hk7Df2raM6tpKAvwUVVran",
+                    "lamports": 935000,
+                    "source": "4Tu4bx36rY9TMitePTWYMNhHPabyRqv6nMfUfS5GLBZT"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              }
+            ],
+            "recentBlockhash": "5VecaFznaNpNrV9VysVUiPSg1qfXfCiPHQFWR5zbb18d"
+          },
+          "signatures": [
+            "C4LvAtRnFDxp2xwFo6ob79E1VqzdbdTUNnETUtHvpHbQXL7uLQLdSXjUDmLPQ9xtYzhiG9eWAEkXPDac9mL8GfF"
+          ]
+        },
+        "version": "legacy"
+      }
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-22T18:23:27.844Z",
+      "isCopyable": false,
+      "reason": "Balance change analysis did not detect a valid swap."
+    }
+  ],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Analysis Aborted: Balance change analysis did not detect a valid swap.",
+  "timestamp_end": "2025-08-22T18:23:27.850Z"
+}

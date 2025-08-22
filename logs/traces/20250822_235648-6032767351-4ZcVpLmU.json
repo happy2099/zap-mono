@@ -1,0 +1,454 @@
+{
+  "traceVersion": "1.1",
+  "signature": "4ZcVpLmUMPihwCL9F1uAcSKLtAwnAok6HPJotHhNpGequxjvqA87XAo9quVJggM1dWLeQMMu63y25sf22WE31yrE",
+  "traderWallet": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-22T18:26:48.109Z",
+  "steps": [
+    {
+      "step": "step2_transactionData",
+      "timestamp": "2025-08-22T18:26:49.082Z",
+      "rawTransaction": {
+        "blockTime": 1755887198,
+        "meta": {
+          "computeUnitsConsumed": 3000,
+          "costUnits": 7088,
+          "err": null,
+          "fee": 5000,
+          "innerInstructions": [],
+          "logMessages": [
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [1]",
+            "Program 11111111111111111111111111111111 success"
+          ],
+          "postBalances": [
+            420600268,
+            81874426590,
+            1400429381,
+            4898878,
+            65828708,
+            35890207,
+            8017133731,
+            34120608818,
+            987614,
+            9982270,
+            2000000008,
+            1
+          ],
+          "postTokenBalances": [],
+          "preBalances": [
+            420605328,
+            81874426584,
+            1400429375,
+            4898872,
+            65828702,
+            35890201,
+            8017133725,
+            34120608812,
+            987608,
+            9982264,
+            2000000002,
+            1
+          ],
+          "preTokenBalances": [],
+          "rewards": [],
+          "status": {
+            "Ok": null
+          }
+        },
+        "slot": 361810496,
+        "transaction": {
+          "message": {
+            "accountKeys": [
+              {
+                "pubkey": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "22UBXzWBz7ABJRUGt6VXYePHYrUFrrKziTZPBwNMHFoP",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "4Cvp5ow6yekESaqeYvuQdV6p3GE9NRHAaoDeNtCtMPuN",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "5D5RnaHo5pggA46SpgcHfFzLNmz1H2AFmkKTnsk2ZPUH",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "776eyzhz4teQriqktLAvTVcoBempiF8935prsq1zz6gk",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "9bFfacQYr5XBL4k9fb4HtsGALdec7tBks6Np6tNvTk4X",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "9ipFWccjQJdTGia6N1SDBDpL14RwDyJdUu6eEKTFpjta",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "BPV73hrVtSLX2Fusw5EsQSf94kPyKaqVjU673442aWB3",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "DdoQ8oKa1QS5QmrUYnAhuhd7sF1Lv6rAMZuhhpJsmXL1",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "FTdEWimn8EagwaVuieFgdKvTGWQT5uR3H2XYEA17JF7r",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "11111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              }
+            ],
+            "instructions": [
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "22UBXzWBz7ABJRUGt6VXYePHYrUFrrKziTZPBwNMHFoP",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "5D5RnaHo5pggA46SpgcHfFzLNmz1H2AFmkKTnsk2ZPUH",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "FTdEWimn8EagwaVuieFgdKvTGWQT5uR3H2XYEA17JF7r",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "9bFfacQYr5XBL4k9fb4HtsGALdec7tBks6Np6tNvTk4X",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "DdoQ8oKa1QS5QmrUYnAhuhd7sF1Lv6rAMZuhhpJsmXL1",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "BPV73hrVtSLX2Fusw5EsQSf94kPyKaqVjU673442aWB3",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "4Cvp5ow6yekESaqeYvuQdV6p3GE9NRHAaoDeNtCtMPuN",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "9ipFWccjQJdTGia6N1SDBDpL14RwDyJdUu6eEKTFpjta",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "776eyzhz4teQriqktLAvTVcoBempiF8935prsq1zz6gk",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "22UBXzWBz7ABJRUGt6VXYePHYrUFrrKziTZPBwNMHFoP",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "5D5RnaHo5pggA46SpgcHfFzLNmz1H2AFmkKTnsk2ZPUH",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "FTdEWimn8EagwaVuieFgdKvTGWQT5uR3H2XYEA17JF7r",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "9bFfacQYr5XBL4k9fb4HtsGALdec7tBks6Np6tNvTk4X",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "DdoQ8oKa1QS5QmrUYnAhuhd7sF1Lv6rAMZuhhpJsmXL1",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "BPV73hrVtSLX2Fusw5EsQSf94kPyKaqVjU673442aWB3",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "4Cvp5ow6yekESaqeYvuQdV6p3GE9NRHAaoDeNtCtMPuN",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "9ipFWccjQJdTGia6N1SDBDpL14RwDyJdUu6eEKTFpjta",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "parsed": {
+                  "info": {
+                    "destination": "776eyzhz4teQriqktLAvTVcoBempiF8935prsq1zz6gk",
+                    "lamports": 3,
+                    "source": "Gc825i82VGD1asd8L77LmWZBbDPejGAgSfAj4WHegZFn"
+                  },
+                  "type": "transfer"
+                },
+                "program": "system",
+                "programId": "11111111111111111111111111111111",
+                "stackHeight": 1
+              }
+            ],
+            "recentBlockhash": "2n2p9AQVzakJYS4fHRLSspsNUoSkzBVEsNzHHwR3c2i2"
+          },
+          "signatures": [
+            "4ZcVpLmUMPihwCL9F1uAcSKLtAwnAok6HPJotHhNpGequxjvqA87XAo9quVJggM1dWLeQMMu63y25sf22WE31yrE"
+          ]
+        },
+        "version": "legacy"
+      }
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-22T18:26:49.090Z",
+      "isCopyable": false,
+      "reason": "Balance change analysis did not detect a valid swap."
+    }
+  ],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Analysis Aborted: Balance change analysis did not detect a valid swap.",
+  "timestamp_end": "2025-08-22T18:26:49.095Z"
+}

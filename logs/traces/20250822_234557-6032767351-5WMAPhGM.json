@@ -1,0 +1,226 @@
+{
+  "traceVersion": "1.1",
+  "signature": "5WMAPhGMRp4PawbvxqSbc7qq9Q5mMfEsq2mfEUHvTMarB7C8ttd2PzZMCMksfpVNXHVibHt7kxk2uhkm2qyTgsHn",
+  "traderWallet": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-22T18:15:57.547Z",
+  "steps": [
+    {
+      "step": "step2_transactionData",
+      "timestamp": "2025-08-22T18:15:58.515Z",
+      "rawTransaction": {
+        "blockTime": 1755886534,
+        "meta": {
+          "computeUnitsConsumed": 38228,
+          "costUnits": 41186,
+          "err": null,
+          "fee": 11997,
+          "innerInstructions": [
+            {
+              "index": 1,
+              "instructions": [
+                {
+                  "parsed": {
+                    "info": {
+                      "lamports": 1231920,
+                      "newAccount": "9a5B23bLaUmTwQkiwaqC7KWzj9v3NQKbwTj4CGCiPHto",
+                      "owner": "vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo",
+                      "source": "PUPAMf3xCKqQgciSYv6ggZzjMirMdMVs4UW6fnz6kBr",
+                      "space": 49
+                    },
+                    "type": "createAccount"
+                  },
+                  "program": "system",
+                  "programId": "11111111111111111111111111111111",
+                  "stackHeight": 2
+                },
+                {
+                  "parsed": {
+                    "info": {
+                      "destination": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                      "lamports": 36247472,
+                      "source": "9r4rNed3kKU9qpyTwZYYpmGCphu7vRib4Vcf9D5uXZS8"
+                    },
+                    "type": "transfer"
+                  },
+                  "program": "system",
+                  "programId": "11111111111111111111111111111111",
+                  "stackHeight": 2
+                },
+                {
+                  "accounts": [
+                    "6phoPPD68zKi7h7eqPkKc86sEaAWvCYvZNdmFsmHNGPA"
+                  ],
+                  "data": "FsZCYc2TMoYP8VeiYV6aydR2sDyjF3dHojnNBUPVY8LXdg1K6zyp4Fn1EcSNkMC6tacSDyJLNvkGegy2NQ314iBvW29eeMMDX4cw",
+                  "programId": "vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo",
+                  "stackHeight": 2
+                }
+              ]
+            }
+          ],
+          "logMessages": [
+            "Program ComputeBudget111111111111111111111111111111 invoke [1]",
+            "Program ComputeBudget111111111111111111111111111111 success",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo invoke [1]",
+            "Program log: Instruction: ClaimRuffleTickets",
+            "Program 11111111111111111111111111111111 invoke [2]",
+            "Program 11111111111111111111111111111111 success",
+            "Program 11111111111111111111111111111111 invoke [2]",
+            "Program 11111111111111111111111111111111 success",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo invoke [2]",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo consumed 6536 of 172173 compute units",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo success",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo consumed 38078 of 202850 compute units",
+            "Program vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo success"
+          ],
+          "postBalances": [
+            72874426582,
+            8547478900,
+            1280640,
+            1231920,
+            569799670910,
+            1,
+            0,
+            1,
+            1003162900,
+            1009200,
+            1141440
+          ],
+          "postTokenBalances": [],
+          "preBalances": [
+            72838191107,
+            8548710820,
+            1280640,
+            0,
+            569835918382,
+            1,
+            0,
+            1,
+            1003162900,
+            1009200,
+            1141440
+          ],
+          "preTokenBalances": [],
+          "rewards": [],
+          "status": {
+            "Ok": null
+          }
+        },
+        "slot": 361808824,
+        "transaction": {
+          "message": {
+            "accountKeys": [
+              {
+                "pubkey": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "PUPAMf3xCKqQgciSYv6ggZzjMirMdMVs4UW6fnz6kBr",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "3F1Gw71yXPRv9RGVHJ6k5n5soVg6LJpkQWeeNypLu61q",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "9a5B23bLaUmTwQkiwaqC7KWzj9v3NQKbwTj4CGCiPHto",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "9r4rNed3kKU9qpyTwZYYpmGCphu7vRib4Vcf9D5uXZS8",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": true
+              },
+              {
+                "pubkey": "11111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "6phoPPD68zKi7h7eqPkKc86sEaAWvCYvZNdmFsmHNGPA",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "ComputeBudget111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "D1sfs9tj5zPfw9QygoXTBZCELbqNFDpWsUq6kP97RVjr",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "SysvarRent111111111111111111111111111111111",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              },
+              {
+                "pubkey": "vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo",
+                "signer": "[CENSORED]",
+                "source": "transaction",
+                "writable": false
+              }
+            ],
+            "instructions": [
+              {
+                "accounts": [],
+                "data": "3XP36SPiysvf",
+                "programId": "ComputeBudget111111111111111111111111111111",
+                "stackHeight": 1
+              },
+              {
+                "accounts": [
+                  "D1sfs9tj5zPfw9QygoXTBZCELbqNFDpWsUq6kP97RVjr",
+                  "PUPAMf3xCKqQgciSYv6ggZzjMirMdMVs4UW6fnz6kBr",
+                  "9r4rNed3kKU9qpyTwZYYpmGCphu7vRib4Vcf9D5uXZS8",
+                  "3F1Gw71yXPRv9RGVHJ6k5n5soVg6LJpkQWeeNypLu61q",
+                  "9a5B23bLaUmTwQkiwaqC7KWzj9v3NQKbwTj4CGCiPHto",
+                  "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+                  "PUPAMf3xCKqQgciSYv6ggZzjMirMdMVs4UW6fnz6kBr",
+                  "11111111111111111111111111111111",
+                  "SysvarRent111111111111111111111111111111111",
+                  "6phoPPD68zKi7h7eqPkKc86sEaAWvCYvZNdmFsmHNGPA",
+                  "vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo"
+                ],
+                "data": "ALiXmZ3CdcHMHQ1NBZd9i3uCr99cpLHecfwQnZu2PsoD",
+                "programId": "vu1t7ReSFRLfUsnbkQWh1x2JKDVLgecp86zR1iphmDo",
+                "stackHeight": 1
+              }
+            ],
+            "recentBlockhash": "AuEGG6e7q4rgLX5MN2DSrpmrwtcgLBHgE8zzz8Ux8eY8"
+          },
+          "signatures": [
+            "5WMAPhGMRp4PawbvxqSbc7qq9Q5mMfEsq2mfEUHvTMarB7C8ttd2PzZMCMksfpVNXHVibHt7kxk2uhkm2qyTgsHn",
+            "3UMeEx2PwPDdCVjgXi6THuqQSwParwYcsSwm369okrC4eBe18WETcEJQGiR2E7LaoGGJJw4Pp5irMwDR7w92NK3o"
+          ]
+        },
+        "version": "legacy"
+      }
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-22T18:15:58.520Z",
+      "isCopyable": false,
+      "reason": "Balance change analysis did not detect a valid swap."
+    }
+  ],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Analysis Aborted: Balance change analysis did not detect a valid swap.",
+  "timestamp_end": "2025-08-22T18:15:58.529Z"
+}
