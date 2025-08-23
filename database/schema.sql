@@ -8,10 +8,25 @@ CREATE TABLE IF NOT EXISTS users (
     username TEXT,
     settings TEXT DEFAULT '{}',
     sol_amount REAL DEFAULT 0.001,
-    primary_wallet_label TEXT DEFAULT 'zap',
     is_admin BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Wallets table (separate from users to avoid confusion)
+CREATE TABLE IF NOT EXISTS wallets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    address TEXT NOT NULL,
+    private_key TEXT,
+    wallet_type TEXT DEFAULT 'trading', -- 'trading', 'funding', etc.
+    is_primary BOOLEAN DEFAULT 0,
+    balance REAL DEFAULT 0.0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, label)
 );
 
 -- Traders table
@@ -115,3 +130,6 @@ CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses(user_id);
 CREATE INDEX IF NOT EXISTS idx_processed_pools_address ON processed_pools(pool_address);
 CREATE INDEX IF NOT EXISTS idx_users_admin ON users(is_admin);
 CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
+CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
+CREATE INDEX IF NOT EXISTS idx_wallets_primary ON wallets(user_id, is_primary);
+CREATE INDEX IF NOT EXISTS idx_wallets_label ON wallets(user_id, label);

@@ -10,7 +10,7 @@ const bs58 = require('bs58');
 const { PublicKey } = require('@solana/web3.js');
 
 // Import shared utilities and config
-const { shortenAddress, escapeMarkdownV2, formatLamports } = require('./utils');
+const { shortenAddress, escapeMarkdownV2, formatLamports, createUserFriendlyMessage, getUserGreeting } = require('./utils');
 const config = require('./patches/config.js');
 const { BOT_TOKEN, USER_WALLET_PUBKEY, MIN_SOL_AMOUNT_PER_TRADE, ADMIN_CHAT_ID } = config;
 
@@ -103,12 +103,39 @@ class TelegramUI {
 
     async handleMenuCommand(msg) {
         const chatId = msg.chat.id;
+        
+        // Save user information to database
+        await this.saveUserInfo(msg);
+        
         if (this.activeFlows.has(chatId)) {
             const flowType = this.activeFlows.get(chatId)?.type;
             this.activeFlows.delete(chatId);
             await this.sendOrEditMessage(chatId, `_Flow '${flowType}' cancelled._`, {}, msg.message_id).catch(() => { });
         }
         await this.showMainMenu(chatId, msg.message_id);
+    }
+
+    async saveUserInfo(msg) {
+        try {
+            const chatId = msg.chat.id;
+            const user = msg.from;
+            
+            if (user) {
+                // Use the actual Telegram user's name
+                const displayName = user.first_name || user.username || `User${chatId}`;
+                
+                // Save user info directly to database
+                try {
+                    await this.dataManager.saveUser(chatId, { 
+                        username: displayName
+                    });
+                } catch (dbError) {
+                    console.log('Could not save user in database:', dbError.message);
+                }
+            }
+        } catch (error) {
+            console.error('Error saving user info:', error);
+        }
     }
 
 async handleCallbackQuery(cb) {
@@ -166,6 +193,8 @@ async handleCallbackQuery(cb) {
             admin_remove_user_prompt: () => this.showUserRemovalList(chatId),
             admin_manage_admins: () => this.showAdminManagement(chatId),
             admin_list_users: () => this.showAllUsers(chatId),
+            admin_promote_user: () => this.requestUserToPromote(chatId),
+            admin_demote_user: () => this.requestUserToDemote(chatId),
         };
 
         if (simpleRoutes[data]) {
@@ -203,6 +232,19 @@ async handleCallbackQuery(cb) {
             return await this.displayWalletList(chatId); // Refresh wallet list
         }
         
+        // Admin promotion/demotion handlers
+        if (action === 'admin' && params[0] === 'promote' && params[1] === 'execute') {
+            const userIdToPromote = params.slice(2).join('_');
+            await this.handlePromoteUser(chatId, userIdToPromote);
+            return;
+        }
+        
+        if (action === 'admin' && params[0] === 'demote' && params[1] === 'execute') {
+            const userIdToDemote = params.slice(2).join('_');
+            await this.handleDemoteUser(chatId, userIdToDemote);
+            return;
+        }
+        
         console.warn(`Unhandled callback data: ${data}`);
         await this.sendErrorMessage(chatId, `Unknown action: ${data}`);
 
@@ -219,22 +261,30 @@ async handleCallbackQuery(cb) {
         const userSol = solAmounts[String(chatId)] || solAmounts.default || config.DEFAULT_SOL_TRADE_AMOUNT;
 
         // Get user-specific primary wallet setting
-        const settings = await this.dataManager.loadSettings();
-        const userSettings = settings.userSettings?.[String(chatId)] || {};
-        const primaryCopyWalletLabel = userSettings.primaryCopyWalletLabel;
+        const primaryCopyWalletLabel = await this.dataManager.getPrimaryWalletLabel(chatId);
 
         // Get user-specific wallet count
         const allWallets = this.walletManager.getAllWallets();
         const userWalletCount = allWallets.tradingWallets.length;
 
+        // Get user greeting - try to get from database first, fallback to 'Trader'
+        let userName = 'Trader';
+        try {
+            const user = await this.dataManager.getUser(chatId);
+            userName = user?.username || user?.first_name || 'Trader';
+        } catch (error) {
+            console.log('Could not get user from database, using fallback name');
+        }
+        const greeting = getUserGreeting({ first_name: userName });
+
         // The message is now fully personalized
         const userTraders = await this.dataManager.loadTraders(chatId);
         const activeTradersCount = Object.values(userTraders).filter(t => t.active).length;
         const totalTradersCount = Object.values(userTraders).length;
-        const message = `*🚀 ZapTrade Bot Menu*\n\n` +
-             `📊 Your Active Copies: *${activeTradersCount} / ${totalTradersCount} trader\\(s\\) active*\n`+ 
-            `💰 Your Trade Size: *${escapeMarkdownV2(userSol.toString())} SOL*\\.\n` +
-            `💼 Your Wallets: *${userWalletCount}* ${primaryCopyWalletLabel ? `\\(Primary: *${escapeMarkdownV2(primaryCopyWalletLabel)}*\\)` : `\\(⚠️ Primary NOT Set\\)`}\n\n` + // <-- FIXED
+        const message = `${greeting}\n\n🚀 *ZapTrade Bot Menu*\n\n` +
+             `📊 Your Active Copies: ${activeTradersCount} / ${totalTradersCount} trader(s) active\n`+ 
+            `💰 Your Trade Size: ${escapeMarkdownV2(userSol.toString())} SOL\n` +
+            `💼 Your Wallets: ${userWalletCount} ${primaryCopyWalletLabel ? `(Primary: ${escapeMarkdownV2(primaryCopyWalletLabel)})` : `(⚠️ Primary NOT Set)`}\n\n` +
             `Choose an action:`;
         console.log("Debug: Type of escapeMarkdownV2:", typeof escapeMarkdownV2);
 
@@ -262,7 +312,7 @@ async handleCallbackQuery(cb) {
             return;
         }
 
-        const message = `*👑 Admin God-Mode Panel*\n\nWelcome, operator\\. Select a command\\.`;
+        const message = `👑 *Admin God-Mode Panel*\n\nWelcome, operator. Select a command.`;
 
         const keyboard = [
             [{ text: "👀 View User Activity", callback_data: "admin_view_activity" }],
@@ -377,15 +427,15 @@ async handleCallbackQuery(cb) {
                     userTotalCurrentValue += currentValueSol;
 
                     userReport += ` *-* \`${escapeMarkdownV2(shortenAddress(mint))}\`\n`
-                        + `   *Spent:* ${escapeMarkdownV2(position.solSpent.toFixed(4))} SOL\n`
-                        + `   *Value:* ${escapeMarkdownV2(currentValueSol.toFixed(4))} SOL\n`
-                        + `   *P/L:* ${pnlIcon} ${escapeMarkdownV2(pnlSol.toFixed(4))} SOL\n`;
+                        + `   *Spent:* ${position.solSpent.toFixed(4)} SOL\n`
+                        + `   *Value:* ${currentValueSol.toFixed(4)} SOL\n`
+                        + `   *P/L:* ${pnlIcon} ${pnlSol.toFixed(4)} SOL\n`;
                 }
 
                 if (hasPositions) {
                     const userTotalPnl = userTotalCurrentValue - userTotalSolSpent;
                     const userPnlIcon = userTotalPnl >= 0 ? '🟢' : '🔴';
-                    userReport += ` *User Total P/L:* ${userPnlIcon} ${escapeMarkdownV2(userTotalPnl.toFixed(4))} SOL\n\n`;
+                    userReport += ` *User Total P/L:* ${userPnlIcon} ${userTotalPnl.toFixed(4)} SOL\n\n`;
                     finalMessage += userReport;
 
                     grandTotalSolSpent += userTotalSolSpent;
@@ -398,9 +448,8 @@ async handleCallbackQuery(cb) {
         const grandPnlIcon = grandTotalPnl >= 0 ? '🟢' : '🔴';
 
       finalMessage += `*===========================*\n`
-             + `*Bot Grand Total P/L:* ${grandPnlIcon} *${escapeMarkdownV2(grandTotalPnl.toFixed(4))} SOL*\n`
-             // THE FIX: Remove the unescaped parentheses from the fallback message.
-             + `_Value in USD: ~\\$${escapeMarkdownV2((grandTotalPnl * solPriceUsd).toFixed(2))}_`;
+             + `*Bot Grand Total P/L:* ${grandPnlIcon} *${grandTotalPnl.toFixed(4)} SOL*\n`
+             + `_Value in USD: ~$${(grandTotalPnl * solPriceUsd).toFixed(2)}_`;
         const keyboard = [
             [{ text: "🔄 Refresh", callback_data: "admin_view_pnl" }],
             [{ text: "🔙 Back to Admin Panel", callback_data: "admin_panel" }]
@@ -544,6 +593,50 @@ async handleCallbackQuery(cb) {
         await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
     }
 
+    async requestUserToPromote(chatId) {
+        const users = await this.dataManager.loadUsers();
+        const admins = await this.dataManager.getAllAdmins();
+        const adminIds = new Set(admins.map(a => a.chat_id));
+        
+        // Filter out users who are already admins
+        const nonAdminUsers = Object.entries(users).filter(([userId]) => !adminIds.has(userId));
+        
+        let message = `👑 *Promote User to Admin*\n\nSelect a user to promote to admin:`;
+        
+        const buttons = [];
+        if (nonAdminUsers.length === 0) {
+            message += `\n\n_All users are already admins\\._`;
+        } else {
+            nonAdminUsers.forEach(([userId, username]) => {
+                buttons.push([{ text: `👤 ${username}`, callback_data: `admin_promote_execute_${userId}` }]);
+            });
+        }
+        
+        buttons.push([{ text: "🔙 Back to Admin Management", callback_data: "admin_manage_admins" }]);
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: buttons } });
+    }
+
+    async requestUserToDemote(chatId) {
+        const admins = await this.dataManager.getAllAdmins();
+        
+        // Filter out the main admin (ADMIN_CHAT_ID) to prevent demoting them
+        const demotableAdmins = admins.filter(admin => String(admin.chat_id) !== String(config.ADMIN_CHAT_ID));
+        
+        let message = `➖ *Demote Admin*\n\nSelect an admin to demote:`;
+        
+        const buttons = [];
+        if (demotableAdmins.length === 0) {
+            message += `\n\n_No admins can be demoted\\._`;
+        } else {
+            demotableAdmins.forEach(admin => {
+                buttons.push([{ text: `👑 ${admin.username || admin.chat_id}`, callback_data: `admin_demote_execute_${admin.chat_id}` }]);
+            });
+        }
+        
+        buttons.push([{ text: "🔙 Back to Admin Management", callback_data: "admin_manage_admins" }]);
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: buttons } });
+    }
+
     async showUserSelectionForActivity(chatId) {
         const users = await this.dataManager.loadUsers();
         const userList = Object.entries(users);
@@ -579,10 +672,10 @@ async showTradersList(chatId) {
     const userTraders = await this.dataManager.loadTraders(chatId);
     const traderEntries = Object.entries(userTraders);
 
-    let message = "*📋 Your Configured Traders*";
+    let message = "📋 Your Configured Traders";
 
     if (traderEntries.length === 0) {
-        message += "\n\n_🤷 You haven't added any traders yet._";
+        message += "\n\n🤷 You haven't added any traders yet.";
     } else {
         const userSolAmounts = await this.dataManager.loadSolAmounts();
         const solAmt = userSolAmounts[String(chatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
@@ -594,8 +687,8 @@ async showTradersList(chatId) {
                 const statusIcon = trader.active ? "🟢" : "⚪️";
                 const statusText = trader.active ? "Active" : "Inactive";
 
-                const mainLine = `${statusIcon} *${escapeMarkdownV2(name)}* \\- _${escapeMarkdownV2(statusText)}_`;
-                const amountLine = `• Amount: \`${escapeMarkdownV2(solAmtStr)}\``;
+                const mainLine = `${statusIcon} ${name} - ${statusText}`;
+                const amountLine = `• Amount: ${solAmtStr}`;
 
                 return `${mainLine}\n${amountLine}`;
             });
@@ -607,7 +700,6 @@ async showTradersList(chatId) {
         reply_markup: {
             inline_keyboard: [[{ text: "🔙 Back to Main Menu", callback_data: "main_menu" }]],
         },
-        parse_mode: "MarkdownV2",
         disable_web_page_preview: true,
     });
 }
@@ -623,39 +715,39 @@ async showTradersMenu(chatId, action) {
             title = "▶️ Select Trader to START";
             filterFn = ([, t]) => !t.active;
             cbPrefix = "start_";
-            emptyMsg = "_All your traders are already active._";
-            header = "*Select one of your inactive traders:*";
+            emptyMsg = "All your traders are already active.";
+            header = "Select one of your inactive traders:";
             break;
         case 'stop':
             title = "⛔ Select Trader to STOP";
             filterFn = ([, t]) => t.active;
             cbPrefix = "stop_";
-            emptyMsg = "_You have no active traders to stop._";
-            header = "*Select one of your active traders:*";
+            emptyMsg = "You have no active traders to stop.";
+            header = "Select one of your active traders:";
             break;
         case 'remove':
             title = "🗑️ Select Trader to REMOVE";
             filterFn = () => true;
             cbPrefix = "remove_";
-            emptyMsg = "_You have no traders configured._";
-            header = "*Select any of your traders to remove:*";
+            emptyMsg = "You have no traders configured.";
+            header = "Select any of your traders to remove:";
             break;
         default: return;
     }
 
     const filteredTraders = Object.entries(userTraders).filter(filterFn);
     
-    // THE FIX: We don't escape our own headers.
-    let message = `*${escapeMarkdownV2(title)}*\\n\\n${header}`;
+    // Create user-friendly message
+    let message = `${title}\n\n${header}`;
 
-    // THE FIX: We add the status icons back to the buttons for a professional look.
+    // Add status icons to buttons for professional look
     const buttons = filteredTraders.map(([name, trader]) => {
         const icon = trader.active ? '🟢' : '⚪️';
         return [{ text: `${icon} ${name}`, callback_data: `${cbPrefix}${name}` }];
     });
 
     if (filteredTraders.length === 0) {
-        message += `\\n\\n${emptyMsg}`;
+        message += `\n\n${emptyMsg}`;
     }
 
     buttons.push([{ text: "🔙 Back to Main Menu", callback_data: "main_menu" }]);
@@ -667,7 +759,7 @@ async showTradersMenu(chatId, action) {
 }
  
     async displayWalletManagerMenu(chatId) {
-        const message = `*💼 Wallet Manager*\n\nManage wallets used for copy trading\\.`;
+        const message = `💼 *Wallet Manager*\n\nManage wallets used for copy trading.`;
         const keyboard = [
             [{ text: "👁️ List/Delete Wallets", callback_data: "wm_view" }, { text: "💰 Check Balances", callback_data: "balance" }],
             [{ text: "➕ Add New Wallet", callback_data: "wm_add" }],
@@ -1050,6 +1142,58 @@ async showTradersMenu(chatId, action) {
         await this.showUserRemovalList(chatId);
     }
 
+    async handlePromoteUser(chatId, userIdToPromote) {
+        try {
+            const users = await this.dataManager.loadUsers();
+            const username = users[userIdToPromote];
+            
+            if (!username) {
+                await this.sendOrEditMessage(chatId, `⚠️ User with ID \`${escapeMarkdownV2(userIdToPromote)}\` not found.`);
+                return;
+            }
+
+            // Promote the user to admin
+            await this.dataManager.setUserAdmin(userIdToPromote, true);
+            
+            await this.sendOrEditMessage(chatId, `✅ User *${escapeMarkdownV2(username)}* has been promoted to admin!`);
+            
+            // Show the updated admin management menu
+            await this.showAdminManagement(chatId);
+        } catch (error) {
+            console.error('Error promoting user:', error);
+            await this.sendErrorMessage(chatId, `Failed to promote user: ${error.message}`);
+        }
+    }
+
+    async handleDemoteUser(chatId, userIdToDemote) {
+        try {
+            const users = await this.dataManager.loadUsers();
+            const username = users[userIdToDemote];
+            
+            if (!username) {
+                await this.sendOrEditMessage(chatId, `⚠️ User with ID \`${escapeMarkdownV2(userIdToDemote)}\` not found.`);
+                return;
+            }
+
+            // Prevent demoting the main admin
+            if (String(userIdToDemote) === String(config.ADMIN_CHAT_ID)) {
+                await this.sendOrEditMessage(chatId, `⚠️ Cannot demote the main admin.`);
+                return;
+            }
+
+            // Demote the user from admin
+            await this.dataManager.setUserAdmin(userIdToDemote, false);
+            
+            await this.sendOrEditMessage(chatId, `✅ User *${escapeMarkdownV2(username)}* has been demoted from admin.`);
+            
+            // Show the updated admin management menu
+            await this.showAdminManagement(chatId);
+        } catch (error) {
+            console.error('Error demoting user:', error);
+            await this.sendErrorMessage(chatId, `Failed to demote user: ${error.message}`);
+        }
+    }
+
 
     async sendOrEditMessage(chatId, text, options = {}, messageId = null) {
         messageId = messageId || this.latestMessageIds.get(chatId);
@@ -1086,25 +1230,40 @@ async showTradersMenu(chatId, action) {
                     } catch (plainError) {
                         console.error(`CRITICAL: Failed to send plain message:`, plainError.message);
                         
-                        // Final fallback: try to sanitize the message completely
+                        // Final fallback: try to send user-friendly message
                         try {
-                            console.log('Attempting to send sanitized message...');
-                            // More aggressive sanitization - remove all problematic characters
-                            const sanitizedText = text
-                                .replace(/[_*[\]()~`>#+=|{}.!-\\]/g, '')
-                                .replace(/\n/g, ' ')
-                                .replace(/\s+/g, ' ')
-                                .trim();
+                            console.log('Attempting to send user-friendly message...');
+                            const userFriendlyText = createUserFriendlyMessage(text);
                             
-                            if (sanitizedText.length > 0) {
-                                const sanitizedMessage = await this.bot.sendMessage(chatId, sanitizedText, { disable_web_page_preview: true });
-                                this.latestMessageIds.set(chatId, sanitizedMessage.message_id);
-                                return sanitizedMessage;
+                            if (userFriendlyText.length > 0) {
+                                const userFriendlyMessage = await this.bot.sendMessage(chatId, userFriendlyText, { disable_web_page_preview: true });
+                                this.latestMessageIds.set(chatId, userFriendlyMessage.message_id);
+                                return userFriendlyMessage;
                             } else {
                                 console.error('Message was completely sanitized away');
+                                // Send a generic message
+                                const genericMessage = await this.bot.sendMessage(chatId, "✅ Operation completed successfully!", { disable_web_page_preview: true });
+                                this.latestMessageIds.set(chatId, genericMessage.message_id);
+                                return genericMessage;
                             }
-                        } catch (sanitizedError) {
-                            console.error(`CRITICAL: Failed to send sanitized message:`, sanitizedError.message);
+                        } catch (userFriendlyError) {
+                            console.error(`CRITICAL: Failed to send user-friendly message:`, userFriendlyError.message);
+                            // Last resort: send a simple message
+                            try {
+                                const simpleMessage = await this.bot.sendMessage(chatId, "✅ Success!", { disable_web_page_preview: true });
+                                this.latestMessageIds.set(chatId, simpleMessage.message_id);
+                                return simpleMessage;
+                            } catch (finalError) {
+                                console.error(`CRITICAL: Failed to send even simple message:`, finalError.message);
+                                // Ultimate fallback - try with just emoji
+                                try {
+                                    const emojiMessage = await this.bot.sendMessage(chatId, "✅", { disable_web_page_preview: true });
+                                    this.latestMessageIds.set(chatId, emojiMessage.message_id);
+                                    return emojiMessage;
+                                } catch (ultimateError) {
+                                    console.error(`CRITICAL: Failed to send even emoji message:`, ultimateError.message);
+                                }
+                            }
                         }
                     }
                 }
@@ -1120,6 +1279,13 @@ async showTradersMenu(chatId, action) {
             await this.bot.sendMessage(chatId, `❌ *Error*\n\n${escapeMarkdownV2(text)}`, { parse_mode: 'MarkdownV2' });
         } catch (e) {
             console.error(`Failed to send error message to chat ${chatId}:`, e);
+            // Fallback to user-friendly error message
+            try {
+                const userFriendlyError = createUserFriendlyMessage(`❌ Error\n\n${text}`);
+                await this.bot.sendMessage(chatId, userFriendlyError || "❌ An error occurred", { disable_web_page_preview: true });
+            } catch (fallbackError) {
+                console.error(`Failed to send fallback error message:`, fallbackError);
+            }
         }
     }
 

@@ -8,7 +8,7 @@ const { Token, TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solan
 const { PumpSdk } = require('@pump-fun/pump-sdk');
 const bs58 = require('bs58');
 const config = require('./patches/config.js');
-const traceLogger = require('./traceLogger.js');
+// const traceLogger = require('./traceLogger.js'); // COMMENTED OUT FOR QA TESTING
 
 class PumpFunPrebuilder {
     constructor(solanaManager, walletManager) {

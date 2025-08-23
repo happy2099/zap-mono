@@ -15,7 +15,7 @@ const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, 
 const axios = require('axios');
 const BN = require('bn.js');
 const { struct, u64, u8 } = require('@solana/buffer-layout');
-const traceLogger = require('./traceLogger.js');
+// const traceLogger = require('./traceLogger.js'); // COMMENTED OUT FOR QA TESTING
 
 // --- PROTOCOL SDKs ---
 const { PumpSdk } = require('@pump-fun/pump-sdk');

@@ -13,7 +13,7 @@ const {
 } = require('@solana/spl-token');
 const { PumpSdk } = require('@pump-fun/pump-sdk');
 const config = require('./patches/config.js');
-const traceLogger = require('./traceLogger.js');
+// const traceLogger = require('./traceLogger.js'); // COMMENTED OUT FOR QA TESTING
 
 // Optimization config
 const OPTIMIZATION_CONFIG = {

@@ -55,12 +55,26 @@ export function formatTokenAmount(amount, decimals) {
 export function escapeMarkdownV2(textInput) {
     if (textInput == null) return '';
     const text = String(textInput);
-    // More comprehensive regex to catch all special characters that need escaping in MarkdownV2
-    // Including all characters that need escaping according to Telegram's MarkdownV2 specification
-    const escapeCharsRegex = /[_*[\]()~`>#+=|{}.!-]/g;
-    return text
-        .replace(/\\/g, '\\\\')
-        .replace(escapeCharsRegex, (match) => `\\${match}`);
+    
+    // Use a simple and reliable approach - escape each character individually
+    let escaped = text;
+    
+    // Escape backslashes first
+    escaped = escaped.replace(/\\/g, '\\\\');
+    
+    // Escape all special characters that need escaping in MarkdownV2
+    // Using a simple string replacement approach to avoid regex issues
+    // Note: We don't escape '.' to avoid issues with decimal numbers
+    // Note: We don't escape '=' to avoid issues with separator lines
+    // Note: We don't escape '-' to avoid issues with negative numbers
+    // Note: We don't escape '!' to avoid issues with exclamation marks
+    // Note: We don't escape '•' to avoid issues with bullet points
+    const specialChars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '|', '{', '}'];
+    for (const char of specialChars) {
+        escaped = escaped.split(char).join(`\\${char}`);
+    }
+    
+    return escaped;
 }
 
 /**
@@ -74,9 +88,63 @@ export function safeEscapeMarkdownV2(textInput) {
     } catch (error) {
         console.warn('escapeMarkdownV2 failed, using fallback:', error.message);
         // Fallback: remove all special characters that could cause issues
+        // Note: We don't remove '.' to preserve decimal numbers
+        // Note: We don't remove '=' to preserve separator lines
+        // Note: We don't remove '-' to preserve negative numbers
+        // Note: We don't remove '!' to preserve exclamation marks
         const text = String(textInput || '');
-        return text.replace(/[_*[\]()~`>#+=|{}.!-\\]/g, '');
+        return text.replace(/[_*[\]()~`>#+|{}\\]/g, '');
     }
+}
+
+/**
+ * Creates user-friendly messages without Markdown formatting
+ * @param {string} text - The text to format
+ * @returns {string} - User-friendly formatted text
+ */
+export function createUserFriendlyMessage(text) {
+    if (!text) return '';
+    
+    // Remove Markdown formatting and make it readable
+    return text
+        .replace(/\*([^*]+)\*/g, '$1') // Remove bold
+        .replace(/_([^_]+)_/g, '$1')   // Remove italic
+        .replace(/`([^`]+)`/g, '$1')   // Remove code
+        .replace(/\\/g, '')            // Remove escape characters
+        .replace(/\n+/g, '\n')         // Normalize line breaks
+        .replace(/\s+/g, ' ')          // Normalize whitespace
+        .trim();
+}
+
+/**
+ * Creates a safe MarkdownV2 message by building it piece by piece
+ * @param {string[]} parts - Array of text parts to combine
+ * @returns {string} - Safely formatted MarkdownV2 message
+ */
+export function createSafeMarkdownMessage(parts) {
+    if (!Array.isArray(parts)) return '';
+    
+    return parts.map(part => {
+        if (typeof part === 'string') {
+            return escapeMarkdownV2(part);
+        }
+        return part;
+    }).join('');
+}
+
+/**
+ * Gets a user-friendly greeting based on user information
+ * @param {Object} user - Telegram user object
+ * @returns {string} - Greeting message
+ */
+export function getUserGreeting(user) {
+    if (!user) return 'Welcome!';
+    
+    // Try to get first name, then username, then fallback
+    const firstName = user.first_name || user.username || 'Trader';
+    const greeting = `Hello ${firstName}! 👋`;
+    
+    return greeting;
 }
 
 /**

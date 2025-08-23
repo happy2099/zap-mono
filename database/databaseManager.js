@@ -95,6 +95,15 @@ class DatabaseManager {
         return await this.get('SELECT * FROM users WHERE chat_id = ?', [chatId]);
     }
 
+    async updateUser(chatId, userData) {
+        const setClause = Object.keys(userData).map(key => `${key} = ?`).join(', ');
+        const values = [...Object.values(userData), chatId];
+        return this.run(
+            `UPDATE users SET ${setClause}, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?`,
+            values
+        );
+    }
+
     async updateUserSettings(chatId, settings) {
         await this.run(
             'UPDATE users SET settings = ?, updated_at = CURRENT_TIMESTAMP WHERE chat_id = ?',
@@ -184,9 +193,9 @@ class DatabaseManager {
     // Enhanced user creation with all fields
     async createUserComplete(chatId, userData) {
         return this.run(
-            `INSERT OR REPLACE INTO users (chat_id, username, settings, sol_amount, primary_wallet_label, is_admin) 
-             VALUES (?, ?, ?, ?, ?, ?)`,
-            [chatId, userData.username, userData.settings, userData.sol_amount, userData.primary_wallet_label, userData.is_admin || 0]
+            `INSERT OR REPLACE INTO users (chat_id, username, settings, sol_amount, is_admin) 
+             VALUES (?, ?, ?, ?, ?)`,
+            [chatId, userData.username, userData.settings, userData.sol_amount, userData.is_admin || 0]
         );
     }
 
@@ -279,6 +288,50 @@ class DatabaseManager {
     async isPoolProcessed(poolAddress) {
         const result = await this.get('SELECT 1 FROM processed_pools WHERE pool_address = ?', [poolAddress]);
         return !!result;
+    }
+
+    // Wallet management methods
+    async createWallet(userId, walletData) {
+        return this.run(
+            `INSERT OR REPLACE INTO wallets 
+             (user_id, label, address, private_key, wallet_type, is_primary, balance) 
+             VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            [
+                userId,
+                walletData.label,
+                walletData.address,
+                walletData.privateKey || null,
+                walletData.walletType || 'trading',
+                walletData.isPrimary ? 1 : 0,
+                walletData.balance || 0.0
+            ]
+        );
+    }
+
+    async getWallets(userId) {
+        return this.all('SELECT * FROM wallets WHERE user_id = ? ORDER BY is_primary DESC, created_at ASC', [userId]);
+    }
+
+    async getPrimaryWallet(userId) {
+        return this.get('SELECT * FROM wallets WHERE user_id = ? AND is_primary = 1', [userId]);
+    }
+
+    async setPrimaryWallet(userId, walletLabel) {
+        // First, unset all primary wallets for this user
+        await this.run('UPDATE wallets SET is_primary = 0 WHERE user_id = ?', [userId]);
+        // Then set the specified wallet as primary
+        return this.run('UPDATE wallets SET is_primary = 1 WHERE user_id = ? AND label = ?', [userId, walletLabel]);
+    }
+
+    async updateWalletBalance(userId, walletLabel, balance) {
+        return this.run(
+            'UPDATE wallets SET balance = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ? AND label = ?',
+            [balance, userId, walletLabel]
+        );
+    }
+
+    async deleteWallet(userId, walletLabel) {
+        return this.run('DELETE FROM wallets WHERE user_id = ? AND label = ?', [userId, walletLabel]);
     }
 
     // Saved addresses

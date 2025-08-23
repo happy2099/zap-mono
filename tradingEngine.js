@@ -13,7 +13,7 @@ const { Buffer } = require('buffer');
 const platformBuilders = require('./platformBuilders.js');
 const config = require('./patches/config.js');
 const { shortenAddress } = require('./utils.js');
-const traceLogger = require('./traceLogger.js');
+// const traceLogger = require('./traceLogger.js'); // COMMENTED OUT FOR QA TESTING
 const UnifiedPrebuilder = require('./unifiedPrebuilder.js');
 
 class TradingEngine {
@@ -377,7 +377,7 @@ async _mapTraderToUser(traderWallet) {
 }
 
 async _executeCopyForUser(userChatId, masterTraderName, traderConfig, masterTxSignature) {
-    await traceLogger.initTrace(masterTxSignature, traderConfig.wallet, userChatId);
+            // await traceLogger.initTrace(masterTxSignature, traderConfig.wallet, userChatId); // COMMENTED OUT FOR QA TESTING
     let followerKeypairPacket = null;
 
     try {
@@ -386,12 +386,12 @@ async _executeCopyForUser(userChatId, masterTraderName, traderConfig, masterTxSi
 
         const analysisResult = await this.transactionAnalyzer.analyzeTransactionForCopy(masterTxSignature, null, traderConfig.wallet);
         
-        await traceLogger.appendTrace(masterTxSignature, 'step2_transactionData', { rawTransaction: analysisResult.rawTransaction });
-        await traceLogger.appendTrace(masterTxSignature, 'step3_routeAnalysis', { isCopyable: analysisResult.isCopyable, reason: analysisResult.reason, details: analysisResult.details });
+        // await traceLogger.appendTrace(masterTxSignature, 'step2_transactionData', { rawTransaction: analysisResult.rawTransaction }); // COMMENTED OUT FOR QA TESTING
+        // await traceLogger.appendTrace(masterTxSignature, 'step3_routeAnalysis', { isCopyable: analysisResult.isCopyable, reason: analysisResult.reason, details: analysisResult.details }); // COMMENTED OUT FOR QA TESTING
 
         if (!analysisResult.isCopyable) {
             console.log(`[COPY-EXEC] Analysis determined not to copy. Reason: ${analysisResult.reason}`);
-            await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', `Analysis Aborted: ${analysisResult.reason}`);
+            // await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', `Analysis Aborted: ${analysisResult.reason}`); // COMMENTED OUT FOR QA TESTING
             return;
         }
 

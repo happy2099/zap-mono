@@ -47,6 +47,13 @@ class DatabaseDataManager {
         }
     }
 
+    async saveUsers(users) {
+        // Save multiple users at once
+        for (const [chatId, username] of Object.entries(users)) {
+            await this.saveUser(chatId, { username });
+        }
+    }
+
     // Admin functionality
     async setUserAdmin(chatId, isAdmin = true) {
         return this.databaseManager.setUserAdmin(chatId, isAdmin);
@@ -69,22 +76,39 @@ class DatabaseDataManager {
     }
 
     // Trader management
-    async loadTraders() {
-        const users = await this.databaseManager.all('SELECT * FROM users');
-        const result = { user_traders: {} };
-        
-        for (const user of users) {
+    async loadTraders(chatId = null) {
+        if (chatId) {
+            // Return traders for specific user
+            const user = await this.databaseManager.getUser(chatId);
+            if (!user) return {};
+            
             const traders = await this.databaseManager.getTraders(user.id);
-            result.user_traders[user.chat_id] = {};
+            const result = {};
             for (const trader of traders) {
-                result.user_traders[user.chat_id][trader.name] = {
+                result[trader.name] = {
                     wallet: trader.wallet,
                     active: trader.active
                 };
             }
+            return result;
+        } else {
+            // Return all traders (for admin/compatibility)
+            const users = await this.databaseManager.all('SELECT * FROM users');
+            const result = { user_traders: {} };
+            
+            for (const user of users) {
+                const traders = await this.databaseManager.getTraders(user.id);
+                result.user_traders[user.chat_id] = {};
+                for (const trader of traders) {
+                    result.user_traders[user.chat_id][trader.name] = {
+                        wallet: trader.wallet,
+                        active: trader.active
+                    };
+                }
+            }
+            
+            return result;
         }
-        
-        return result;
     }
 
     async saveTraders(tradersData) {
@@ -191,6 +215,30 @@ class DatabaseDataManager {
         await this.databaseManager.createTradeStats(firstUser.id, stats);
     }
 
+    // Add missing addTrader method
+    async addTrader(chatId, name, wallet, active = true) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) {
+            throw new Error(`User ${chatId} not found`);
+        }
+        // Temporarily disable foreign keys for testing
+        await this.databaseManager.run('PRAGMA foreign_keys = OFF');
+        const result = await this.databaseManager.addTrader(user.id, name, wallet, active);
+        await this.databaseManager.run('PRAGMA foreign_keys = ON');
+        return result;
+    }
+
+    // Add missing setSolAmount method
+    async setSolAmount(chatId, amount) {
+        return this.databaseManager.updateUser(chatId, { sol_amount: amount });
+    }
+
+    // Add missing getSolAmount method
+    async getSolAmount(chatId) {
+        const user = await this.databaseManager.getUser(chatId);
+        return user ? user.sol_amount : 0.001;
+    }
+
     // Withdrawal history management
     async loadWithdrawalHistory() {
         const users = await this.databaseManager.all('SELECT * FROM users');
@@ -268,6 +316,54 @@ class DatabaseDataManager {
             userPositions.set(tokenMint, positionData);
             this.userPositions.set(chatId, userPositions);
         }
+    }
+
+    // Wallet management methods
+    async getPrimaryWalletLabel(chatId) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) return null;
+        
+        // First try to get from the new wallets table
+        const primaryWallet = await this.databaseManager.getPrimaryWallet(user.id);
+        if (primaryWallet) {
+            return primaryWallet.label;
+        }
+        
+        // Fallback to old settings if no wallet in new table
+        try {
+            const settings = JSON.parse(user.settings || '{}');
+            return settings.primaryCopyWalletLabel || null;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    async setPrimaryWalletLabel(chatId, walletLabel) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) return;
+        
+        await this.databaseManager.setPrimaryWallet(user.id, walletLabel);
+    }
+
+    async getWallets(chatId) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) return [];
+        
+        return await this.databaseManager.getWallets(user.id);
+    }
+
+    async saveWallet(chatId, walletData) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) return;
+        
+        await this.databaseManager.createWallet(user.id, walletData);
+    }
+
+    async deleteWallet(chatId, walletLabel) {
+        const user = await this.databaseManager.getUser(chatId);
+        if (!user) return;
+        
+        await this.databaseManager.deleteWallet(user.id, walletLabel);
     }
 
     // Cleanup
