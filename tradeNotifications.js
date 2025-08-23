@@ -3,7 +3,7 @@
 // Description: Manages and sends all trade-related notifications to Telegram.
 // ==========================================
 
-const { shortenAddress, escapeMarkdownV2 } = require('./utils.js');
+const { shortenAddress, escapeMarkdownV2, safeEscapeMarkdownV2 } = require('./utils.js');
 const config = require('./config.js'); // Import config for Helius API Key & LAMPORTS_PER_SOL
 
 class TradeNotificationManager {
@@ -178,12 +178,12 @@ class TradeNotificationManager {
                         if (amountBigInt === 0n) return '0';
                         const divisor = BigInt(10) ** BigInt(tokenDecimals || 9);
                         const displayVal = (Number(amountBigInt * BigInt(10 ** precision)) / Number(divisor)) / (10 ** precision);
-                        return escapeMarkdownV2(displayVal.toLocaleString(undefined, {
+                        return safeEscapeMarkdownV2(displayVal.toLocaleString(undefined, {
                             minimumFractionDigits: Math.min(2, precision),
                             maximumFractionDigits: precision
                         }));
                     } else if (unitType === 'sol' && typeof value === 'number') {
-                        return escapeMarkdownV2(value.toLocaleString(undefined, {
+                        return safeEscapeMarkdownV2(value.toLocaleString(undefined, {
                             minimumFractionDigits: 2,
                             maximumFractionDigits: precision
                         }));
@@ -201,8 +201,8 @@ class TradeNotificationManager {
             let tradeDetailsContent = "";
 
             // Trader info for consistency across buy/sell
-            const escTrader = escapeMarkdownV2(traderName);
-            const escWallet = escapeMarkdownV2(copyWalletLabel);
+            const escTrader = safeEscapeMarkdownV2(traderName);
+            const escWallet = safeEscapeMarkdownV2(copyWalletLabel);
 
             // Dynamically build message content
             if (tradeType === 'buy') {
@@ -210,11 +210,11 @@ class TradeNotificationManager {
                 const solUsed = formatValue(solSpent, 'sol', 6);
 
                 messageTitle = `🟢 *Buy Order Executed* ✅`;
-                summaryContent = `*Summary*: Bought ${amountToken} ${escapeMarkdownV2(tokenSymbol)} for ${solUsed} SOL`;
+                summaryContent = `*Summary*: Bought ${amountToken} ${safeEscapeMarkdownV2(tokenSymbol)} for ${solUsed} SOL`;
 
-                tradeDetailsContent = `*Token Name*: ${escapeMarkdownV2(tokenName)}\n` +
-                    `*Token Symbol*: ${escapeMarkdownV2(tokenSymbol)}\n` +
-                    `*Tokens Bought*: ${amountToken} ${escapeMarkdownV2(tokenSymbol)}\n` +
+                tradeDetailsContent = `*Token Name*: ${safeEscapeMarkdownV2(tokenName)}\n` +
+                    `*Token Symbol*: ${safeEscapeMarkdownV2(tokenSymbol)}\n` +
+                    `*Tokens Bought*: ${amountToken} ${safeEscapeMarkdownV2(tokenSymbol)}\n` +
                     `*SOL Spent*: ${solUsed} SOL\n`;
 
             } else if (tradeType === 'sell') {
@@ -294,10 +294,10 @@ class TradeNotificationManager {
     */
     async notifyFailedCopy(chatId, traderName, copyWalletLabel, tradeType, errorMessage) {
         try {
-            const escTrader = escapeMarkdownV2(traderName);
-            const escWallet = escapeMarkdownV2(copyWalletLabel);
-            const escType = escapeMarkdownV2(tradeType?.toUpperCase() || 'TRADE');
-            const escError = escapeMarkdownV2(String(errorMessage || "Unknown Error").substring(0, 500)); // Increased char limit slightly
+            const escTrader = safeEscapeMarkdownV2(traderName);
+            const escWallet = safeEscapeMarkdownV2(copyWalletLabel);
+            const escType = safeEscapeMarkdownV2(tradeType?.toUpperCase() || 'TRADE');
+            const escError = safeEscapeMarkdownV2(String(errorMessage || "Unknown Error").substring(0, 500)); // Increased char limit slightly
 
             let message = `❌ *Copy ${escType} FAILED* ❗️ \\(${escTrader}\\)\n\n`;
             message += `*Wallet*: ${escWallet}\n`;
@@ -318,9 +318,9 @@ class TradeNotificationManager {
 
       async notifyNoCopy(chatId, traderName, walletLabel, reason) {
         try {
-            const escTrader = escapeMarkdownV2(traderName);
-            const escWallet = escapeMarkdownV2(walletLabel || 'Unknown');
-            const escReason = escapeMarkdownV2(String(reason || "Internal criteria not met.").substring(0, 500));
+            const escTrader = safeEscapeMarkdownV2(traderName);
+            const escWallet = safeEscapeMarkdownV2(walletLabel || 'Unknown');
+            const escReason = safeEscapeMarkdownV2(String(reason || "Internal criteria not met.").substring(0, 500));
 
             let message = `🧐 *Copy Skipped* \\(${escTrader}\\)\n\n`;
             message += `*Wallet*: ${escWallet}\n`;
@@ -372,14 +372,14 @@ class TradeNotificationManager {
         const requiredSolFormatted = parseFloat(requiredSol).toFixed(6);
         const currentSolFormatted = parseFloat(currentSol).toFixed(6);
 
-        // Escape all parts for perfect MarkdownV2
-        const escTraderName = escapeMarkdownV2(traderNameStr);
-        const escWalletLabel = escapeMarkdownV2(walletLabelStr);
-        const escPubkey = escapeMarkdownV2(walletPubkeyStr);
-        const escTokenDisplay = escapeMarkdownV2(tokenSymbol);
-        const escReq = escapeMarkdownV2(requiredSolFormatted);
-        const escCurr = escapeMarkdownV2(currentSolFormatted);
-        const escType = escapeMarkdownV2(tradeTypeStr.toUpperCase());
+        // Escape all parts for perfect MarkdownV2 using safe escaping
+        const escTraderName = safeEscapeMarkdownV2(traderNameStr);
+        const escWalletLabel = safeEscapeMarkdownV2(walletLabelStr);
+        const escPubkey = safeEscapeMarkdownV2(walletPubkeyStr);
+        const escTokenDisplay = safeEscapeMarkdownV2(tokenSymbol);
+        const escReq = safeEscapeMarkdownV2(requiredSolFormatted);
+        const escCurr = safeEscapeMarkdownV2(currentSolFormatted);
+        const escType = safeEscapeMarkdownV2(tradeTypeStr.toUpperCase());
 
         const message = 
             `⚠️ *Insufficient Balance* ⚠️\n\n` +

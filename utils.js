@@ -55,10 +55,28 @@ export function formatTokenAmount(amount, decimals) {
 export function escapeMarkdownV2(textInput) {
     if (textInput == null) return '';
     const text = String(textInput);
-    const escapeCharsRegex = /[_*[\]()~`>#+-=|{}.!]/g;
+    // More comprehensive regex to catch all special characters that need escaping in MarkdownV2
+    // Including all characters that need escaping according to Telegram's MarkdownV2 specification
+    const escapeCharsRegex = /[_*[\]()~`>#+=|{}.!-]/g;
     return text
         .replace(/\\/g, '\\\\')
         .replace(escapeCharsRegex, (match) => `\\${match}`);
+}
+
+/**
+ * Safe version of escapeMarkdownV2 that handles edge cases and provides fallback
+ * @param {string|number|null|undefined} textInput - The text to escape.
+ * @returns {string} - Escaped text or fallback.
+ */
+export function safeEscapeMarkdownV2(textInput) {
+    try {
+        return escapeMarkdownV2(textInput);
+    } catch (error) {
+        console.warn('escapeMarkdownV2 failed, using fallback:', error.message);
+        // Fallback: remove all special characters that could cause issues
+        const text = String(textInput || '');
+        return text.replace(/[_*[\]()~`>#+=|{}.!-\\]/g, '');
+    }
 }
 
 /**

@@ -6,7 +6,7 @@
 
 const { DatabaseManager } = require('./database/databaseManager');
 const { RedisManager } = require('./redis/redisManager');
-const { DataManager } = require('./dataManager');
+const { DatabaseDataManager } = require('./database/databaseDataManager');
 const config = require('./patches/config');
 
 class ZapBotStartup {
@@ -39,11 +39,11 @@ class ZapBotStartup {
                 this.redisManager = null;
             }
 
-            // Step 3: Initialize legacy DataManager (for migration)
-            console.log('📁 Initializing legacy data manager...');
-            this.dataManager = new DataManager();
-            await this.dataManager.initFiles();
-            console.log('✅ Legacy data manager initialized');
+            // Step 3: Initialize DatabaseDataManager
+            console.log('📁 Initializing database data manager...');
+            this.dataManager = new DatabaseDataManager();
+            await this.dataManager.initialize();
+            console.log('✅ Database data manager initialized');
 
             // Step 4: Migrate data if needed
             await this.migrateDataIfNeeded();

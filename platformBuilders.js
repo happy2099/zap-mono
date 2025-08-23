@@ -40,7 +40,8 @@ const { PumpSdk } = require('@pump-fun/pump-sdk');
 
 const { Dlmm } = require('@meteora-ag/dlmm');
 const { CpAmm: MeteoraCpAmm } = require('@meteora-ag/cp-amm-sdk');
-const MeteoraDBC = require('@meteora-ag/dynamic-bonding-curve-sdk');
+const MeteoraDBCModule = require('@meteora-ag/dynamic-bonding-curve-sdk');
+const MeteoraDBC = MeteoraDBCModule.default || MeteoraDBCModule;
 
 
 // --- INTERNAL CONFIG & UTILS ---

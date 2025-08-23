@@ -149,7 +149,7 @@ class ZapBotDebugger {
         const requiredFiles = [
             'zapbot.js',
             'start.js',
-            'dataManager.js',
+            null // Removed,
             'patches/config.js',
             'database/databaseManager.js',
             'database/schema.sql',
@@ -157,7 +157,7 @@ class ZapBotDebugger {
         ];
 
         const requiredDirs = [
-            'data',
+            null // Removed,
             'logs',
             'database',
             'redis',

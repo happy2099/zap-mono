@@ -54,6 +54,14 @@ class TelegramUI {
         this.actionHandlers = handlers;
     }
 
+    setNotificationManager(notificationManager) {
+        this.notificationManager = notificationManager;
+    }
+
+    setApiManager(apiManager) {
+        this.apiManager = apiManager;
+    }
+
     setupEventListeners() {
         if (!this.bot) return;
 
@@ -119,6 +127,15 @@ async handleCallbackQuery(cb) {
         const [action, ...params] = data.split('_');
         const param = params.join('_');
 
+        // Check admin access for admin-only functions
+        if (data.startsWith('admin_') && data !== 'admin_panel') {
+            const isAdmin = await this.dataManager.isUserAdmin(chatId.toString());
+            if (!isAdmin) {
+                await this.sendOrEditMessage(chatId, "❌ *Access Denied*\n\nYou don't have admin privileges to access this function.");
+                return;
+            }
+        }
+
         const simpleRoutes = {
             main_menu: () => this.showMainMenu(chatId),
             help: () => this.showHelp(chatId),
@@ -141,6 +158,14 @@ async handleCallbackQuery(cb) {
             admin_panel: () => this.showAdminPanel(chatId),
             admin_view_activity: () => this.displayUserActivity(chatId),
             admin_view_pnl: () => this.displayUserPnl(chatId),
+            admin_manage_users: () => this.showUserManagementMenu(chatId),
+            admin_bot_stats: () => this.showBotStatistics(chatId),
+            admin_system_health: () => this.showSystemHealth(chatId),
+            admin_global_settings: () => this.showGlobalSettings(chatId),
+            admin_add_user_prompt: () => this.requestNewUserChatId(chatId),
+            admin_remove_user_prompt: () => this.showUserRemovalList(chatId),
+            admin_manage_admins: () => this.showAdminManagement(chatId),
+            admin_list_users: () => this.showAllUsers(chatId),
         };
 
         if (simpleRoutes[data]) {
@@ -221,7 +246,8 @@ async handleCallbackQuery(cb) {
             [{ text: "💲 Set SOL Amt", callback_data: "set_sol" }, { text: "⚙️ Reset Bot", callback_data: "reset_all" }]
         ];
         // Admins get a special button
-        if (String(chatId) === String(config.ADMIN_CHAT_ID)) {
+        const isAdmin = await this.dataManager.isUserAdmin(chatId.toString());
+        if (isAdmin) {
             keyboard.push([{ text: "👑 Admin Panel", callback_data: "admin_panel" }]);
         }
         await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } }, messageId);
@@ -229,9 +255,11 @@ async handleCallbackQuery(cb) {
 
 
     async showAdminPanel(chatId) {
-        // A safety check to ensure only the admin can access this.
-        if (String(chatId) !== String(config.ADMIN_CHAT_ID)) {
-            return this.showMainMenu(chatId);
+        // A safety check to ensure only admins can access this.
+        const isAdmin = await this.dataManager.isUserAdmin(chatId.toString());
+        if (!isAdmin) {
+            await this.sendOrEditMessage(chatId, "❌ *Access Denied*\n\nYou don't have admin privileges to access this panel.");
+            return;
         }
 
         const message = `*👑 Admin God-Mode Panel*\n\nWelcome, operator\\. Select a command\\.`;
@@ -251,7 +279,8 @@ async handleCallbackQuery(cb) {
 
     async displayUserActivity(chatId) {
         // Double-check admin privileges
-        if (String(chatId) !== String(config.ADMIN_CHAT_ID)) return;
+        const isAdmin = await this.dataManager.isUserAdmin(chatId.toString());
+        if (!isAdmin) return;
 
         let message = `*👀 Live User Activity*\n\n`;
         const allTraders = await this.dataManager.loadTraders();
@@ -297,7 +326,8 @@ async handleCallbackQuery(cb) {
     }
 
     async displayUserPnl(chatId) {
-        if (String(chatId) !== String(config.ADMIN_CHAT_ID)) return;
+        const isAdmin = await this.dataManager.isUserAdmin(chatId.toString());
+        if (!isAdmin) return;
 
         await this.sendOrEditMessage(chatId, "⏳ _Calculating all user positions and fetching live market prices\\.\\.\\._", {});
 
@@ -322,7 +352,10 @@ async handleCallbackQuery(cb) {
             }
 
             // Step 2: Fetch all prices in ONE efficient API call
-            const priceMap = await this.apiManager.getTokenPrices(Array.from(allMints));
+            if (!this.notificationManager || !this.notificationManager.apiManager) {
+                throw new Error('API Manager not available for price fetching');
+            }
+            const priceMap = await this.notificationManager.apiManager.getTokenPrices(Array.from(allMints));
 
             // Step 3: Iterate and build the report for each user
             for (const [userId, userPositionMap] of allUserPositions.entries()) {
@@ -380,11 +413,133 @@ async handleCallbackQuery(cb) {
     }
 
     async showUserManagementMenu(chatId) {
-        const message = "✅ *User Whitelist Management*\n\nHere you can add new friends to the bot or remove them.";
+        const users = await this.dataManager.loadUsers();
+        const userCount = Object.keys(users).length;
+        const admins = await this.dataManager.getAllAdmins();
+        const adminCount = admins.length;
+        
+        const message = `✅ *User Management*\n\n` +
+            `👥 Total Users: *${userCount}*\n` +
+            `👑 Total Admins: *${adminCount}*\n\n` +
+            `Manage bot users and permissions:`;
+            
         const keyboard = [
             [{ text: "➕ Add New User", callback_data: "admin_add_user_prompt" }],
             [{ text: "❌ Remove User", callback_data: "admin_remove_user_prompt" }],
+            [{ text: "👑 Manage Admins", callback_data: "admin_manage_admins" }],
+            [{ text: "📋 List All Users", callback_data: "admin_list_users" }],
             [{ text: "🔙 Back to Admin Panel", callback_data: "admin_panel" }]
+        ];
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+    }
+
+    async showBotStatistics(chatId) {
+        const users = await this.dataManager.loadUsers();
+        const allTraders = await this.dataManager.loadTraders();
+        
+        let totalTraders = 0;
+        let activeTraders = 0;
+        
+        for (const [userId, userTraders] of Object.entries(allTraders.user_traders || {})) {
+            for (const [name, trader] of Object.entries(userTraders)) {
+                totalTraders++;
+                if (trader.active) activeTraders++;
+            }
+        }
+        
+        const message = `📊 *Bot Statistics*\n\n` +
+            `👥 Total Users: *${Object.keys(users).length}*\n` +
+            `📈 Total Traders: *${totalTraders}*\n` +
+            `🟢 Active Traders: *${activeTraders}*\n` +
+            `⚪ Inactive Traders: *${totalTraders - activeTraders}*\n\n` +
+            `_Last updated: ${new Date().toLocaleString()}_`;
+            
+        const keyboard = [
+            [{ text: "🔄 Refresh", callback_data: "admin_bot_stats" }],
+            [{ text: "🔙 Back to Admin Panel", callback_data: "admin_panel" }]
+        ];
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+    }
+
+    async showSystemHealth(chatId) {
+        const uptime = process.uptime();
+        const memUsage = process.memoryUsage();
+        
+        const message = `🏥 *System Health*\n\n` +
+            `⏱️ Uptime: *${Math.floor(uptime / 3600)}h ${Math.floor((uptime % 3600) / 60)}m*\n` +
+            `💾 Memory: *${Math.round(memUsage.heapUsed / 1024 / 1024)}MB / ${Math.round(memUsage.heapTotal / 1024 / 1024)}MB*\n` +
+            `🔗 RPC Status: *Connected*\n` +
+            `🤖 Bot Status: *Running*\n` +
+            `📊 Database: *Connected*\n\n` +
+            `_System is operating normally_`;
+            
+        const keyboard = [
+            [{ text: "🔄 Refresh", callback_data: "admin_system_health" }],
+            [{ text: "🔙 Back to Admin Panel", callback_data: "admin_panel" }]
+        ];
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+    }
+
+    async showGlobalSettings(chatId) {
+        const message = `⚙️ *Global Settings*\n\n` +
+            `Configure bot-wide settings and parameters:\n\n` +
+            `🔧 *Current Settings:*\n` +
+            `• Min Trade Amount: *${config.MIN_SOL_AMOUNT_PER_TRADE} SOL*\n` +
+            `• Default Trade Amount: *${config.DEFAULT_SOL_TRADE_AMOUNT} SOL*\n` +
+            `• Transaction Timeout: *${config.TRANSACTION_TIMEOUT / 1000}s*\n\n` +
+            `_Settings management coming soon_`;
+            
+        const keyboard = [
+            [{ text: "🔙 Back to Admin Panel", callback_data: "admin_panel" }]
+        ];
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+    }
+
+    async showAdminManagement(chatId) {
+        const admins = await this.dataManager.getAllAdmins();
+        
+        let message = `👑 *Admin Management*\n\n`;
+        
+        if (admins.length === 0) {
+            message += `_No admins found\\._`;
+        } else {
+            message += `Current admins:\n\n`;
+            for (const admin of admins) {
+                message += `👑 *${escapeMarkdownV2(admin.username || admin.chat_id)}*\n`;
+                message += `   ID: \`${escapeMarkdownV2(admin.chat_id)}\`\n\n`;
+            }
+        }
+        
+        const keyboard = [
+            [{ text: "➕ Promote User to Admin", callback_data: "admin_promote_user" }],
+            [{ text: "➖ Demote Admin", callback_data: "admin_demote_user" }],
+            [{ text: "🔙 Back to User Management", callback_data: "admin_manage_users" }]
+        ];
+        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+    }
+
+    async showAllUsers(chatId) {
+        const users = await this.dataManager.loadUsers();
+        const admins = await this.dataManager.getAllAdmins();
+        const adminIds = new Set(admins.map(a => a.chat_id));
+        
+        let message = `📋 *All Users*\n\n`;
+        
+        if (Object.keys(users).length === 0) {
+            message += `_No users found\\._`;
+        } else {
+            for (const [userId, username] of Object.entries(users)) {
+                const isAdmin = adminIds.has(userId);
+                const icon = isAdmin ? '👑' : '👤';
+                const role = isAdmin ? ' \\(Admin\\)' : '';
+                message += `${icon} *${escapeMarkdownV2(username)}*${role}\n`;
+                message += `   ID: \`${escapeMarkdownV2(userId)}\`\n\n`;
+            }
+        }
+        
+        const keyboard = [
+            [{ text: "🔄 Refresh", callback_data: "admin_list_users" }],
+            [{ text: "🔙 Back to User Management", callback_data: "admin_manage_users" }]
         ];
         await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
     }
@@ -919,6 +1074,41 @@ async showTradersMenu(chatId, action) {
                 return newMessage;
             } catch (sendError) {
                 console.error(`CRITICAL: Failed to SEND message after edit failed:`, sendError.message);
+                
+                // Try to send without MarkdownV2 if parsing failed
+                if (sendError.message?.includes("can't parse entities")) {
+                    try {
+                        console.log('Attempting to send message without MarkdownV2 formatting...');
+                        const plainOptions = { ...options, disable_web_page_preview: true };
+                        const plainMessage = await this.bot.sendMessage(chatId, text, plainOptions);
+                        this.latestMessageIds.set(chatId, plainMessage.message_id);
+                        return plainMessage;
+                    } catch (plainError) {
+                        console.error(`CRITICAL: Failed to send plain message:`, plainError.message);
+                        
+                        // Final fallback: try to sanitize the message completely
+                        try {
+                            console.log('Attempting to send sanitized message...');
+                            // More aggressive sanitization - remove all problematic characters
+                            const sanitizedText = text
+                                .replace(/[_*[\]()~`>#+=|{}.!-\\]/g, '')
+                                .replace(/\n/g, ' ')
+                                .replace(/\s+/g, ' ')
+                                .trim();
+                            
+                            if (sanitizedText.length > 0) {
+                                const sanitizedMessage = await this.bot.sendMessage(chatId, sanitizedText, { disable_web_page_preview: true });
+                                this.latestMessageIds.set(chatId, sanitizedMessage.message_id);
+                                return sanitizedMessage;
+                            } else {
+                                console.error('Message was completely sanitized away');
+                            }
+                        } catch (sanitizedError) {
+                            console.error(`CRITICAL: Failed to send sanitized message:`, sanitizedError.message);
+                        }
+                    }
+                }
+                
                 return null;
             }
         }

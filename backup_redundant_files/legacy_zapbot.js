@@ -11,7 +11,7 @@ const fs = require('fs/promises');
 
 // Project Modules (CommonJS requires)
 const config = require('./config.js');
-const { DatabaseDataManager } = require('./database/databaseDataManager.js');
+const { DataManager } = require('./dataManager.js');
 const { SolanaManager } = require('./solanaManager.js');
 const TelegramUI = require('./telegramUi.js');
 const WalletManager = require('./walletManager.js');
@@ -34,7 +34,7 @@ class ZapBot {
 
         console.log("ZapBot core modules instantiated. Awaiting initialization...");
 
-        this.dataManager = new DatabaseDataManager();
+        this.dataManager = new DataManager();
         this.solanaManager = new SolanaManager();
         this.apiManager = new ApiManager(this.solanaManager);
         this.walletManager = new WalletManager(this.dataManager);
@@ -62,10 +62,13 @@ class ZapBot {
 
         // 1. Initialize data layer
         try {
-            await this.dataManager.initialize();
-            console.log('1/6: ✅ DatabaseDataManager initialized.');
+            await this.dataManager.initFiles();
+            await this.dataManager.loadPositions();
+            await this.dataManager.loadTraders();
+            await this.dataManager.loadTradeStats();
+            console.log('1/6: ✅ DataManager initialized.');
         } catch (e) {
-            throw new Error(`Failed to initialize DatabaseDataManager: ${e.message}`);
+            throw new Error(`Failed to initialize DataManager: ${e.message}`);
         }
 
         // 2. Initialize Solana connection
@@ -92,29 +95,26 @@ class ZapBot {
 
         // 4. Initialize Telegram UI
         try {
-            const initResult = this.telegramUi.initialize();
-            if (initResult && initResult.mode === 'headless') {
-                console.log('4/6: ⚠️ TelegramUI running in headless mode (no bot token).');
-            } else if (!this.telegramUi.bot) {
+            this.telegramUi.initialize();
+            if (!this.telegramUi.bot) {
                 throw new Error("TelegramUI failed to initialize TelegramBot instance.");
-            } else {
-                this.telegramUi.bindActionHandlers({
-                    onStartCopy: this.handleStartCopy.bind(this),
-                    onStopCopy: this.handleStopCopy.bind(this),
-                    onRemoveTrader: this.handleRemoveTrader.bind(this),
-                    onAddTrader: this.handleAddTrader.bind(this),
-                    onSetSolAmount: this.handleSetSolAmount.bind(this),
-                    onGenerateWallet: this.handleGenerateWallet.bind(this),
-                    onImportWallet: this.handleImportWallet.bind(this),
-                    onResetData: this.handleResetData.bind(this),
-                    onSetPrimaryWallet: this.handleSetPrimaryWallet.bind(this),
-                    onDeleteWallet: this.handleDeleteWallet.bind(this),
-                    onWithdraw: this.handleWithdraw.bind(this),
-                    onConfirmWithdraw: this.handleConfirmWithdraw.bind(this),
-                    onManualCopy: this.handleManualCopy.bind(this),
-                });
-                console.log('4/6: ✅ TelegramUI initialized and wired.');
             }
+            this.telegramUi.bindActionHandlers({
+                onStartCopy: this.handleStartCopy.bind(this),
+                onStopCopy: this.handleStopCopy.bind(this),
+                onRemoveTrader: this.handleRemoveTrader.bind(this),
+                onAddTrader: this.handleAddTrader.bind(this),
+                onSetSolAmount: this.handleSetSolAmount.bind(this),
+                onGenerateWallet: this.handleGenerateWallet.bind(this),
+                onImportWallet: this.handleImportWallet.bind(this),
+                onResetData: this.handleResetData.bind(this),
+                onSetPrimaryWallet: this.handleSetPrimaryWallet.bind(this),
+                onDeleteWallet: this.handleDeleteWallet.bind(this),
+                onWithdraw: this.handleWithdraw.bind(this),
+                onConfirmWithdraw: this.handleConfirmWithdraw.bind(this),
+                onManualCopy: this.handleManualCopy.bind(this),
+            });
+            console.log('4/6: ✅ TelegramUI initialized and wired.');
         } catch (e) {
             throw new Error(`Failed to initialize TelegramUI: ${e.message}`);
         }
@@ -122,17 +122,10 @@ class ZapBot {
         // 5. Initialize TradeNotificationManager
         try {
             this.notificationManager = new TradeNotificationManager(
-                this.telegramUi.bot || null,
+                this.telegramUi.bot,
                 this.apiManager
             );
             this.notificationManager.setConnection(this.solanaManager.connection);
-            
-            // Set the notification manager and API manager in TelegramUI for PnL display
-            if (this.telegramUi) {
-                this.telegramUi.setNotificationManager(this.notificationManager);
-                this.telegramUi.setApiManager(this.apiManager);
-            }
-            
             console.log('5/6: ✅ TradeNotificationManager initialized.');
         } catch (e) {
             throw new Error(`Failed to initialize TradeNotificationManager: ${e.message}`);
@@ -721,12 +714,12 @@ async handleManualCopy(chatId, signature) {
                 throw new Error("Invalid destination wallet address.");
             }
 
-            const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
-            if (!keypairPacket || !keypairPacket.wallet.publicKey) {
+            const primaryWallet = this.walletManager.getPrimaryWallet();
+            if (!primaryWallet || !primaryWallet.publicKey) {
                 throw new Error("No primary wallet configured or invalid public key.");
             }
 
-            const balance = await this.solanaManager.getBalance(keypairPacket.wallet.publicKey.toBase58());
+            const balance = await this.solanaManager.getBalance(primaryWallet.publicKey.toBase58());
             const requiredBalance = solAmount * 1.01; // Estimate fee (1%) for a successful tx.
 
             if (balance < requiredBalance) {
@@ -769,8 +762,8 @@ async handleManualCopy(chatId, signature) {
                 throw new Error("Invalid amount.");
             }
 
-            const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
-            if (!keypairPacket) {
+            const primaryWallet = this.walletManager.getPrimaryWallet();
+            if (!primaryWallet) {
                 throw new Error("No primary wallet available.");
             }
 
@@ -781,7 +774,7 @@ async handleManualCopy(chatId, signature) {
             );
 
             const txSignature = await this.solanaManager.sendSol(
-                keypairPacket.wallet.label,
+                primaryWallet.label,
                 toAddress,
                 solAmount
             );
@@ -797,7 +790,7 @@ async handleManualCopy(chatId, signature) {
                 { parse_mode: "MarkdownV2" }
             );
 
-            const newBalance = await this.solanaManager.getBalance(keypairPacket.wallet.publicKey.toBase58());
+            const newBalance = await this.solanaManager.getBalance(primaryWallet.publicKey.toBase58());
             await this.telegramUi.sendOrEditMessage(
                 chatId,
                 `New balance: *${escapeMarkdownV2(newBalance.toFixed(4))} SOL*`,
@@ -943,25 +936,6 @@ startGlobalPlatformSnipers() {
         }
     }
 
-    // Fix for routeMessage error - handle WebSocket messages
-    async routeMessage(traderName, wallet, messageParams) {
-        try {
-            console.log(`[WS] Received activity for ${traderName} (${shortenAddress(wallet)})`);
-            
-            // Process the message through the trading engine
-            const traderInfo = {
-                name: traderName,
-                wallet: wallet,
-                userChatId: 0 // Default user
-            };
-            
-            await this.tradingEngine.processTrader(traderInfo);
-            
-        } catch (error) {
-            console.error(`[WS] Error routing message for ${traderName}: ${error.message}`);
-        }
-    }
-
     async setupShutdownHandler() {
         const signals = ['SIGINT', 'SIGTERM', 'SIGQUIT'];
         signals.forEach(signal => {
@@ -1043,10 +1017,4 @@ async function main() {
     }
 }
 
-// Export the ZapBot class for use in start.js
-module.exports = ZapBot;
-
-// Only run main() if this file is executed directly
-if (require.main === module) {
-    main();
-}
+main();

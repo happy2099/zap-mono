@@ -5,7 +5,11 @@
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     chat_id TEXT UNIQUE NOT NULL,
+    username TEXT,
     settings TEXT DEFAULT '{}',
+    sol_amount REAL DEFAULT 0.001,
+    primary_wallet_label TEXT DEFAULT 'zap',
+    is_admin BOOLEAN DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
@@ -65,8 +69,49 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     FOREIGN KEY (user_id) REFERENCES users(id)
 );
 
+-- User positions (token holdings)
+CREATE TABLE IF NOT EXISTS positions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    token_mint TEXT NOT NULL,
+    amount_raw TEXT NOT NULL,
+    sol_spent REAL NOT NULL,
+    sold_amount_raw TEXT DEFAULT '0',
+    buy_timestamp BIGINT,
+    sell_timestamp BIGINT,
+    status TEXT DEFAULT 'active',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, token_mint)
+);
+
+-- Saved addresses
+CREATE TABLE IF NOT EXISTS saved_addresses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    label TEXT NOT NULL,
+    address TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id),
+    UNIQUE(user_id, label)
+);
+
+-- Processed pools (to avoid reprocessing)
+CREATE TABLE IF NOT EXISTS processed_pools (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    pool_address TEXT UNIQUE NOT NULL,
+    processed_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_traders_user_wallet ON traders(user_id, wallet);
 CREATE INDEX IF NOT EXISTS idx_trades_user_time ON trades(user_id, executed_at);
 CREATE INDEX IF NOT EXISTS idx_trades_signature ON trades(signature);
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
+CREATE INDEX IF NOT EXISTS idx_positions_user_token ON positions(user_id, token_mint);
+CREATE INDEX IF NOT EXISTS idx_positions_status ON positions(status);
+CREATE INDEX IF NOT EXISTS idx_saved_addresses_user ON saved_addresses(user_id);
+CREATE INDEX IF NOT EXISTS idx_processed_pools_address ON processed_pools(pool_address);
+CREATE INDEX IF NOT EXISTS idx_users_admin ON users(is_admin);
+CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
