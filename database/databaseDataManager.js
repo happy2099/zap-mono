@@ -4,7 +4,7 @@
 // File: database/databaseDataManager.js
 // Description: Database-backed implementation of DataManager interface
 
-const { DatabaseManager } = require('./databaseManager.js');
+import { DatabaseManager } from './databaseManager.js';
 
 class DatabaseDataManager {
     constructor() {
@@ -374,4 +374,4 @@ class DatabaseDataManager {
     }
 }
 
-module.exports = { DatabaseDataManager };
+export { DatabaseDataManager };

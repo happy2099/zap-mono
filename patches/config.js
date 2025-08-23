@@ -4,11 +4,11 @@
 // File: config.js
 // Description: Centralized configuration, constants, and environment variables.
 
-const dotenv = require('dotenv');
-const { PublicKey, SystemProgram, ComputeBudgetProgram, LAMPORTS_PER_SOL, SYSVAR_RENT_PUBKEY, SYSVAR_CLOCK_PUBKEY } = require('@solana/web3.js');
-const { TOKEN_PROGRAM_ID: SPL_TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID: SPL_ASSOCIATED_TOKEN_PROGRAM_ID } = require("@solana/spl-token");
-const path = require('path');
-const { sha256 } = require('@noble/hashes/sha256');
+import dotenv from 'dotenv';
+import { PublicKey, SystemProgram, ComputeBudgetProgram, LAMPORTS_PER_SOL, SYSVAR_RENT_PUBKEY, SYSVAR_CLOCK_PUBKEY } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID as SPL_TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID as SPL_ASSOCIATED_TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import path from 'path';
+import { sha256 } from '@noble/hashes/sha256';
 
 
 // Load environment variables from .env file immediately
@@ -160,12 +160,8 @@ const MEV_PROTECTION = {
     }
 };
 
-module.exports.JANITOR_PUMP_MCAP_THRESHOLD = 4000;
-module.exports.JANITOR_DEX_MCAP_THRESHOLD = 2000;
-module.exports.JANITOR_DEX_GRACE_PERIOD_MS = 10 * 60 * 1000;
-
 // Export all constants at once
-module.exports = {
+export default {
     BOT_TOKEN,
     RPC_URL,
     RPC_FALLBACK_URLS: [],

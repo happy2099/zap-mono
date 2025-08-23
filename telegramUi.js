@@ -5,13 +5,13 @@
 // File: telegramUi.js
 // Description: Manages all Telegram Bot interactions, including menus, commands, and input flows.
 
-const TelegramBot = require('node-telegram-bot-api');
-const bs58 = require('bs58');
-const { PublicKey } = require('@solana/web3.js');
+import TelegramBot from 'node-telegram-bot-api';
+import bs58 from 'bs58';
+import { PublicKey } from '@solana/web3.js';
 
 // Import shared utilities and config
-const { shortenAddress, escapeMarkdownV2, formatLamports, createUserFriendlyMessage, getUserGreeting } = require('./utils');
-const config = require('./patches/config.js');
+import { shortenAddress, escapeMarkdownV2, formatLamports, createUserFriendlyMessage, getUserGreeting } from './utils.js';
+import config from './patches/config.js';
 const { BOT_TOKEN, USER_WALLET_PUBKEY, MIN_SOL_AMOUNT_PER_TRADE, ADMIN_CHAT_ID } = config;
 
 class TelegramUI {
@@ -1296,4 +1296,4 @@ async showTradersMenu(chatId, action) {
 
 }
 
-module.exports = TelegramUI;
+export default TelegramUI;

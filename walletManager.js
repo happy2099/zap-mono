@@ -3,17 +3,17 @@
 // Description: Manages generation, encryption, storage, and retrieval of user wallets.
 // ==========================================
 
-const { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } = require('@solana/web3.js');
-const bs58 = require('bs58');
-const fs = require('fs/promises'); // Use fs.promises for async file operations
-const crypto = require('crypto');
-const { EventEmitter } = require('events');
-const path = require('path');
-const { encrypt, decrypt } = require('./encryption.js'); // Assuming encryption.js for CJS
-const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
-const BN = require('bn.js'); // CommonJS import for BN.js
-const config = require('./patches/config.js'); // Import our config for file paths etc.
-const { shortenAddress } = require('./utils.js'); // Import common utility
+import { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { promises as fs } from 'fs'; // Use fs.promises for async file operations
+import crypto from 'crypto';
+import { EventEmitter } from 'events';
+import path from 'path';
+import { encrypt, decrypt } from './encryption.js'; // Assuming encryption.js for CJS
+import { getAssociatedTokenAddressSync } from '@solana/spl-token';
+import BN from 'bn.js'; // CommonJS import for BN.js
+import config from './patches/config.js'; // Import our config for file paths etc.
+import { shortenAddress } from './utils.js'; // Import common utility
 
 // File paths from config (recommended way to get paths from config.js)
 const WALLETS_FILE = config.WALLET_FILE; // Use path from config.js
@@ -759,4 +759,4 @@ async reset() {
 }
 }
 
-module.exports = WalletManager;
+export default WalletManager;

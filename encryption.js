@@ -1,5 +1,5 @@
-const crypto = require('crypto');
-const dotenv = require('dotenv');
+import crypto from 'crypto';
+import dotenv from 'dotenv';
 
 // Load environment variables
 dotenv.config();
@@ -75,7 +75,4 @@ async function decrypt(encryptedData) {
     return decrypted;
 }
 
-module.exports = {
-    encrypt,
-    decrypt
-};
+export { encrypt, decrypt };

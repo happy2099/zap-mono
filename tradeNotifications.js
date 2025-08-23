@@ -3,8 +3,8 @@
 // Description: Manages and sends all trade-related notifications to Telegram.
 // ==========================================
 
-const { shortenAddress, escapeMarkdownV2, safeEscapeMarkdownV2 } = require('./utils.js');
-const config = require('./config.js'); // Import config for Helius API Key & LAMPORTS_PER_SOL
+import { shortenAddress, escapeMarkdownV2, safeEscapeMarkdownV2 } from './utils.js';
+import config from './patches/config.js'; // Import config for Helius API Key & LAMPORTS_PER_SOL
 
 class TradeNotificationManager {
     constructor(bot, apiManager) {
@@ -501,4 +501,4 @@ class TradeNotificationManager {
 
 
 // CommonJS Export: Export the class directly as the module's export
-module.exports = TradeNotificationManager;
+export default TradeNotificationManager;

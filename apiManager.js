@@ -4,12 +4,12 @@
 // File: apiManager.js
 // Description: Central manager for all external API interactions (Shyft, Raydium, etc.).
 
-const axios = require('axios');
-const config = require('./patches/config.js'); // CommonJS import for internal module
-const { shortenAddress, logPerformance } = require('./utils.js'); // Added logPerformance
-const { createJupiterApiClient } = require('@jup-ag/api');
+import axios from 'axios';
+import config from './patches/config.js'; // CommonJS import for internal module
+import { shortenAddress } from './utils.js';
+import { createJupiterApiClient } from '@jup-ag/api';
 // const jupiterConnection = new Connection("OUR_DEDICATED_JUPITER_RPC_URL");
-const { Client, Datastream } = require('@solana-tracker/data-api'); // Optional dependency
+import { Client, Datastream } from '@solana-tracker/data-api'; // Optional dependency
 
 
 class ApiManager {
@@ -461,10 +461,8 @@ async findAmmPoolForToken(tokenMint) {
 
   
 }
-// CommonJS export
-module.exports = {
-  ApiManager, // Export the class
-};
+// ES module export
+export { ApiManager };
 
 
 

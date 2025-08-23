@@ -5,7 +5,7 @@
 // Description: An in-memory, time-expiring cache for pre-fetched pool keys, 
 //              routes, and pre-built transactions to enable zero-latency swaps.
 
-const { shortenAddress } = require('./utils');
+import { shortenAddress } from './utils.js';
 
 class CacheManager {
     constructor() {
@@ -178,4 +178,4 @@ async getCachedPoolData(mintAddress) {
     }
 }
 
-module.exports = { CacheManager };
+export { CacheManager };

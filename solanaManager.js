@@ -4,12 +4,12 @@
 // File: solanaManager.js
 // Description: Manages all Solana network interactions, including advanced Jito bundle handling and polling.
 
-const { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey, SystemProgram, Transaction, ComputeBudgetProgram, AddressLookupTableAccount } = require('@solana/web3.js');
-const bs58 = require('bs58');
-const { Bundle: JitoBundle } = require('jito-ts/dist/sdk/block-engine/types');
-const { searcherClient: createJitoSearcherClient } = require('jito-ts/dist/sdk/block-engine/searcher');
-const { shortenAddress, sleep } = require('./utils');
-const config = require('./patches/config.js');
+import { Connection, Keypair, VersionedTransaction, TransactionMessage, PublicKey, SystemProgram, Transaction, ComputeBudgetProgram, AddressLookupTableAccount } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { Bundle as JitoBundle } from 'jito-ts/dist/sdk/block-engine/types.js';
+import { searcherClient as createJitoSearcherClient } from 'jito-ts/dist/sdk/block-engine/searcher.js';
+import { shortenAddress, sleep } from './utils.js';
+import config from './patches/config.js';
 const prebuildCache = new Map(); // Cache for prebuilt transactions to avoid re-fetching
 
 
@@ -951,4 +951,4 @@ class SolanaManager {
     }
 }
 
-module.exports = { SolanaManager, RPCLoadBalancer };
+export { SolanaManager, RPCLoadBalancer };
