@@ -263,6 +263,12 @@ class RedisManager {
             this.isConnected = false;
         }
     }
+
+    async shutdown() {
+        console.log('[Redis] Shutting down Redis manager...');
+        await this.cleanup();
+        console.log('[Redis] Redis manager shutdown complete');
+    }
 }
 
 module.exports = { RedisManager };

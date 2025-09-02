@@ -1,0 +1,133 @@
+{
+  "traceVersion": "1.1",
+  "signature": "27GejDUmXZeKy9TMtWGTwW7gMkSdYsZg6GTpNyGzJXXcsX7TUfa3nxGXfrc7YrgpzPo9HhNDYMqLW63rHLhLZRtf",
+  "traderWallet": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-29T11:21:20.059Z",
+  "steps": [
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-29T11:25:59.316Z",
+      "isCopyable": true,
+      "reason": "Trade detected on Raydium Launchpad.",
+      "details": {
+        "found": true,
+        "dexPlatform": "Raydium Launchpad",
+        "platformProgramId": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+        "platformSpecificData": {},
+        "traderPubkey": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj"
+      }
+    },
+    {
+      "step": "step5_buildFailure_RCA",
+      "timestamp": "2025-08-29T11:25:59.417Z",
+      "builderFunction": "buildRaydiumLaunchpadInstruction",
+      "reason": "Sell copy failed: No recorded/valid position for this token.",
+      "fallbackEngaged": "Jupiter API for SELL"
+    },
+    {
+      "step": "step5_jupiterBuild",
+      "timestamp": "2025-08-29T11:25:59.438Z",
+      "status": "PENDING"
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-29T11:32:58.347Z",
+      "isCopyable": true,
+      "reason": "Trade detected on Raydium Launchpad.",
+      "details": {
+        "found": true,
+        "dexPlatform": "Raydium Launchpad",
+        "platformProgramId": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+        "platformSpecificData": {},
+        "tradeType": "buy",
+        "inputMint": "So11111111111111111111111111111111111111112",
+        "outputMint": "Unknown",
+        "traderPubkey": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj"
+      }
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-29T11:55:18.890Z",
+      "isCopyable": false,
+      "reason": "Could not definitively identify the DEX platform or output token."
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-29T12:04:33.473Z",
+      "isCopyable": false,
+      "reason": "Could not definitively identify the DEX platform or output token."
+    },
+    {
+      "step": "step3_routeAnalysis",
+      "timestamp": "2025-08-29T12:12:33.569Z",
+      "isCopyable": true,
+      "reason": "Trade detected on Raydium Launchpad.",
+      "details": {
+        "found": true,
+        "dexPlatform": "Raydium Launchpad",
+        "platformProgramId": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+        "platformSpecificData": {
+          "poolId": "6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX",
+          "configId": "4K3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3Q2xqcV"
+        },
+        "outputMint": "2Efwa1EcadYTAeg1BEdsrFQ26i4ACYNA5AtK6ZYZwUhR",
+        "tradeType": "buy",
+        "inputMint": "So11111111111111111111111111111111111111112",
+        "traderPubkey": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj"
+      }
+    },
+    {
+      "step": "step4_buildAttempt",
+      "timestamp": "2025-08-29T12:12:33.778Z",
+      "builderFunction": "buildRaydiumLaunchpadInstruction",
+      "inputParameters": {
+        "connection": "Connection(https://mainnet.helius-rpc.com/?api-key=1b3e4d64-cda8-4490-bd5f-1c3ada1b377a)",
+        "keypair": "[CENSORED]",
+        "userPublicKey": "HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS",
+        "swapDetails": {
+          "found": true,
+          "dexPlatform": "Raydium Launchpad",
+          "platformProgramId": "LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj",
+          "platformSpecificData": {
+            "poolId": "6s1xP3hpbAfFoNtUNF8mfHsjr2Bd97JxFJRWLbL6aHuX",
+            "configId": "4K3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3Q2xqcV"
+          },
+          "outputMint": "2Efwa1EcadYTAeg1BEdsrFQ26i4ACYNA5AtK6ZYZwUhR",
+          "tradeType": "buy",
+          "inputMint": "So11111111111111111111111111111111111111112",
+          "traderPubkey": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
+          "solSpent": 0.001,
+          "masterTxSignature": "27GejDUmXZeKy9TMtWGTwW7gMkSdYsZg6GTpNyGzJXXcsX7TUfa3nxGXfrc7YrgpzPo9HhNDYMqLW63rHLhLZRtf"
+        },
+        "amountBN": "0f4240",
+        "slippageBps": 2500,
+        "cacheManager": {
+          "tradeReadyCache": {},
+          "launchpadPoolCache": {},
+          "preSignedTxCache": {},
+          "networkStateCache": {
+            "blockhash": null,
+            "priorityFee": null,
+            "lastUpdated": 0
+          },
+          "CACHE_LIFETIME_MS": 1200000
+        }
+      },
+      "status": "PENDING"
+    },
+    {
+      "step": "launchpad_build_start",
+      "timestamp": "2025-08-29T12:12:33.802Z",
+      "tradeType": "buy"
+    },
+    {
+      "step": "launchpad_build_error",
+      "timestamp": "2025-08-29T12:12:34.058Z",
+      "error": "Could not fetch pool/config accounts for Launchpad."
+    }
+  ],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Native builder buildRaydiumLaunchpadInstruction failed: Could not fetch pool/config accounts for Launchpad.. No fallback engaged.",
+  "timestamp_end": "2025-08-29T12:12:34.087Z"
+}

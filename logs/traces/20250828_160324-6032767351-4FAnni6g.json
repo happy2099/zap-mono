@@ -1,0 +1,11 @@
+{
+  "traceVersion": "1.1",
+  "signature": "4FAnni6g4MLpSNRSEKdwBUtAsYA9bCZpXuUSUicAwp1wBYgm8oxhzCYeEqs56Mu5tdDfzmyyyngF8HixkQkBujhw",
+  "traderWallet": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-08-28T10:33:24.480Z",
+  "steps": [],
+  "finalOutcome": "FAILURE",
+  "finalReason": "Critical Engine Error: User 6032767351 has no primary trading wallet configured.",
+  "timestamp_end": "2025-08-28T10:33:24.525Z"
+}

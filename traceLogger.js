@@ -5,7 +5,7 @@
 
 const fs = require('fs/promises');
 const path = require('path');
-const config = require('./patches/config.js'); // For accessing LOGS_DIR
+const config = require('./config.js'); // For accessing LOGS_DIR
 
 const TRACE_DIR = path.join(config.LOGS_DIR, 'traces');
 

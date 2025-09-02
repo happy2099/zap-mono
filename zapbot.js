@@ -21,6 +21,7 @@ const TradeNotificationManager = require('./tradeNotifications.js');
 const { escapeMarkdownV2, shortenAddress } = require('./utils.js');
 const { PublicKey } = require('@solana/web3.js');
 const { CacheManager } = require('./cacheManager.js');
+const { LaserStreamManager } = require('./laserstreamManager.js');
 const platformBuilders = require('./platformBuilders.js');
 
 class ZapBot {
@@ -34,22 +35,38 @@ class ZapBot {
 
         console.log("ZapBot core modules instantiated. Awaiting initialization...");
 
-        this.dataManager = new DataManager();
+        this.databaseManager = null; // We will inject the real one.
         this.solanaManager = new SolanaManager();
         this.apiManager = new ApiManager(this.solanaManager);
-        this.walletManager = new WalletManager(this.dataManager);
+        // Pass null for now, it will be injected.
+        this.walletManager = new WalletManager(this.databaseManager);
         this.walletManager.setSolanaManager(this.solanaManager);
         this.cacheManager = new CacheManager();
 
+        // Pass null for now, it will be injected.
         this.telegramUi = new TelegramUI(
-            this.dataManager,
+            this.databaseManager,
             this.solanaManager,
             this.walletManager
+        );
+        this.notificationManager = new TradeNotificationManager(
+            this.telegramUi.bot, // This is fine for now
+            this.apiManager
         );
 
         this.transactionAnalyzer = null;
         this.tradingEngine = null;
-        this.notificationManager = null;
+    }
+
+    // ADD THIS ENTIRE NEW FUNCTION
+    setDatabaseManager(dbManager) {
+        console.log("[ZAPBOT-CORE] ✅ DatabaseManager instance has been successfully injected.");
+        this.databaseManager = dbManager;
+
+        // Now, pass the REAL database manager to all child components.
+        this.walletManager.databaseManager = dbManager;
+        this.telegramUi.databaseManager = dbManager;
+        this.telegramUi.isDatabaseManager = true; // IMPORTANT: Tell the UI to use DB mode.
     }
 
     async initialize() {
@@ -61,15 +78,11 @@ class ZapBot {
         console.log('--- Starting Bot Initialization Sequence ---');
 
         // 1. Initialize data layer
-        try {
-            await this.dataManager.initFiles();
-            await this.dataManager.loadPositions();
-            await this.dataManager.loadTraders();
-            await this.dataManager.loadTradeStats();
-            console.log('1/6: ✅ DataManager initialized.');
-        } catch (e) {
-            throw new Error(`Failed to initialize DataManager: ${e.message}`);
+        if (!this.databaseManager) {
+             throw new Error("DatabaseManager was not injected. Bot cannot start.");
         }
+        console.log('1/6: ✅ DatabaseManager is live and ready.');
+        // No files to init, the database is already connected.
 
         // 2. Initialize Solana connection
         try {
@@ -87,7 +100,7 @@ class ZapBot {
             await this.walletManager.initialize();
             console.log('3/6: ✅ WalletManager initialized.');
 
-            this.processedLaunchpadPools = await this.dataManager.loadProcessedPools();
+            // this.processedLaunchpadPools = await this.dataManager.loadProcessedPools(); // Removed - using database now
             console.log(`🧠 Bot Brain Loaded: Recalling ${this.processedLaunchpadPools.size} previously processed pools.`);
         } catch (e) {
             throw new Error(`Failed to initialize WalletManager: ${e.message}`);
@@ -136,13 +149,13 @@ class ZapBot {
 
         // 6. Initialize TransactionAnalyzer and TradingEngine
         try {
-            this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
-            console.log('✅ TransactionAnalyzer created with live connection.');
+    this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
+    console.log('✅ TransactionAnalyzer created with live connection.');
 
             const { TradingEngine } = require('./tradingEngine.js');
             this.tradingEngine = new TradingEngine(
                 this.solanaManager,
-                this.dataManager,
+                this.databaseManager,
                 this.walletManager,
                 this.transactionAnalyzer,
                 this.notificationManager,
@@ -150,9 +163,16 @@ class ZapBot {
                 this.cacheManager
             );
             console.log('✅ TradingEngine created with all modules.');
-            console.log('6/6: ✅ TransactionAnalyzer and TradingEngine configured.');
+
+            // ---- Link the LaserStream Manager ----
+            this.laserstreamManager = new LaserStreamManager(this.tradingEngine);
+            this.laserstreamManager.on('status_change', this._handleLaserStreamStatusChange.bind(this));
+            console.log('✅ LaserStreamManager created and linked to TradingEngine.');
+            // ------------------------------------
+
+            console.log('6/6: ✅ TransactionAnalyzer, TradingEngine, and LaserStream Manager configured.');
         } catch (e) {
-            throw new Error(`Failed to initialize TransactionAnalyzer/TradingEngine: ${e.message}`);
+            throw new Error(`Failed to initialize core trading components: ${e.message}`);
         }
 
         // 7. Prime caches and start tasks (keep this as is)
@@ -169,7 +189,7 @@ class ZapBot {
             // this.setupUniversalScanner(); // This one line replaces all the old ones.
 
             // --- FINAL STEP: Activate the correct monitoring mode , we need to remove after uprading solanatracker premium plan ---
-             this.syncAndStartMonitoring();
+            this.syncAndStartMonitoring();
             this.setupCacheJanitor();
 
             // Set initialized status AFTER all internal components have been successfully started.
@@ -401,152 +421,142 @@ class ZapBot {
 
 
     setupCacheJanitor() {
-    const JANITOR_INTERVAL_MS = 60000; // Run the janitor once every 60 seconds
-    console.log(`[JANITOR] Quantum Janitor engaged. Cleaning every ${JANITOR_INTERVAL_MS / 1000}s`);
+        const JANITOR_INTERVAL_MS = 60000; // Run the janitor once every 60 seconds
+        console.log(`[JANITOR] Quantum Janitor engaged. Cleaning every ${JANITOR_INTERVAL_MS / 1000}s`);
 
-    setInterval(async () => {
-        if (this.isShuttingDown) return;
+        setInterval(async () => {
+            if (this.isShuttingDown) return;
 
-        try {
-            const allCachedMints = Array.from(this.cacheManager.tradeReadyCache.keys());
-            if (allCachedMints.length === 0) return;
+            try {
+                const allCachedMints = Array.from(this.cacheManager.tradeReadyCache.keys());
+                if (allCachedMints.length === 0) return;
 
-            // Batch fetch prices and metadata
-            const [prices, metadatas] = await Promise.all([
-                this.apiManager.getTokenPrices(allCachedMints),
-                this.apiManager.getTokenMetadatas(allCachedMints) // New metadata fetcher
-            ]);
+                // Batch fetch prices and metadata
+                const [prices, metadatas] = await Promise.all([
+                    this.apiManager.getTokenPrices(allCachedMints),
+                    this.apiManager.getTokenMetadatas(allCachedMints) // New metadata fetcher
+                ]);
 
-            for (const mint of allCachedMints) {
-                const cacheEntry = this.cacheManager.tradeReadyCache.get(mint);
-                if (!cacheEntry) continue;
+                for (const mint of allCachedMints) {
+                    const cacheEntry = this.cacheManager.tradeReadyCache.get(mint);
+                    if (!cacheEntry) continue;
 
-                // Enhanced metadata handling
-                const metadata = metadatas.get(mint) || cacheEntry.metadata || {};
-                const { totalSupply, decimals } = metadata;
+                    // Enhanced metadata handling
+                    const metadata = metadatas.get(mint) || cacheEntry.metadata || {};
+                    const { totalSupply, decimals } = metadata;
 
-                if (totalSupply === undefined || decimals === undefined) {
-                    console.warn(`[JANITOR] Missing metadata for ${shortenAddress(mint)}. Skipping this cycle.`);
-                    continue;
-                }
+                    if (totalSupply === undefined || decimals === undefined) {
+                        console.warn(`[JANITOR] Missing metadata for ${shortenAddress(mint)}. Skipping this cycle.`);
+                        continue;
+                    }
 
-                const price = prices.get(mint);
-                if (price === undefined) {
-                    console.warn(`[JANITOR] No price data for ${shortenAddress(mint)}. Skipping.`);
-                    continue;
-                }
+                    const price = prices.get(mint);
+                    if (price === undefined) {
+                        console.warn(`[JANITOR] No price data for ${shortenAddress(mint)}. Skipping.`);
+                        continue;
+                    }
 
-                // Universal market cap calculation
-                const marketCap = (Number(totalSupply) / (10 ** decimals)) * price;
-                const tokenAgeMs = Date.now() - (cacheEntry.timestamp || 0);
+                    // Universal market cap calculation
+                    const marketCap = (Number(totalSupply) / (10 ** decimals)) * price;
+                    const tokenAgeMs = Date.now() - (cacheEntry.timestamp || 0);
 
-                // Platform-specific rules
-                let prune = false;
-                let reason = '';
-                const platform = cacheEntry.dexPlatform || 'Unknown';
+                    // Platform-specific rules
+                    let prune = false;
+                    let reason = '';
+                    const platform = cacheEntry.dexPlatform || 'Unknown';
 
-                // 1. Pump.fun rules (BC & AMM)
-                if (platform.includes('Pump.fun')) {
-                    if (marketCap < config.JANITOR_PUMP_MCAP_THRESHOLD) {
-                        prune = true;
-                        reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_PUMP_MCAP_THRESHOLD}`;
+                    // 1. Pump.fun rules (BC & AMM)
+                    if (platform.includes('Pump.fun')) {
+                        if (marketCap < config.JANITOR_PUMP_MCAP_THRESHOLD) {
+                            prune = true;
+                            reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_PUMP_MCAP_THRESHOLD}`;
+                        }
+                    }
+                    // 2. Launchpad rules
+                    else if (platform.includes('Launchpad')) {
+                        const graceExpired = tokenAgeMs > (config.JANITOR_LAUNCHPAD_GRACE_MS || 300000); // 5 minutes default
+                        if (graceExpired && (marketCap < (config.JANITOR_LAUNCHPAD_MCAP_THRESHOLD || 50000) || marketCap === 0)) {
+                            prune = true;
+                            reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_LAUNCHPAD_MCAP_THRESHOLD} after ${Math.floor(tokenAgeMs / 60000)}m`;
+                        }
+                    }
+                    // 3. General DEX rules (Raydium V4/CLMM, Meteora DLMM/DBC)
+                    else {
+                        const graceExpired = tokenAgeMs > (config.JANITOR_DEX_GRACE_MS || 3600000); // 1 hour default
+                        if (graceExpired && marketCap < (config.JANITOR_DEX_MCAP_THRESHOLD || 250000)) {
+                            prune = true;
+                            reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_DEX_MCAP_THRESHOLD} after ${Math.floor(tokenAgeMs / 3600000)}h`;
+                        }
+                    }
+
+                    if (prune) {
+                        this.cacheManager.tradeReadyCache.delete(mint);
+                        console.log(`[JANITOR] 🧹 Pruned ${shortenAddress(mint)} (${platform}): ${reason}`);
                     }
                 }
-                // 2. Launchpad rules
-                else if (platform.includes('Launchpad')) {
-                    const graceExpired = tokenAgeMs > (config.JANITOR_LAUNCHPAD_GRACE_MS || 300000); // 5 minutes default
-                    if (graceExpired && (marketCap < (config.JANITOR_LAUNCHPAD_MCAP_THRESHOLD || 50000) || marketCap === 0)) {
-                        prune = true;
-                        reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_LAUNCHPAD_MCAP_THRESHOLD} after ${Math.floor(tokenAgeMs / 60000)}m`;
-                    }
-                }
-                // 3. General DEX rules (Raydium V4/CLMM, Meteora DLMM/DBC)
-                else {
-                    const graceExpired = tokenAgeMs > (config.JANITOR_DEX_GRACE_MS || 3600000); // 1 hour default
-                    if (graceExpired && marketCap < (config.JANITOR_DEX_MCAP_THRESHOLD || 250000)) {
-                        prune = true;
-                        reason = `${platform} MCap $${marketCap.toFixed(2)} < $${config.JANITOR_DEX_MCAP_THRESHOLD} after ${Math.floor(tokenAgeMs / 3600000)}h`;
-                    }
-                }
+            } catch (error) {
+                console.error(`[JANITOR] Cycle failed:`, error.message);
+            }
+        }, JANITOR_INTERVAL_MS);
+    }
 
-                if (prune) {
-                    this.cacheManager.tradeReadyCache.delete(mint);
-                    console.log(`[JANITOR] 🧹 Pruned ${shortenAddress(mint)} (${platform}): ${reason}`);
+    async handleManualCopy(chatId, signature) {
+        console.log(`[MANUAL FIRE CONTROL] Received /copy command. Target signature: ${signature}`);
+        await this.telegramUi.sendOrEditMessage(chatId, `🎯 *TARGET ACQUIRED*\\nAuthorizing copy for sig: \`${escapeMarkdownV2(signature)}\``, {});
+
+        // --- IMPORTANT: Find which trader this signature belongs to ---
+        // This is the hardest part of manual mode. You need to know which trader to simulate.
+        // For this op, let's assume we test against the FIRST configured active trader.
+        const syndicateData = await this.databaseManager.loadTraders();
+        const userTraders = syndicateData.user_traders[String(chatId)];
+
+        let targetTraderWallet = null;
+        let targetTraderName = 'Unknown';
+        if (userTraders) {
+            for (const name in userTraders) {
+                if (userTraders[name].active) {
+                    targetTraderWallet = userTraders[name].wallet;
+                    targetTraderName = name;
+                    break;
                 }
             }
-        } catch (error) {
-            console.error(`[JANITOR] Cycle failed:`, error.message);
         }
-    }, JANITOR_INTERVAL_MS);
-}
 
-async handleManualCopy(chatId, signature) {
-    console.log(`[MANUAL FIRE CONTROL] Received /copy command. Target signature: ${signature}`);
-    await this.telegramUi.sendOrEditMessage(chatId, `🎯 *TARGET ACQUIRED*\\nAuthorizing copy for sig: \`${escapeMarkdownV2(signature)}\``, {});
-
-    // --- IMPORTANT: Find which trader this signature belongs to ---
-    // This is the hardest part of manual mode. You need to know which trader to simulate.
-    // For this op, let's assume we test against the FIRST configured active trader.
-    const syndicateData = await this.dataManager.loadTraders();
-    const userTraders = syndicateData.user_traders[String(chatId)];
-    
-    let targetTraderWallet = null;
-    let targetTraderName = 'Unknown';
-    if (userTraders) {
-        for (const name in userTraders) {
-            if (userTraders[name].active) {
-                targetTraderWallet = userTraders[name].wallet;
-                targetTraderName = name;
-                break;
-            }
+        if (!targetTraderWallet) {
+            await this.telegramUi.sendErrorMessage(chatId, "Live Fire Failed: No active trader is configured for this test.");
+            return;
         }
-    }
-    
-    if (!targetTraderWallet) {
-        await this.telegramUi.sendErrorMessage(chatId, "Live Fire Failed: No active trader is configured for this test.");
-        return;
-    }
-    console.log(`[MANUAL FIRE CONTROL] Simulating activity from trader: ${targetTraderName} (${targetTraderWallet})`);
+        console.log(`[MANUAL FIRE CONTROL] Simulating activity from trader: ${targetTraderName} (${targetTraderWallet})`);
 
-    // Now, we feed this directly into the bot's brain.
-    await this.tradingEngine.processSignature(targetTraderWallet, signature);
-}
+        // Now, we feed this directly into the bot's brain.
+        await this.tradingEngine.processSignature(targetTraderWallet, signature);
+    }
 
 
     // --- Action Handlers ---
-   async handleStartCopy(chatId, traderName) {
-    console.log(`[Action] START request for ${traderName} from chat ${chatId}`);
-    try {
-        const userTraders = await this.dataManager.loadTraders(chatId);
-        if (userTraders[traderName]) {
-            userTraders[traderName].active = true;
-            await this.dataManager.saveTraders(chatId, userTraders);
+    async handleStartCopy(chatId, traderName) {
+        console.log(`[Action] START request for ${traderName} from chat ${chatId}`);
+        try {
+            // Update trader status in database
+            await this.databaseManager.updateTraderStatus(chatId, traderName, true);
             // Re-sync and restart the global snipers to pick up the new active trader
             // this.startGlobalPlatformSnipers(); 
-               this.syncAndStartMonitoring();
+            this.syncAndStartMonitoring();
             await this.telegramUi.showMainMenu(chatId);
-            } else {
-                await this.telegramUi.sendErrorMessage(chatId, `Trader "${traderName}" not found.`);
-            }
         } catch (e) {
             await this.telegramUi.sendErrorMessage(chatId, `Failed to start copying: ${e.message}`);
         }
     }
 
-   async handleStopCopy(chatId, traderName) {
-    console.log(`[Action] STOP request for ${traderName} from chat ${chatId}`);
-    try {
-        const userTraders = await this.dataManager.loadTraders(chatId);
-        if (userTraders[traderName]) {
-            userTraders[traderName].active = false;
-            await this.dataManager.saveTraders(chatId, userTraders);
+    async handleStopCopy(chatId, traderName) {
+        console.log(`[Action] STOP request for ${traderName} from chat ${chatId}`);
+        try {
+            // Update trader status in database
+            await this.databaseManager.updateTraderStatus(chatId, traderName, false);
             // Re-sync and restart the global snipers to remove the inactive trader
             // this.startGlobalPlatformSnipers(); 
             this.syncAndStartMonitoring();
             await this.telegramUi.showMainMenu(chatId);
-            } else {
-                await this.telegramUi.sendErrorMessage(chatId, `Trader "${traderName}" not found.`);
-            }
         } catch (e) {
             await this.telegramUi.sendErrorMessage(chatId, `Failed to stop copying: ${e.message}`);
         }
@@ -556,37 +566,39 @@ async handleManualCopy(chatId, signature) {
     async handleRemoveTrader(chatId, traderName) {
         console.log(`[Action] REMOVE request for ${traderName} from chat ${chatId}`);
         try {
-            const userTraders = await this.dataManager.loadTraders(chatId);
-            if (userTraders[traderName]) {
-                delete userTraders[traderName];
-                await this.dataManager.saveTraders(chatId, userTraders);
-                await this.telegramUi.showTradersMenu(chatId, 'remove');
-            } else {
-                await this.telegramUi.sendErrorMessage(chatId, `Trader "${traderName}" not found.`);
+            // Get user to get internal user ID
+            const user = await this.databaseManager.getUser(chatId);
+            if (!user) {
+                throw new Error('User not found');
             }
+            
+            // Remove trader from database
+            await this.databaseManager.deleteTrader(user.id, traderName);
+            
+            const message = `✅ Trader *${traderName}* has been removed successfully!`;
+            await this.telegramUi.sendOrEditMessage(chatId, message, {
+                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Traders List", callback_data: "traders_list" }]] }
+            });
         } catch (e) {
             await this.telegramUi.sendErrorMessage(chatId, `Failed to remove trader: ${e.message}`);
         }
     }
 
+    // REPLACE this entire function
     async handleAddTrader(chatId, traderName, walletAddress) {
         console.log(`[Action] ADD request for ${traderName} from chat ${chatId}`);
         try {
-            // Step 1: Load ONLY this user's traders
-            const userTraders = await this.dataManager.loadTraders(chatId);
-
-            if (userTraders[traderName]) {
-                throw new Error(`Trader name "${traderName}" already exists for you.`);
+            // Get user to get internal user ID
+            const user = await this.databaseManager.getUser(chatId);
+            if (!user) {
+                throw new Error('User not found in database. Cannot add trader.');
             }
-            // Add the new trader to this user's personal list
-            userTraders[traderName] = {
-                wallet: new PublicKey(walletAddress).toBase58(),
-                active: false,
-                addedAt: new Date().toISOString(),
-            };
 
-            // Step 2: Save ONLY this user's updated trader list
-            await this.dataManager.saveTraders(chatId, userTraders);
+            // Create the trader in the database, linked to the user's ID
+            await this.databaseManager.createTrader(user.id, traderName, walletAddress);
+
+            // Re-sync monitoring to start following the new trader if they were made active.
+            this.syncAndStartMonitoring();
 
             await this.telegramUi.sendOrEditMessage(
                 chatId,
@@ -607,15 +619,9 @@ async handleManualCopy(chatId, signature) {
         try {
             const deleted = await this.walletManager.deleteWalletByLabel(chatId, walletLabel);
             if (deleted) {
-                const settings = await this.dataManager.loadSettings();
-                const userChatIdStr = String(chatId);
-
-                // Access the user-specific settings.
-                if (settings.userSettings?.[userChatIdStr]?.primaryCopyWalletLabel === walletLabel) {
-                    settings.userSettings[userChatIdStr].primaryCopyWalletLabel = null; // Clear their specific primary.
-                    await this.dataManager.saveSettings(settings);
-                    console.log(`[Action] Primary wallet reset for user ${userChatIdStr} as ${walletLabel} was deleted.`);
-                }
+                            // Clear primary wallet setting in database if this was the primary
+            await this.databaseManager.updateUserTradingSettings(chatId, { primary_wallet_label: null });
+            console.log(`[Action] Primary wallet reset for user ${chatId} as ${walletLabel} was deleted.`);
             }
             await this.telegramUi.displayWalletList(chatId);
         } catch (e) {
@@ -634,14 +640,8 @@ async handleManualCopy(chatId, signature) {
                 throw new Error(`Wallet "${walletLabel}" not found or you don't own it.`);
             }
 
-            const settings = await this.dataManager.loadSettings();
-            const userChatIdStr = String(chatId);
-
-            if (!settings.userSettings[userChatIdStr]) {
-                settings.userSettings[userChatIdStr] = {};
-            }
-            settings.userSettings[userChatIdStr].primaryCopyWalletLabel = walletLabel;
-            await this.dataManager.saveSettings(settings);
+            // Update primary wallet in database
+            await this.databaseManager.updateUserTradingSettings(chatId, { primary_wallet_label: walletLabel });
 
             await this.telegramUi.displayPrimaryWalletSelection(chatId, `✅ Primary wallet set to: ${escapeMarkdownV2(walletLabel)}`);
 
@@ -650,12 +650,11 @@ async handleManualCopy(chatId, signature) {
         }
     }
 
+    // REPLACE this entire function
     async handleSetSolAmount(chatId, amount) {
         console.log(`[Action] SET SOL amount request for ${amount} from chat ${chatId}`);
         try {
-            const amounts = await this.dataManager.loadSolAmounts();
-            amounts[String(chatId)] = amount;
-            await this.dataManager.saveSolAmounts(amounts);
+            await this.databaseManager.updateUserTradingSettings(chatId, { sol_amount_per_trade: amount });
             await this.telegramUi.showMainMenu(chatId);
         } catch (e) {
             await this.telegramUi.sendErrorMessage(chatId, `Failed to set SOL amount: ${e.message}`);
@@ -666,6 +665,18 @@ async handleManualCopy(chatId, signature) {
         console.log(`[Action] GENERATE wallet request for label "${label}" from chat ${chatId}`);
         try {
             const { walletInfo, privateKey } = await this.walletManager.generateAndAddWallet(label, 'trading', chatId);
+            
+            // Also store in database
+            const user = await this.databaseManager.getUser(chatId);
+            if (user) {
+                await this.databaseManager.createWallet(
+                    user.id, 
+                    label, 
+                    walletInfo.publicKey.toBase58(), 
+                    walletInfo.encryptedPrivateKey
+                );
+            }
+            
             const message = `✅ Wallet *${escapeMarkdownV2(label)}* Generated\\!\n` +
                 `Address: \`${escapeMarkdownV2(walletInfo.publicKey.toBase58())}\`\n\n` +
                 `🚨 *SAVE THIS PRIVATE KEY SECURELY* 🚨\n\n` +
@@ -683,6 +694,17 @@ async handleManualCopy(chatId, signature) {
         console.log(`[Action] IMPORT wallet request for label "${label}" from chat ${chatId}`);
         try {
             const walletInfo = await this.walletManager.importWalletFromPrivateKey(privateKey, label, 'trading', chatId);
+
+            // Also store in database
+            const user = await this.databaseManager.getUser(chatId);
+            if (user) {
+                await this.databaseManager.createWallet(
+                    user.id, 
+                    label, 
+                    walletInfo.publicKey.toBase58(), 
+                    walletInfo.encryptedPrivateKey
+                );
+            }
 
             // Delete the message containing the user's private key IMMEDIATELY for security.
             const lastMsgId = this.telegramUi.latestMessageIds.get(chatId);
@@ -814,8 +836,10 @@ async handleManualCopy(chatId, signature) {
         console.log(`[Action] RESET data request from chat ${chatId}`);
         try {
             await this.telegramUi.sendOrEditMessage(chatId, "♻️ *PERFORMING RESET\\.\\.\\.*", {});
-            await this.dataManager.deleteAllDataFiles();
-            await this.dataManager.initFiles();
+            // Reset data in database instead of files
+            await this.databaseManager.run('DELETE FROM traders WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
+            await this.databaseManager.run('DELETE FROM user_positions WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
+            await this.databaseManager.run('DELETE FROM trade_stats WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
             await this.walletManager.initialize();
             await this.telegramUi.sendOrEditMessage(chatId, "✅ *RESET COMPLETE\\!*", {});
             await this.telegramUi.showMainMenu(chatId);
@@ -825,91 +849,102 @@ async handleManualCopy(chatId, signature) {
     }
 
     // In zapbot.js
-startGlobalPlatformSnipers() {
-    console.log('[WEAPON_SYSTEM] Activating unified WebSocket intelligence streams...');
-    
-    // 1. Start the pool sniper. This is for automatically finding and pre-caching new tokens.
-    this.apiManager.startUniversalDataStream(this.tradingEngine);
-    
-    // 2. Start the trader monitor. This is the heart of the copy trading.
-    // We wait for the stream to confirm it's connected before we subscribe to traders.
-    if (this.apiManager.solanaTrackerStream) {
-        this.apiManager.solanaTrackerStream.once('connected', () => {
-            console.log('[WEAPON_SYSTEM] ✅ WebSocket connection established. Activating trader monitoring...');
-            this.apiManager.startTraderMonitoringStream(this.tradingEngine);
-        });
+    startGlobalPlatformSnipers() {
+        console.log('[WEAPON_SYSTEM] Activating unified WebSocket intelligence streams...');
 
-        // Add a handler for re-connecting after a disconnect
-        this.apiManager.solanaTrackerStream.on('reconnected', () => {
-             console.log('[WEAPON_SYSTEM] ✅ WebSocket RECONNECTED. Re-syncing trader monitoring...');
-             this.apiManager.startTraderMonitoringStream(this.tradingEngine);
-        });
+        // 1. Start the pool sniper. This is for automatically finding and pre-caching new tokens.
+        this.apiManager.startUniversalDataStream(this.tradingEngine);
 
-    } else {
-        console.error("[WEAPON_SYSTEM] ❌ CRITICAL: SolanaTrackerStream object does not exist. Automatic copy trading will not function.");
+        // 2. Start the trader monitor. This is the heart of the copy trading.
+        // We wait for the stream to confirm it's connected before we subscribe to traders.
+        if (this.apiManager.solanaTrackerStream) {
+            this.apiManager.solanaTrackerStream.once('connected', () => {
+                console.log('[WEAPON_SYSTEM] ✅ WebSocket connection established. Activating trader monitoring...');
+                this.apiManager.startTraderMonitoringStream(this.tradingEngine);
+            });
+
+            // Add a handler for re-connecting after a disconnect
+            this.apiManager.solanaTrackerStream.on('reconnected', () => {
+                console.log('[WEAPON_SYSTEM] ✅ WebSocket RECONNECTED. Re-syncing trader monitoring...');
+                this.apiManager.startTraderMonitoringStream(this.tradingEngine);
+            });
+
+        } else {
+            console.error("[WEAPON_SYSTEM] ❌ CRITICAL: SolanaTrackerStream object does not exist. Automatic copy trading will not function.");
+        }
     }
-}
 
 
     // --- Monitoring & Tasks ---
 
-   async setupPeriodicTasks() {
-    const SCAN_INTERVAL_MS = 25000;
-    console.log(`[FALLBACK_MODE] Polling activated. Interval: ${SCAN_INTERVAL_MS / 1000}s. Upgrade to a SolanaTracker paid plan for real-time WebSocket speed.`);
-
-    if (this.periodicTaskInterval) clearInterval(this.periodicTaskInterval);
-
-    this.periodicTaskInterval = setInterval(async () => {
+    _startFallbackPolling() {
+        if (this.isFallbackPollingActive) {
+            return; // Prevent multiple intervals from running
+        }
+   
+        const SCAN_INTERVAL_MS = 25000;
+        console.log(`[CIRCUIT-BREAKER] ❗️ ENGAGING FALLBACK POLLING MODE. Interval: ${SCAN_INTERVAL_MS / 1000}s.`);
+        this.isFallbackPollingActive = true;
+        
+        // This is the original logic from setupPeriodicTasks
+        this.fallbackPollingInterval = setInterval(async () => {
             if (this.isShuttingDown) {
-                clearInterval(this.periodicTaskInterval);
+                this._stopFallbackPolling();
                 return;
             }
-
-            // ===== [START] NEW POLLING LOGIC V2 =====
-            const syndicateData = await this.dataManager.loadTraders();
-
+            
+            const syndicateData = await this.databaseManager.loadTraders();
             if (syndicateData && syndicateData.user_traders) {
-                // Process each user's active traders independently
                 for (const userChatId in syndicateData.user_traders) {
                     const userTraders = syndicateData.user_traders[userChatId];
                     for (const traderName in userTraders) {
                         const traderConfig = userTraders[traderName];
-
                         if (traderConfig.active && traderConfig.wallet) {
-                            // Create the COMPLETE "polledTraderInfo" object right here
-                            const traderTaskInfo = {
-                                ...traderConfig, // a copy of the trader's config
-                                name: traderName,         // ensure the name is set
-                                userChatId: userChatId, // THE CRITICAL MISSING PIECE OF INTEL
-                            };
-                            
-                            // Dispatch the task to the trading engine
+                            const traderTaskInfo = { ...traderConfig, name: traderName, userChatId: userChatId };
                             this.tradingEngine.processTrader(traderTaskInfo)
                                 .catch(e => console.error(`[POLLER_ERROR] Uncaught error for trader ${traderName}: ${e.message}`));
                         }
                     }
                 }
             }
-            // ===== [END] NEW POLLING LOGIC V2 =====
+        }, SCAN_INTERVAL_MS);
+    }
+   
+    _stopFallbackPolling() {
+        if (!this.isFallbackPollingActive) {
+            return;
+        }
+        console.log("[CIRCUIT-BREAKER] ✅ DISENGAGING FALLBACK POLLING MODE. Real-time stream is active.");
+        if (this.fallbackPollingInterval) {
+            clearInterval(this.fallbackPollingInterval);
+            this.fallbackPollingInterval = null;
+        }
+        this.isFallbackPollingActive = false;
+    }
 
-        }, SCAN_INTERVAL_MS); // <--- THE FUNCTION ENDS HERE
-}
-
- syncAndStartMonitoring() {
-        console.log('[SYNC] Re-evaluating monitoring mode...');
-        // This is our master logic block. It is now the ONLY place
-        // that decides whether to use polling or WebSockets.
-        if (config.FORCE_POLLING_MODE) {
-            console.log('[SYNC] -> Engaging STEALTH Polling mode.');
-            this.setupPeriodicTasks();
-        } else if (config.SOLANA_TRACKER_API_KEY && !config.SOLANA_TRACKER_API_KEY.startsWith('c556a3b7-0855-40c6-ade1-95424f5feb34')) {
-            console.log('[SYNC] -> Engaging WEAPONIZED WebSocket mode.');
-            this.startGlobalPlatformSnipers();
-        } else {
-            console.log('[SYNC] -> Defaulting to STEALTH Polling mode.');
-            this.setupPeriodicTasks();
+    _handleLaserStreamStatusChange({ status, reason, error }) {
+        if (status === 'connected') {
+            // If the stream is healthy, make sure the fallback is turned OFF.
+            this._stopFallbackPolling();
+        } else if (status === 'disconnected') {
+            // If the stream disconnects for any reason, turn the fallback ON.
+            console.warn(`[CIRCUIT-BREAKER] LaserStream disconnected. Reason: ${error || reason}`);
+            this._startFallbackPolling();
         }
     }
+
+
+
+    // FIND and REPLACE this entire function in zapbot.js
+// REPLACE this entire function
+syncAndStartMonitoring() {
+    console.log('[SYNC] Initiating primary monitoring stream...');
+
+    // The new logic is simple: always try to start the best monitoring system.
+    // The "Circuit Breaker" event handler we added will automatically
+    // manage starting or stopping the fallback polling based on the stream's status.
+    this.laserstreamManager.startMonitoring();
+}
 
     async primeCachesAndSync() {
         console.log("[CACHE] Priming caches...");
@@ -943,16 +978,16 @@ startGlobalPlatformSnipers() {
     async routeMessage(traderName, wallet, messageParams) {
         try {
             console.log(`[WS] Received activity for ${traderName} (${shortenAddress(wallet)})`);
-            
+
             // Process the message through the trading engine
             const traderInfo = {
                 name: traderName,
                 wallet: wallet,
                 userChatId: 0 // Default user
             };
-            
+
             await this.tradingEngine.processTrader(traderInfo);
-            
+
         } catch (error) {
             console.error(`[WS] Error routing message for ${traderName}: ${error.message}`);
         }
@@ -997,6 +1032,14 @@ startGlobalPlatformSnipers() {
             }
         }
 
+        // Close Solana WebSocket connections
+        if (this.solanaManager) {
+            this.solanaManager.stop();
+        }
+
+        if (this.laserstreamManager) {
+            this.laserstreamManager.stop();
+        }
         // Close Solana WebSocket connections
         if (this.solanaManager) {
             this.solanaManager.stop();

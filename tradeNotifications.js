@@ -1,53 +1,80 @@
 // ==========================================
-// File: tradeNotifications.js
+// File: tradeNotifications.js (THREAD-AWARE)
 // Description: Manages and sends all trade-related notifications to Telegram.
 // ==========================================
 
 const { shortenAddress, escapeMarkdownV2 } = require('./utils.js');
-const config = require('./config.js'); // Import config for Helius API Key & LAMPORTS_PER_SOL
+const config = require('./config.js');
 
 class TradeNotificationManager {
-    constructor(bot, apiManager) {
-        // Change the original problematic `if` block (lines 14-17 from your snapshot) to this:
-        if (!bot || !apiManager) {
-            console.error("TradeNotificationManager Constructor Error: Passed 'bot' or 'apiManager' are null or undefined.");
-            throw new Error("TradeNotificationManager: Required instances missing on initialization.");
-        }
-        // Removed specific instanceof/constructor.name checks here
-        // Adding more logs for ultra-final debug if this fails, before actual assignments.
-        console.log(`Debug TradeNotif Final: Receiving bot type ${typeof bot}, constructor name ${bot.constructor?.name}`);
-        console.log(`Debug TradeNotif Final: Receiving apiManager type ${typeof apiManager}, constructor name ${apiManager.constructor?.name}`);
-
-        this.bot = bot;
+    constructor(botInstance, apiManager, workerManager = null, databaseManager = null) {
+        // We can now accept either the bot instance OR the worker manager
+        this.bot = botInstance;
+        this.workerManager = workerManager;
         this.apiManager = apiManager;
-        this.connection = null; // Initialize connection as null
-        this.coinGeckoSolId = 'solana'; // Static ID for Solana on CoinGecko
+        this.databaseManager = databaseManager;
 
-        console.log("[TradeNotificationManager] Initialized. (Connection will be set shortly).");
+        if (!apiManager) {
+            throw new Error("TradeNotificationManager: apiManager is a required instance.");
+        }
+        if (!this.bot && !this.workerManager) {
+            throw new Error("TradeNotificationManager: Must be provided with a bot instance OR a workerManager.");
+        }
+
+        this.connection = null;
+        this.coinGeckoSolId = 'solana';
+
+        const mode = this.workerManager ? 'Threaded Dispatch' : 'Direct Bot';
+        console.log(`[TradeNotificationManager] Initialized in ${mode} mode.`);
     }
-
+    
+    // Internal helper to abstract sending messages
+    async _sendMessage(chatId, text, options = {}) {
+        const finalOptions = { parse_mode: 'MarkdownV2', disable_web_page_preview: true, ...options };
+        if (this.workerManager) {
+            // Dispatch to the Telegram worker thread
+            this.workerManager.dispatch('telegram', {
+                type: 'send_message',
+                payload: { chatId, text, options: finalOptions }
+            });
+        } else if (this.bot) {
+            // Send directly using the bot instance
+            await this.bot.sendMessage(chatId, text, finalOptions);
+        }
+    }
+    
+    // Internal helper to abstract pinning messages
+    async _pinMessage(chatId, messageId) {
+        if (this.workerManager) {
+            this.workerManager.dispatch('telegram', {
+                type: 'pin_message',
+                payload: { chatId, messageId, disable_notification: true }
+            });
+        } else if (this.bot) {
+            await this.bot.pinChatMessage(chatId, messageId, { disable_notification: true });
+        }
+    }
+    
     setConnection(connection) {
         if (!connection) {
-            console.error("[TradeNotificationManager] FATAL: setConnection received null or invalid connection instance.");
-            // Decide to throw or handle gracefully. For core ops, usually fatal.
-            // Keeping the error log from your original for consistency:
-            throw new Error("TradeNotificationManager connection instance cannot be null."); // Re-throw fatal for startup.
+            throw new Error("TradeNotificationManager connection instance cannot be null.");
         }
         this.connection = connection;
-        // console.log("[TradeNotificationManager] Connection set successfully.");
     }
 
-    /**
-     * Fetches SOL price in USD from CoinGecko API. Uses caching.
-     * @returns {Promise<number|null>} SOL price in USD, or null on persistent error.
-     */
+    setDatabaseManager(databaseManager) {
+        if (!databaseManager) {
+            throw new Error("TradeNotificationManager databaseManager instance cannot be null.");
+        }
+        this.databaseManager = databaseManager;
+    }
+
     async getSolPriceInUSD() {
-        if (!this.connection) { // Check if connection has been set before using
+        if (!this.connection) {
             console.warn("[Notifications] Connection not available to fetch SOL price. Returning 0.");
-            return 0; // Return 0 if connection not available
+            return 0;
         }
         try {
-            // Your CoinGecko logic goes here...
             const response = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=${this.coinGeckoSolId}&vs_currencies=usd`);
             const data = await response.json();
             if (data && data[this.coinGeckoSolId] && data[this.coinGeckoSolId].usd) {
@@ -56,77 +83,62 @@ class TradeNotificationManager {
         } catch (error) {
             console.error("[Notifications] Error fetching SOL price from CoinGecko:", error.message);
         }
-        return 0; // Default or fallback price
+        return 0;
     }
 
-    /**
-     * Fetches token metadata using the Helius API.
-     * @param {string} mintAddress - The token mint address.
-     * @returns {Promise<{name: string, symbol: string, decimals: number|null, logo: string|null}|null>}
-     */
-   async getEnhancedTokenData(mintAddress) {
-    if (!this.connection || !mintAddress) {
-        console.warn("[SOLANA_RPC] Connection not available or no mint address provided for metadata.");
-        return null;
-    }
-
-    try {
-        const response = await fetch(this.connection.rpcEndpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: `get-metadata-${mintAddress}`,
-                method: 'getAsset',
-                params: {
-                    id: mintAddress
-                },
-            }),
-        });
-
-        if (!response.ok) {
-            const errorBody = await response.text();
-            console.error(`[SOLANA_RPC] API Error for ${shortenAddress(mintAddress)}: ${response.status} ${response.statusText}`, errorBody.substring(0, 500));
+    async getEnhancedTokenData(mintAddress) {
+        if (!this.connection || !mintAddress) {
+            console.warn("[SOLANA_RPC] Connection not available or no mint address provided for metadata.");
             return null;
         }
 
-        const data = await response.json();
-        const result = data?.result;
+        try {
+            const response = await fetch(this.connection.rpcEndpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: `get-metadata-${mintAddress}`,
+                    method: 'getAsset',
+                    params: { id: mintAddress },
+                }),
+            });
 
-        if (!result) {
-            console.warn(`[SOLANA_RPC] No metadata found in response for ${shortenAddress(mintAddress)}.`);
+            if (!response.ok) {
+                const errorBody = await response.text();
+                console.error(`[SOLANA_RPC] API Error for ${shortenAddress(mintAddress)}: ${response.status} ${response.statusText}`, errorBody.substring(0, 500));
+                return null;
+            }
+
+            const data = await response.json();
+            const result = data?.result;
+
+            if (!result) {
+                console.warn(`[SOLANA_RPC] No metadata found in response for ${shortenAddress(mintAddress)}.`);
+                return null;
+            }
+
+            const decimals = result.content?.metadata?.decimals ?? (result.spl_token_info?.decimals ?? null);
+            const symbol = result.content?.metadata?.symbol || result.spl_token_info?.symbol || '';
+            const name = result.content?.metadata?.name || result.spl_token_info?.name || '';
+            const logo = result.content?.files?.[0]?.uri || null;
+            
+            const cleanSymbol = symbol.replace(/\u0000/g, '').trim();
+            const cleanName = name.replace(/\u0000/g, '').trim();
+
+            if (!cleanSymbol && !cleanName && decimals == null) {
+                console.warn(`[SOLANA_RPC] Usable metadata (symbol, name, decimals) not found for ${shortenAddress(mintAddress)} in RPC response.`);
+                return null;
+            }
+
+            return { symbol: cleanSymbol, name: cleanName, decimals: decimals, logo: logo };
+
+        } catch (error) {
+            console.error(`[SOLANA_RPC] Network/Fetch error for metadata of ${shortenAddress(mintAddress)}:`, error);
             return null;
         }
-
-        const decimals = result.content?.metadata?.decimals ?? (result.spl_token_info?.decimals ?? null);
-        const symbol = result.content?.metadata?.symbol || result.spl_token_info?.symbol || '';
-        const name = result.content?.metadata?.name || result.spl_token_info?.name || '';
-        const logo = result.content?.files?.[0]?.uri || null;
-        
-        // Sanitize the strings to remove any null characters that can come from on-chain data
-        const cleanSymbol = symbol.replace(/\u0000/g, '').trim();
-        const cleanName = name.replace(/\u0000/g, '').trim();
-
-        if (!cleanSymbol && !cleanName && decimals == null) {
-            console.warn(`[SOLANA_RPC] Usable metadata (symbol, name, decimals) not found for ${shortenAddress(mintAddress)} in RPC response.`);
-            return null;
-        }
-
-        return { symbol: cleanSymbol, name: cleanName, decimals: decimals, logo: logo };
-
-    } catch (error) {
-        console.error(`[SOLANA_RPC] Network/Fetch error for metadata of ${shortenAddress(mintAddress)}:`, error);
-        return null;
     }
-}
 
-    /**
-     * Sends a notification for a successful copy trade.
-     * @param {number} chatId User's Telegram chat ID.
-     * @param {string} traderName Name of the copied trader.
-     * @param {string} copyWalletLabel Label of the bot's wallet used.
-     * @param {object} tradeResult Detailed trade results. Includes: signature, tradeType, outputMint, inputMint, inputAmountRaw (string), outputAmountRaw (string), solSpent (SOL units), solReceived (SOL units).
-     */
     async notifySuccessfulCopy(chatId, traderName, copyWalletLabel, tradeResult) {
         try {
             if (!tradeResult || typeof tradeResult !== 'object' || !tradeResult.signature || !tradeResult.tradeType) {
@@ -134,24 +146,16 @@ class TradeNotificationManager {
             }
 
             const {
-                signature, tradeType, // Common
-                outputMint, inputMint, // Mints
-                inputAmountRaw, outputAmountRaw, // Raw string amounts
-                solSpent, solReceived, // Already in SOL units from trading engine
-                // Assuming `orderPrice` or `pnl` would come from analysis and be in tradeResult directly for more detail
+                signature, tradeType, outputMint, inputMint, inputAmountRaw, outputAmountRaw, solSpent, solReceived
             } = tradeResult;
 
-            const targetMintAddress = tradeType === 'buy' ? outputMint : inputMint; // Token Mint Address
-            const solScanUrl = `https://solscan.io/tx/${signature}`; // Build Solscan URL
+            const targetMintAddress = tradeType === 'buy' ? outputMint : inputMint;
+            const solScanUrl = `https://solscan.io/tx/${signature}`;
 
-            // Get relevant decimals from tradeResult for formatting, if available from Analyzer
-            // Defaulting to 9 (SOL decimals) or trying enhancedData for consistency
             let tokenDecimals = tradeResult.tokenDecimals ?? 9;
-
-            // --- Fetch Enhanced Token Data and SOL Price ---
             const solPriceUsd = await this.getSolPriceInUSD();
-            let tokenSymbol = shortenAddress(targetMintAddress, 6); // Fallback display name
-            let tokenName = tokenSymbol; // Fallback display name
+            let tokenSymbol = shortenAddress(targetMintAddress, 6);
+            let tokenName = tokenSymbol;
 
             if (targetMintAddress) {
                 try {
@@ -160,15 +164,14 @@ class TradeNotificationManager {
                         tokenSymbol = enhancedData.symbol || tokenSymbol;
                         tokenName = enhancedData.name || tokenName;
                         if (typeof enhancedData.decimals === 'number') {
-                            tokenDecimals = enhancedData.decimals; // Use Helius decimals if more accurate
+                            tokenDecimals = enhancedData.decimals;
                         }
                     }
-                } catch (fetchError) { console.error(`Error fetching token data: ${fetchError.message}`); }
+                } catch (fetchError) { 
+                    console.error(`Error fetching token data: ${fetchError.message}`); 
+                }
             }
 
-            // --- Amount Formatting Helper ---
-            // Handles both BigInt strings (raw amounts) and regular numbers (SOL amounts, already in SOL)
-            // Displays in MarkdownV2 escaped format
             const formatValue = (value, unitType = 'sol', precision = 6) => {
                 if (value == null || (typeof value === 'string' && value.trim() === '')) return '_N/A_';
 
@@ -195,16 +198,13 @@ class TradeNotificationManager {
                 }
             };
 
-            // --- Determine Trade Direction & Build Message ---
             let messageTitle = "";
             let summaryContent = "";
             let tradeDetailsContent = "";
 
-            // Trader info for consistency across buy/sell
             const escTrader = escapeMarkdownV2(traderName);
             const escWallet = escapeMarkdownV2(copyWalletLabel);
 
-            // Dynamically build message content
             if (tradeType === 'buy') {
                 const amountToken = formatValue(outputAmountRaw, 'token', 4);
                 const solUsed = formatValue(solSpent, 'sol', 6);
@@ -217,40 +217,50 @@ class TradeNotificationManager {
                     `*Tokens Bought*: ${amountToken} ${escapeMarkdownV2(tokenSymbol)}\n` +
                     `*SOL Spent*: ${solUsed} SOL\n`;
 
-            } else if (tradeType === 'sell') {
-                const amountToken = formatValue(inputAmountRaw, 'token', 4); // inputAmountRaw from Analyzer for Sells (tokens sold)
-                const solReceived = formatValue(solReceived, 'sol', 6); // solReceived from trading engine in SOL units
+                       } else if (tradeType === 'sell') {
+                const amountToken = formatValue(inputAmountRaw, 'token', 4);
+                const solReceivedFormatted = formatValue(solReceived, 'sol', 6);
+                const sellFeeFormatted = formatValue(tradeResult.solFee, 'sol', 8);
 
-                  // --- PnL Calculation ---
-                let pnlSol = null;
-                // The trading engine now provides us with the original cost.
-                if (typeof tradeResult.originalSolSpent === 'number' && typeof solReceived === 'number') {
-                    pnlSol = solReceived - tradeResult.originalSolSpent;
+                // Get original position to calculate PnL and total fees
+                let userPositions;
+                if (!this.databaseManager) {
+                    console.warn("[TradeNotifications] DatabaseManager not available, skipping PnL calculation");
+                    userPositions = new Map();
+                } else {
+                    userPositions = await this.databaseManager.getUserPositions(chatId);
                 }
-                const pnlPrefix = (pnlSol && pnlSol >= 0) ? '🟢' : '🔻';
-                const pnlSolDisplay = (pnlSol != null) ? `${formatValue(pnlSol, 'sol', 6)} SOL` : '_N/A_';
+                const originalPosition = userPositions.get(targetMintAddress) || {};
+                const originalSolSpent = originalPosition.solSpent || tradeResult.originalSolSpent || 0;
+                const buyFee = originalPosition.solFeeBuy || 0;
+                const totalFee = buyFee + (tradeResult.solFee || 0);
 
-                const pnlUsd = (pnlSol != null && solPriceUsd) ? pnlSol * solPriceUsd : null;
-                const pnlUsdDisplay = (pnlUsd != null) ? `\\$${escapeMarkdownV2(pnlUsd.toFixed(4))}` : '_N/A_';
+                let pnlSol = 0;
+                if (typeof solReceived === 'number') {
+                    pnlSol = solReceived - originalSolSpent;
+                }
+                const pnlNetSol = pnlSol - totalFee; // PnL after all fees
 
-                const pnlLine = (pnlSol != null) ? `*P/L*: ${pnlPrefix} ${pnlUsdDisplay} (${pnlSolDisplay})\n` : '';
-
-
+                const pnlPrefix = pnlNetSol >= 0 ? '🟢' : '🔻';
+                const pnlGrossDisplay = formatValue(pnlSol, 'sol', 6);
+                const pnlNetDisplay = formatValue(pnlNetSol, 'sol', 6);
+                
                 messageTitle = `🔴 *Sell Order Executed* ✅`;
-                summaryContent = `*Summary*: Sold ${amountToken} ${escapeMarkdownV2(tokenSymbol)} for ${solReceived} SOL`;
+                summaryContent = `*Summary*: Sold ${amountToken} ${escapeMarkdownV2(tokenSymbol)} for ${solReceivedFormatted} SOL`;
 
                 tradeDetailsContent =
-                    pnlLine +
-                    `*Token Name*: ${escapeMarkdownV2(tokenName)}\n` +
-                    `*Token Symbol*: ${escapeMarkdownV2(tokenSymbol)}\n` +
-                    `*Tokens Sold*: ${amountToken} ${escapeMarkdownV2(tokenSymbol)}\n` +
-                    `*SOL Received*: ${solReceived} SOL\n`;
+                    `*P/L \\(Net\\)*: ${pnlPrefix} *${pnlNetDisplay} SOL*\n` +
+                    `*P/L \\(Gross\\)*: ${pnlGrossDisplay} SOL\n\n` +
+                    `*SOL Received*: ${solReceivedFormatted} SOL\n` +
+                    `*SOL Spent \\(initial\\)*: ${formatValue(originalSolSpent, 'sol', 6)} SOL\n\n` +
+                    `*Network Fees*\n`+
+                    `• Sell Fee: ${sellFeeFormatted} SOL\n` +
+                    `• Total Fees: ${formatValue(totalFee, 'sol', 8)} SOL`;
             } else {
                 console.warn(`[Notification] Unknown trade type: ${tradeType}`);
-                return; // Do not send notification for unknown trade type
+                return;
             }
 
-            // --- Assemble Final Message ---
             let finalMessage =
                 `${messageTitle}\n\n` +
                 `👤 *Trader*: ${escTrader}\n` +
@@ -260,63 +270,45 @@ class TradeNotificationManager {
                 `${tradeDetailsContent}` +
                 `*Tx Link*: [View on Solscan](${solScanUrl})\n\n`;
 
-            // Optional: Add gas/fee if provided in tradeResult (assuming its passed as `solFee` for network fee, and total gas can be combined).
             if (tradeResult.solFee != null) {
                 finalMessage += `*Network Fee*: ${formatValue(tradeResult.solFee, 'sol', 8)} SOL\n`;
-                // Add this if 'totalGas' represents the full transaction cost beyond network fee (Compute Budget + rent, etc.)
-                // For simplicity, total gas is usually just network fee + priority fee.
-                // You can add tradeResult.priorityFee from TradingEngine's call if passed:
-                // finalMessage += `*Total Gas*: ${formatValue(tradeResult.totalGas || (tradeResult.solFee + (tradeResult.priorityFee/1e9 || 0)), 'sol', 8)} SOL\n\n`;
             }
 
-            // 4. --- SEND MESSAGE ---
-            await this.bot.sendMessage(chatId, finalMessage, {
-                parse_mode: "MarkdownV2",
-                disable_web_page_preview: true
-            });
+            await this._sendMessage(chatId, finalMessage);
 
         } catch (error) {
             const telegramError = error.response?.body?.description || error.message;
             console.error(`❌ Error sending successful copy notification to chat ${chatId}:`, telegramError, error.stack);
             const fallbackSig = tradeResult?.signature ? `\`${escapeMarkdownV2(tradeResult.signature)}\`` : 'N/A';
             const fallbackMsg = `✅ Copy Success \\(Sig: ${fallbackSig}\\) \\- Error generating full notification details due to: ${escapeMarkdownV2(error.message)}\\.`;
-            await this.bot.sendMessage(chatId, fallbackMsg, { parse_mode: 'MarkdownV2' });
+            await this._sendMessage(chatId, fallbackMsg);
         }
     }
 
-    /**
-    * Sends a notification to the user about a failed copy trade attempt.
-    * @param {number} chatId User's chat ID.
-    * @param {string} traderName Name of the trader being copied.
-    * @param {string} copyWalletLabel Label of the wallet used.
-    * @param {string} tradeType 'buy' or 'sell' or 'trade'.
-    * @param {string} errorMessage The error message describing the failure.
-    */
     async notifyFailedCopy(chatId, traderName, copyWalletLabel, tradeType, errorMessage) {
         try {
             const escTrader = escapeMarkdownV2(traderName);
             const escWallet = escapeMarkdownV2(copyWalletLabel);
             const escType = escapeMarkdownV2(tradeType?.toUpperCase() || 'TRADE');
-            const escError = escapeMarkdownV2(String(errorMessage || "Unknown Error").substring(0, 500)); // Increased char limit slightly
+            const escError = escapeMarkdownV2(String(errorMessage || "Unknown Error").substring(0, 500));
 
             let message = `❌ *Copy ${escType} FAILED* ❗️ \\(${escTrader}\\)\n\n`;
             message += `*Wallet*: ${escWallet}\n`;
             message += `*Reason*: _${escError}_`;
 
-            await this.bot.sendMessage(chatId, message, { parse_mode: "MarkdownV2" });
+            await this._sendMessage(chatId, message);
 
         } catch (error) {
             const telegramError = error.response?.body?.description || error.message;
             console.error(`❌ Error sending FAILED copy notification to chat ${chatId}:`, telegramError);
             try {
-                // Fallback simpler message with minimal escaping, max 400 chars.
                 const fallbackMsg = `ALERT: Copy Failed for trader ${traderName}! Wallet: ${copyWalletLabel}. Type: ${tradeType}. Error: ${String(errorMessage || "").substring(0, 400)}`;
-                await this.bot.sendMessage(chatId, fallbackMsg);
-            } catch { } // Catch fallback send error
+                await this._sendMessage(chatId, fallbackMsg);
+            } catch { }
         }
     }
 
-      async notifyNoCopy(chatId, traderName, walletLabel, reason) {
+    async notifyNoCopy(chatId, traderName, walletLabel, reason) {
         try {
             const escTrader = escapeMarkdownV2(traderName);
             const escWallet = escapeMarkdownV2(walletLabel || 'Unknown');
@@ -326,105 +318,86 @@ class TradeNotificationManager {
             message += `*Wallet*: ${escWallet}\n`;
             message += `*Reason*: _${escReason}_`;
 
-            await this.bot.sendMessage(chatId, message, { parse_mode: "MarkdownV2" });
+            await this._sendMessage(chatId, message);
 
         } catch (error) {
             console.error(`❌ Error sending NO COPY notification to chat ${chatId}:`, error.message);
         }
     }
 
-
-    // New common notification for insufficient balance (Called by TradingEngine)
-    // Assumes `tradeDetails` includes `traderName` and `traderWallet` and `chatId` might come from it or elsewhere
     async sendInsufficientBalanceNotification(chatId, requiredSol, currentSol, copyWalletInfo, tradeDetails) {
-    if (!chatId || !copyWalletInfo || !tradeDetails) {
-        console.error("[Notify Balance] Missing vital info for insufficient balance notification.");
-        return;
-    }
-
-    // Default to a clear "Not Provided" if the traderName is still missing for some reason.
-    const traderNameStr = tradeDetails.traderName || 'Unknown Trader'; 
-
-    const tokenMint = tradeDetails.outputMint || tradeDetails.inputMint;
-    let tokenSymbol = tokenMint ? shortenAddress(tokenMint, 6) : "Unknown Token";
-
-    // Attempt to get the real token symbol for a better message.
-    try {
-        const enhancedData = await this.getEnhancedTokenData(tokenMint);
-        if (enhancedData && enhancedData.symbol) {
-            tokenSymbol = enhancedData.symbol;
+        if (!chatId || !copyWalletInfo || !tradeDetails) {
+            console.error("[Notify Balance] Missing vital info for insufficient balance notification.");
+            return;
         }
-    } catch (e) { 
-        // Ignore if Helius fails, we'll just use the shortened mint address.
+
+        const traderNameStr = tradeDetails.traderName || 'Unknown Trader'; 
+        const tokenMint = tradeDetails.outputMint || tradeDetails.inputMint;
+        let tokenSymbol = tokenMint ? shortenAddress(tokenMint, 6) : "Unknown Token";
+
+        try {
+            const enhancedData = await this.getEnhancedTokenData(tokenMint);
+            if (enhancedData && enhancedData.symbol) {
+                tokenSymbol = enhancedData.symbol;
+            }
+        } catch (e) { }
+
+        try {
+            const tradeTypeStr = tradeDetails.tradeType || 'trade';
+            const walletLabelStr = copyWalletInfo.label || 'Unnamed Wallet';
+            
+            const walletPubkeyStr = typeof copyWalletInfo.publicKey === 'object' && copyWalletInfo.publicKey !== null
+                ? copyWalletInfo.publicKey.toBase58()
+                : String(copyWalletInfo.publicKey || 'N/A');
+
+            const requiredSolFormatted = parseFloat(requiredSol).toFixed(6);
+            const currentSolFormatted = parseFloat(currentSol).toFixed(6);
+
+            const escTraderName = escapeMarkdownV2(traderNameStr);
+            const escWalletLabel = escapeMarkdownV2(walletLabelStr);
+            const escPubkey = escapeMarkdownV2(walletPubkeyStr);
+            const escTokenDisplay = escapeMarkdownV2(tokenSymbol);
+            const escReq = escapeMarkdownV2(requiredSolFormatted);
+            const escCurr = escapeMarkdownV2(currentSolFormatted);
+            const escType = escapeMarkdownV2(tradeTypeStr.toUpperCase());
+
+            const message = 
+                `⚠️ *Insufficient Balance* ⚠️\n\n` +
+                `*Trader*: ${escTraderName}\n\n` +
+                `*Your Wallet*: *${escWalletLabel}*\n` +
+                `*Addr*: \`${escPubkey}\`\n\n` +
+                `Skipped *${escType}* copy for *${escTokenDisplay}*\\.\n\n` +
+                `> *Need*: ${escReq} SOL\n` +
+                `> *Have*:  ${escCurr} SOL\n\n` +
+                `_Deposit SOL to the address above to enable copies\\._`;
+
+            await this._sendMessage(chatId, message);
+
+        } catch (error) {
+            console.error(`❌ Failed to send Insufficient Balance alert to ${chatId}:`, error.message);
+        }
     }
 
-    try {
-        const tradeTypeStr = tradeDetails.tradeType || 'trade';
-        const walletLabelStr = copyWalletInfo.label || 'Unnamed Wallet';
-        
-        // --- THE MAIN FIX IS HERE ---
-        // We now safely check if publicKey is an object and call .toBase58()
-        const walletPubkeyStr = typeof copyWalletInfo.publicKey === 'object' && copyWalletInfo.publicKey !== null
-            ? copyWalletInfo.publicKey.toBase58()
-            : String(copyWalletInfo.publicKey || 'N/A');
-
-        // Format amounts for clean display
-        const requiredSolFormatted = parseFloat(requiredSol).toFixed(6);
-        const currentSolFormatted = parseFloat(currentSol).toFixed(6);
-
-        // Escape all parts for perfect MarkdownV2
-        const escTraderName = escapeMarkdownV2(traderNameStr);
-        const escWalletLabel = escapeMarkdownV2(walletLabelStr);
-        const escPubkey = escapeMarkdownV2(walletPubkeyStr);
-        const escTokenDisplay = escapeMarkdownV2(tokenSymbol);
-        const escReq = escapeMarkdownV2(requiredSolFormatted);
-        const escCurr = escapeMarkdownV2(currentSolFormatted);
-        const escType = escapeMarkdownV2(tradeTypeStr.toUpperCase());
-
-        const message = 
-            `⚠️ *Insufficient Balance* ⚠️\n\n` +
-            `*Trader*: ${escTraderName}\n\n` +
-            `*Your Wallet*: *${escWalletLabel}*\n` +
-            `*Addr*: \`${escPubkey}\`\n\n` +
-            `Skipped *${escType}* copy for *${escTokenDisplay}*\\.\n\n` +
-            `> *Need*: ${escReq} SOL\n` +
-            `> *Have*:  ${escCurr} SOL\n\n` +
-            `_Deposit SOL to the address above to enable copies\\._`;
-
-        await this.bot.sendMessage(chatId, message, { parse_mode: "MarkdownV2" });
-
-    } catch (error) {
-        console.error(`❌ Failed to send Insufficient Balance alert to ${chatId}:`, error.message);
-    }
-} // End sendInsufficientBalanceNotification
-
-    /**
-     * Sends a general formatted error notification.
-     * @param {number} chatId
-     * @param {string} title
-     * @param {string} details
-     */
     async sendErrorNotification(chatId, title, details) {
-        if (!this.bot) {
-            console.error("[Notify] Cannot send general error notification: Bot instance not set.");
+        if (!this.bot && !this.workerManager) {
+            console.error("[Notify] Cannot send general error notification: No bot instance or worker manager.");
             return;
         }
         try {
             const escTitle = escapeMarkdownV2(title);
             const escDetails = escapeMarkdownV2(details);
             const message = `❌ *${escTitle}*\n\n${escDetails}`;
-            await this.bot.sendMessage(chatId, message, { parse_mode: 'MarkdownV2' });
+            await this._sendMessage(chatId, message);
 
         } catch (error) {
             console.error(`[Notify] ❌ Error sending general error notification (title: ${title}) to chat ${chatId}:`, error);
-            // Fallback on severe send failure
             const fallbackMsg = `ALERT: General Bot Error: ${title}. Details: ${details.substring(0, 200)}`;
-            try { await this.bot.sendMessage(chatId, fallbackMsg); } catch { }
+            try { await this._sendMessage(chatId, fallbackMsg); } catch { }
         }
     }
 
-     async notifyMigrationEvent(chatId, tokenMint, oldPlatform, newPlatform, signature) {
-        if (!chatId) return; // Can't send without a chat ID.
+    async notifyMigrationEvent(chatId, tokenMint, oldPlatform, newPlatform, signature) {
+        if (!chatId) return;
         
         try {
             const tokenData = await this.getEnhancedTokenData(tokenMint) || { symbol: 'TOKEN', name: 'Unknown Token' };
@@ -438,16 +411,14 @@ class TradeNotificationManager {
                             `_The bot will now use the new market for any future sell actions\\._\n\n` +
                             `[View Migration Tx](${solscanLink})`;
 
-            // Send the message first...
-            const sentMessage = await this.bot.sendMessage(chatId, message, {
+            const sentMessage = await this._sendMessage(chatId, message, {
                 parse_mode: "MarkdownV2",
                 disable_web_page_preview: true
             });
 
-            // ...then pin it. The bot must be an admin in the channel for this to work.
-            if (sentMessage) {
-                await this.bot.pinChatMessage(chatId, sentMessage.message_id, { disable_notification: true });
-                 console.log(`[NOTIFY_MIGRATE] Pinned migration alert for ${tokenData.symbol} in chat ${chatId}.`);
+            if (sentMessage && sentMessage.message_id) {
+                await this._pinMessage(chatId, sentMessage.message_id);
+                console.log(`[NOTIFY_MIGRATE] Pinned migration alert for ${tokenData.symbol} in chat ${chatId}.`);
             }
 
         } catch (error) {
@@ -455,9 +426,9 @@ class TradeNotificationManager {
         }
     }
 
-      async startMigrationMonitoringNotification(chatId, tokenMint, initialProgress) {
+    async startMigrationMonitoringNotification(chatId, tokenMint, initialProgress) {
         try {
-            const { createAsciiProgressBar } = require('./utils.js'); // Import our new util
+            const { createAsciiProgressBar } = require('./utils.js');
             
             const tokenData = await this.getEnhancedTokenData(tokenMint) || { symbol: 'TOKEN' };
             const progressBar = createAsciiProgressBar(initialProgress);
@@ -466,14 +437,16 @@ class TradeNotificationManager {
                             `*Token*: *${escapeMarkdownV2(tokenData.symbol)}*\n` +
                             `\`${escapeMarkdownV2(progressBar)}\``;
             
-            const sentMessage = await this.bot.sendMessage(chatId, message, {
+            const sentMessage = await this._sendMessage(chatId, message, {
                 parse_mode: 'MarkdownV2'
             });
 
-            await this.bot.pinChatMessage(chatId, sentMessage.message_id, { disable_notification: true });
-
-            console.log(`[PROGRESS_BAR] Created and pinned progress monitor for ${tokenData.symbol}.`);
-            return sentMessage.message_id; // CRITICAL: Return the ID so we can edit it later.
+            if (sentMessage && sentMessage.message_id) {
+                await this._pinMessage(chatId, sentMessage.message_id);
+                console.log(`[PROGRESS_BAR] Created and pinned progress monitor for ${tokenData.symbol}.`);
+                return sentMessage.message_id;
+            }
+            return null;
 
         } catch (error) {
             console.error(`[PROGRESS_BAR] Failed to create progress bar:`, error.message);
@@ -481,7 +454,7 @@ class TradeNotificationManager {
         }
     }
 
-     async sendSimpleMigrationAlert(chatId, tokenMint, newPlatform) {
+    async sendSimpleMigrationAlert(chatId, tokenMint, newPlatform) {
         try {
             const tokenData = await this.getEnhancedTokenData(tokenMint) || { symbol: shortenAddress(tokenMint) };
 
@@ -490,15 +463,11 @@ class TradeNotificationManager {
                           `*Event*: Has migrated to *${escapeMarkdownV2(newPlatform)}*\\!\n\n` +
                           `The bot is now ready to trade this token on its new home\\.`;
 
-            // We don't pin these because they are one-time events.
-            await this.bot.sendMessage(chatId, message, { parse_mode: "MarkdownV2" });
+            await this._sendMessage(chatId, message);
         } catch (error) {
             console.error(`[Notify] Failed to send simple migration alert for ${tokenMint}:`, error.message);
         }
     }
-
 }
 
-
-// CommonJS Export: Export the class directly as the module's export
 module.exports = TradeNotificationManager;

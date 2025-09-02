@@ -1,0 +1,3621 @@
+🚀 Starting ZapBot with Helius integration...
+📊 Initializing SQLite database...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+✅ Database initialized successfully
+🔴 Initializing Redis for flight data...
+✅ RedisManager initialized successfully
+🔥 Warming up Redis cache...
+✅ Cache warming completed
+✅ Redis initialized successfully
+🧵 Threaded mode: Skipping legacy DataManager initialization
+🔄 Checking for data migration...
+✅ Database already contains data, skipping migration.
+🤖 Starting main ZapBot application...
+🧵 Starting in THREADED mode...
+🧵 ThreadedZapBot initialized with worker configuration
+🚀 Starting ThreadedZapBot initialization...
+🔧 Initializing worker threads...
+🔧 Created worker: telegram
+🔧 Created worker: monitor
+🔧 Created worker: executor
+🔧 Created worker: data
+🔧 Created worker: websocket
+🔧 Created worker: cache
+🔧 Created worker: analyzer
+✅ 7 workers initialized
+💓 Worker monitoring started (interval: 30000ms)
+⏳ Waiting for workers to be ready...
+[data] Initializing worker...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+✅ Worker data is ready
+[DB] DatabaseManager initialized successfully 
+[2025-09-01T18:27:49.904Z] [data] [INFO] Database manager worker initialized successfully {}
+[data] Worker initialized successfully
+[cache] Initializing worker...
+✅ Worker cache is ready
+CacheManager (Quantum Core) initialized.
+[2025-09-01T18:27:50.085Z] [cache] [INFO] Periodic cleanup started { interval: 60000 }
+[2025-09-01T18:27:50.086Z] [cache] [INFO] Cache manager worker initialized successfully {}
+[cache] Worker initialized successfully
+[monitor] Initializing worker...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[analyzer] Initializing worker...
+[executor] Initializing worker...
+[DB] Database tables created successfully 
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[websocket] Initializing worker...
+[DB] Database tables created successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[telegram] Initializing worker...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker monitor is ready
+[2025-09-01T18:27:50.791Z] [monitor] [INFO] Trader monitor worker initialized successfully {}
+[monitor] Worker initialized successfully
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker analyzer is ready
+[2025-09-01T18:27:50.944Z] [analyzer] [INFO] Queue processing started { interval: 1000 }
+[2025-09-01T18:27:50.944Z] [analyzer] [INFO] Transaction analyzer worker initialized successfully {}
+[analyzer] Worker initialized successfully
+[WM Init] SolanaManager instance set.
+[WM Init] Initializing WalletManager...
+[WM Init] Memory storage cleared - using database only mode.
+✅ Worker telegram is ready
+[WM Init] Successfully initialized in DATABASE-ONLY mode.
+[TELEGRAM_UI] TelegramUI initialized. 
+[TELEGRAM_UI] BOT_TOKEN: "Set"
+[TELEGRAM_UI] TelegramBot instance created: "Success"
+[2025-09-01T18:27:50.994Z] [telegram] [INFO] Telegram UI initialized successfully {}
+[telegram] Worker initialized successfully
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker websocket is ready
+[2025-09-01T18:27:51.014Z] [websocket] [INFO] WebSocket worker initialized successfully {}
+[websocket] Worker initialized successfully
+[WM Init] SolanaManager instance set.
+[WM Init] Initializing WalletManager...
+[WM Init] Memory storage cleared - using database only mode.
+[TELEGRAM_UI] Telegram Bot authorized for: @zaptradebot 
+✅ Worker executor is ready
+[WM Init] Successfully initialized in DATABASE-ONLY mode.
+[ApiManager] Initialized with Helius-native logic.
+CacheManager (Quantum Core) initialized.
+[TradeNotificationManager] Initialized in Direct Bot mode.
+TradingEngine initialized with HYBRID (Polling + API) logic and Quantum Cache.
+[2025-09-01T18:27:51.751Z] [executor] [INFO] Trade executor worker initialized successfully {}
+[executor] Worker initialized successfully
+✅ All required workers are ready
+✅ ThreadedZapBot initialization completed successfully
+🎯 Starting trader monitoring...
+✅ Trader monitoring started
+🎉 ThreadedZapBot started successfully with 7 workers
+✅ Threaded application started successfully
+🎉 ZapBot startup completed successfully!
+🏥 Health check server running on port 3001
+[2025-09-01T18:27:51.848Z] [monitor] [INFO] Trader added to monitoring {
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK',
+  userChatId: 6032767351
+}
+📨 Message from monitor: TRADER_ADDED_TO_MONITORING {
+  type: 'TRADER_ADDED_TO_MONITORING',
+  workerName: 'monitor',
+  timestamp: 1756751271849,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_ADDED_TO_MONITORING {
+  type: 'TRADER_ADDED_TO_MONITORING',
+  workerName: 'monitor',
+  timestamp: 1756751271850,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:27:51.849Z] [monitor] [INFO] Trader added to monitoring {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5',
+  userChatId: 6032767351
+}
+[2025-09-01T18:27:51.850Z] [monitor] [INFO] Periodic monitoring started { interval: 25000 }
+[2025-09-01T18:27:51.850Z] [monitor] [INFO] Trader monitoring started { traderCount: 2 }
+📨 Message from monitor: MONITORING_STARTED {
+  type: 'MONITORING_STARTED',
+  workerName: 'monitor',
+  timestamp: 1756751271897,
+  traderCount: 2
+}
+[2025-09-01T18:28:16.894Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751296895,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751296895,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:28:16.895Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751299794,
+  uptime: 29197,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751299794,
+  uptime: 29501,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751299794,
+  uptime: 29455,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751299795,
+  uptime: 29925,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751299795,
+  uptime: 29440,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751299795,
+  uptime: 29716,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751299795,
+  uptime: 29489,
+  messageCount: 1,
+  errorCount: 0
+}
+[2025-09-01T18:28:41.917Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751321918,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751321918,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:28:41.918Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751329802,
+  uptime: 59204,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751329802,
+  uptime: 59509,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751329802,
+  uptime: 59463,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751329802,
+  uptime: 59933,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751329802,
+  uptime: 59447,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751329802,
+  uptime: 59723,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751329802,
+  uptime: 59496,
+  messageCount: 2,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:29:06.930Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751346931,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751346931,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:29:06.931Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751359815,
+  uptime: 89218,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751359815,
+  uptime: 89522,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751359815,
+  uptime: 89476,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751359815,
+  uptime: 89946,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751359815,
+  uptime: 89460,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751359816,
+  uptime: 89737,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751359816,
+  uptime: 89510,
+  messageCount: 3,
+  errorCount: 0
+}
+[2025-09-01T18:29:31.945Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751371946,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751371946,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:29:31.946Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751389835,
+  uptime: 119238,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751389835,
+  uptime: 119542,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751389835,
+  uptime: 119496,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751389835,
+  uptime: 119966,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751389835,
+  uptime: 119480,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751389835,
+  uptime: 119756,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751389836,
+  uptime: 119530,
+  messageCount: 4,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:29:56.949Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751396949,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751396949,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:29:56.949Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751419858,
+  uptime: 149261,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751419858,
+  uptime: 149565,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751419858,
+  uptime: 149519,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751419858,
+  uptime: 149989,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751419858,
+  uptime: 149503,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751419858,
+  uptime: 149779,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751419858,
+  uptime: 149552,
+  messageCount: 5,
+  errorCount: 0
+}
+[2025-09-01T18:30:21.952Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751421953,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751421953,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:30:21.953Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:30:46.978Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751446979,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751446979,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:30:46.979Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751449862,
+  uptime: 179265,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751449862,
+  uptime: 179569,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751449862,
+  uptime: 179523,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751449863,
+  uptime: 179994,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751449863,
+  uptime: 179508,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751449863,
+  uptime: 179784,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751449863,
+  uptime: 179557,
+  messageCount: 6,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:31:11.981Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751471982,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751471982,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:31:11.982Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751479870,
+  uptime: 209273,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751479870,
+  uptime: 209577,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751479870,
+  uptime: 209531,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751479870,
+  uptime: 210001,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751479870,
+  uptime: 209515,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751479870,
+  uptime: 209791,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751479870,
+  uptime: 209564,
+  messageCount: 7,
+  errorCount: 0
+}
+[2025-09-01T18:31:36.987Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751496987,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751496988,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:31:36.988Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751509882,
+  uptime: 239285,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751509883,
+  uptime: 239590,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751509883,
+  uptime: 239544,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751509883,
+  uptime: 240014,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751509883,
+  uptime: 239528,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751509883,
+  uptime: 239804,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751509883,
+  uptime: 239577,
+  messageCount: 8,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:32:01.999Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751522000,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751522000,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:32:02.000Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751539901,
+  uptime: 269304,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751539901,
+  uptime: 269608,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751539902,
+  uptime: 269562,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751539902,
+  uptime: 270033,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751539902,
+  uptime: 269547,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751539902,
+  uptime: 269823,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751539902,
+  uptime: 269596,
+  messageCount: 9,
+  errorCount: 0
+}
+[2025-09-01T18:32:27.008Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751547009,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751547009,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:32:27.009Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751569918,
+  uptime: 299321,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751569918,
+  uptime: 299625,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751569918,
+  uptime: 299579,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751569918,
+  uptime: 300049,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751569918,
+  uptime: 299563,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751569919,
+  uptime: 299839,
+  messageCount: 10,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751569919,
+  uptime: 299613,
+  messageCount: 10,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:32:52.009Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751572009,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751572009,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:32:52.009Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:33:17.043Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751597044,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751597044,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:33:17.044Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751599922,
+  uptime: 329325,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751599922,
+  uptime: 329629,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751599922,
+  uptime: 329583,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751599922,
+  uptime: 330053,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751599922,
+  uptime: 329567,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751599922,
+  uptime: 329843,
+  messageCount: 11,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751599922,
+  uptime: 329616,
+  messageCount: 11,
+  errorCount: 0
+}
+[2025-09-01T18:33:42.070Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751622071,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751622071,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:33:42.071Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751629930,
+  uptime: 359333,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751629930,
+  uptime: 359637,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751629931,
+  uptime: 359591,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751629931,
+  uptime: 360061,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751629931,
+  uptime: 359576,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751629931,
+  uptime: 359852,
+  messageCount: 12,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751629931,
+  uptime: 359625,
+  messageCount: 12,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:34:07.085Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751647085,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751647085,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:34:07.085Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751659944,
+  uptime: 389346,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751659944,
+  uptime: 389651,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751659944,
+  uptime: 389605,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751659944,
+  uptime: 390075,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751659944,
+  uptime: 389589,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751659944,
+  uptime: 389865,
+  messageCount: 13,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751659944,
+  uptime: 389638,
+  messageCount: 13,
+  errorCount: 0
+}
+[2025-09-01T18:34:32.087Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751672087,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751672087,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:34:32.087Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751689963,
+  uptime: 419366,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751689963,
+  uptime: 419670,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751689963,
+  uptime: 419624,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751689963,
+  uptime: 420094,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751689963,
+  uptime: 419608,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751689964,
+  uptime: 419885,
+  messageCount: 14,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751689964,
+  uptime: 419658,
+  messageCount: 14,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:34:57.093Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751697094,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751697094,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:34:57.094Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751719987,
+  uptime: 449390,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751719987,
+  uptime: 449694,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751719987,
+  uptime: 449648,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751719987,
+  uptime: 450118,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751719987,
+  uptime: 449632,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751719987,
+  uptime: 449908,
+  messageCount: 15,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751719988,
+  uptime: 449682,
+  messageCount: 15,
+  errorCount: 0
+}
+[2025-09-01T18:35:22.097Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751722097,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751722097,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:35:22.097Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:35:47.122Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751747122,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751747122,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:35:47.122Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751749990,
+  uptime: 479393,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751749990,
+  uptime: 479697,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751749990,
+  uptime: 479651,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751749990,
+  uptime: 480121,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751749990,
+  uptime: 479635,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751749991,
+  uptime: 479912,
+  messageCount: 16,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751749991,
+  uptime: 479685,
+  messageCount: 16,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:36:12.157Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751772158,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751772158,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:36:12.158Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751779998,
+  uptime: 509401,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751779998,
+  uptime: 509705,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751779998,
+  uptime: 509659,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751779998,
+  uptime: 510129,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751779999,
+  uptime: 509644,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751779999,
+  uptime: 509920,
+  messageCount: 17,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751779999,
+  uptime: 509693,
+  messageCount: 17,
+  errorCount: 0
+}
+[2025-09-01T18:36:37.160Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751797161,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751797161,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:36:37.161Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751810011,
+  uptime: 539414,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751810011,
+  uptime: 539718,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751810011,
+  uptime: 539672,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751810011,
+  uptime: 540142,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751810011,
+  uptime: 539656,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751810011,
+  uptime: 539932,
+  messageCount: 18,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751810012,
+  uptime: 539706,
+  messageCount: 18,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:37:02.172Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751822172,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751822172,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:37:02.172Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751840030,
+  uptime: 569433,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751840030,
+  uptime: 569737,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751840030,
+  uptime: 569691,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751840030,
+  uptime: 570161,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751840030,
+  uptime: 569675,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751840030,
+  uptime: 569951,
+  messageCount: 19,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751840030,
+  uptime: 569724,
+  messageCount: 19,
+  errorCount: 0
+}
+[2025-09-01T18:37:27.180Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751847180,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751847180,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:37:27.180Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751870053,
+  uptime: 599456,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751870054,
+  uptime: 599761,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751870054,
+  uptime: 599715,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751870054,
+  uptime: 600185,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751870054,
+  uptime: 599699,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751870054,
+  uptime: 599975,
+  messageCount: 20,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751870054,
+  uptime: 599748,
+  messageCount: 20,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:37:52.183Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751872183,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751872183,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:37:52.183Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:38:17.209Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751897209,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751897209,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:38:17.209Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751900056,
+  uptime: 629459,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751900056,
+  uptime: 629763,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751900056,
+  uptime: 629717,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751900056,
+  uptime: 630187,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751900056,
+  uptime: 629701,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751900057,
+  uptime: 629978,
+  messageCount: 21,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751900057,
+  uptime: 629751,
+  messageCount: 21,
+  errorCount: 0
+}
+[2025-09-01T18:38:42.242Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751922243,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751922243,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:38:42.243Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751930064,
+  uptime: 659467,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751930064,
+  uptime: 659771,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751930064,
+  uptime: 659725,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751930064,
+  uptime: 660195,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751930064,
+  uptime: 659709,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751930064,
+  uptime: 659985,
+  messageCount: 22,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751930064,
+  uptime: 659758,
+  messageCount: 22,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:39:07.247Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751947247,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751947247,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:39:07.247Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751960069,
+  uptime: 689472,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751960069,
+  uptime: 689776,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751960069,
+  uptime: 689730,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751960069,
+  uptime: 690200,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751960070,
+  uptime: 689715,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751960070,
+  uptime: 689991,
+  messageCount: 23,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751960070,
+  uptime: 689764,
+  messageCount: 23,
+  errorCount: 0
+}
+[2025-09-01T18:39:32.259Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751972259,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751972259,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:39:32.259Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756751990086,
+  uptime: 719489,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756751990086,
+  uptime: 719793,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756751990086,
+  uptime: 719747,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756751990087,
+  uptime: 720218,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756751990087,
+  uptime: 719732,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756751990087,
+  uptime: 720008,
+  messageCount: 24,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756751990087,
+  uptime: 719781,
+  messageCount: 24,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+[2025-09-01T18:39:57.266Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751997266,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756751997266,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:39:57.266Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752020109,
+  uptime: 749512,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752020110,
+  uptime: 749817,
+  messageCount: 26,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752020110,
+  uptime: 749771,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752020110,
+  uptime: 750241,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752020110,
+  uptime: 749755,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752020110,
+  uptime: 750031,
+  messageCount: 25,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752020110,
+  uptime: 749804,
+  messageCount: 25,
+  errorCount: 0
+}
+[2025-09-01T18:40:22.270Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752022270,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752022270,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:40:22.270Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:40:47.307Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752047308,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752047308,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:40:47.308Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752050111,
+  uptime: 779514,
+  messageCount: 26,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752050111,
+  uptime: 779818,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752050111,
+  uptime: 779772,
+  messageCount: 26,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752050111,
+  uptime: 780242,
+  messageCount: 26,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752050111,
+  uptime: 779756,
+  messageCount: 26,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752050111,
+  uptime: 780032,
+  messageCount: 26,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752050111,
+  uptime: 779805,
+  messageCount: 26,
+  errorCount: 0
+}
+[2025-09-01T18:41:12.331Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752072331,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752072331,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:41:12.331Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752080120,
+  uptime: 809523,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752080120,
+  uptime: 809827,
+  messageCount: 28,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752080120,
+  uptime: 809781,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752080120,
+  uptime: 810251,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752080121,
+  uptime: 809766,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752080121,
+  uptime: 810042,
+  messageCount: 27,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752080121,
+  uptime: 809815,
+  messageCount: 27,
+  errorCount: 0
+}
+[2025-09-01T18:41:37.347Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752097347,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752097347,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:41:37.347Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752110133,
+  uptime: 839536,
+  messageCount: 28,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752110133,
+  uptime: 839840,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752110133,
+  uptime: 839794,
+  messageCount: 28,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752110133,
+  uptime: 840264,
+  messageCount: 28,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752110133,
+  uptime: 839778,
+  messageCount: 28,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752110133,
+  uptime: 840054,
+  messageCount: 28,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752110134,
+  uptime: 839828,
+  messageCount: 28,
+  errorCount: 0
+}
+[2025-09-01T18:42:02.359Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752122359,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752122359,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:42:02.359Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752140150,
+  uptime: 869553,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752140150,
+  uptime: 869857,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752140150,
+  uptime: 869811,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752140150,
+  uptime: 870281,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752140150,
+  uptime: 869795,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752140151,
+  uptime: 870072,
+  messageCount: 29,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752140151,
+  uptime: 869845,
+  messageCount: 29,
+  errorCount: 0
+}
+[2025-09-01T18:42:27.366Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752147366,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752147367,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:42:27.367Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752170165,
+  uptime: 899568,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752170165,
+  uptime: 899872,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752170165,
+  uptime: 899826,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752170165,
+  uptime: 900296,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752170166,
+  uptime: 899811,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752170166,
+  uptime: 900087,
+  messageCount: 30,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752170166,
+  uptime: 899860,
+  messageCount: 30,
+  errorCount: 0
+}
+[2025-09-01T18:42:52.355Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752172355,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752172355,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:42:52.355Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:43:17.382Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752197382,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752197382,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:43:17.382Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752200169,
+  uptime: 929572,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752200169,
+  uptime: 929876,
+  messageCount: 32,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752200169,
+  uptime: 929830,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752200169,
+  uptime: 930300,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752200170,
+  uptime: 929815,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752200170,
+  uptime: 930091,
+  messageCount: 31,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752200170,
+  uptime: 929864,
+  messageCount: 31,
+  errorCount: 0
+}
+[2025-09-01T18:43:42.419Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752222419,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752222419,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:43:42.419Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752230178,
+  uptime: 959581,
+  messageCount: 32,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752230178,
+  uptime: 959885,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752230178,
+  uptime: 959839,
+  messageCount: 32,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752230178,
+  uptime: 960309,
+  messageCount: 32,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752230178,
+  uptime: 959823,
+  messageCount: 32,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752230178,
+  uptime: 960099,
+  messageCount: 32,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752230178,
+  uptime: 959872,
+  messageCount: 32,
+  errorCount: 0
+}
+[2025-09-01T18:44:07.413Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752247413,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752247413,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:44:07.413Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752260190,
+  uptime: 989593,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752260190,
+  uptime: 989897,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752260190,
+  uptime: 989851,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752260190,
+  uptime: 990321,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752260190,
+  uptime: 989835,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752260190,
+  uptime: 990111,
+  messageCount: 33,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752260190,
+  uptime: 989884,
+  messageCount: 33,
+  errorCount: 0
+}
+[2025-09-01T18:44:32.425Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752272425,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752272425,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:44:32.425Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752290194,
+  uptime: 1019597,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752290194,
+  uptime: 1019901,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752290194,
+  uptime: 1019855,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752290194,
+  uptime: 1020325,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752290194,
+  uptime: 1019839,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752290194,
+  uptime: 1020115,
+  messageCount: 34,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752290194,
+  uptime: 1019888,
+  messageCount: 34,
+  errorCount: 0
+}
+[2025-09-01T18:44:57.446Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752297447,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752297447,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:44:57.447Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752320216,
+  uptime: 1049619,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752320217,
+  uptime: 1049924,
+  messageCount: 36,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752320217,
+  uptime: 1049878,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752320217,
+  uptime: 1050348,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752320217,
+  uptime: 1049862,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752320217,
+  uptime: 1050138,
+  messageCount: 35,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752320217,
+  uptime: 1049911,
+  messageCount: 35,
+  errorCount: 0
+}
+[2025-09-01T18:45:22.447Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752322448,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752322448,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:45:22.448Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:45:47.473Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752347474,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752347474,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:45:47.474Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752350220,
+  uptime: 1079623,
+  messageCount: 36,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752350220,
+  uptime: 1079927,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752350220,
+  uptime: 1079881,
+  messageCount: 36,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752350220,
+  uptime: 1080351,
+  messageCount: 36,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752350220,
+  uptime: 1079865,
+  messageCount: 36,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752350221,
+  uptime: 1080142,
+  messageCount: 36,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752350220,
+  uptime: 1079914,
+  messageCount: 36,
+  errorCount: 0
+}
+[2025-09-01T18:46:12.485Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752372485,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752372485,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:46:12.485Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752380225,
+  uptime: 1109628,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752380225,
+  uptime: 1109932,
+  messageCount: 38,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752380225,
+  uptime: 1109886,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752380225,
+  uptime: 1110356,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752380225,
+  uptime: 1109870,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752380225,
+  uptime: 1110146,
+  messageCount: 37,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752380225,
+  uptime: 1109919,
+  messageCount: 37,
+  errorCount: 0
+}
+[2025-09-01T18:46:37.512Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752397513,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752397513,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:46:37.513Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752410237,
+  uptime: 1139640,
+  messageCount: 38,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752410237,
+  uptime: 1139944,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752410237,
+  uptime: 1139898,
+  messageCount: 38,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752410237,
+  uptime: 1140368,
+  messageCount: 38,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752410237,
+  uptime: 1139882,
+  messageCount: 38,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752410237,
+  uptime: 1140158,
+  messageCount: 38,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752410237,
+  uptime: 1139931,
+  messageCount: 38,
+  errorCount: 0
+}
+[2025-09-01T18:47:02.528Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752422528,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752422528,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:47:02.528Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752440255,
+  uptime: 1169658,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752440255,
+  uptime: 1169962,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752440255,
+  uptime: 1169916,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752440255,
+  uptime: 1170386,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752440255,
+  uptime: 1169900,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752440255,
+  uptime: 1170176,
+  messageCount: 39,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752440255,
+  uptime: 1169949,
+  messageCount: 39,
+  errorCount: 0
+}
+[2025-09-01T18:47:27.533Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752447533,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752447533,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:47:27.533Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752470268,
+  uptime: 1199671,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752470268,
+  uptime: 1199975,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752470268,
+  uptime: 1199929,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752470268,
+  uptime: 1200399,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752470268,
+  uptime: 1199913,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752470268,
+  uptime: 1200189,
+  messageCount: 40,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752470268,
+  uptime: 1199962,
+  messageCount: 40,
+  errorCount: 0
+}
+[2025-09-01T18:47:52.540Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752472540,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752472540,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:47:52.540Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:48:17.546Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752497546,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752497546,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:48:17.546Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752500272,
+  uptime: 1229675,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752500273,
+  uptime: 1229980,
+  messageCount: 42,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752500273,
+  uptime: 1229934,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752500273,
+  uptime: 1230404,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752500273,
+  uptime: 1229918,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752500273,
+  uptime: 1230194,
+  messageCount: 41,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752500274,
+  uptime: 1229968,
+  messageCount: 41,
+  errorCount: 0
+}
+[2025-09-01T18:48:42.583Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752522584,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752522584,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:48:42.584Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752530280,
+  uptime: 1259683,
+  messageCount: 42,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752530280,
+  uptime: 1259987,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752530280,
+  uptime: 1259941,
+  messageCount: 42,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752530280,
+  uptime: 1260411,
+  messageCount: 42,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752530280,
+  uptime: 1259925,
+  messageCount: 42,
+  errorCount: 0
+}
+[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: 0
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752530280,
+  uptime: 1260201,
+  messageCount: 42,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752530280,
+  uptime: 1259974,
+  messageCount: 42,
+  errorCount: 0
+}
+[2025-09-01T18:49:07.604Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752547604,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752547604,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:49:07.604Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+💓 Health check: healthy { workers: 7, ready: 7 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756752560293,
+  uptime: 1289696,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756752560293,
+  uptime: 1290000,
+  messageCount: 44,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756752560294,
+  uptime: 1289955,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756752560294,
+  uptime: 1290425,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756752560294,
+  uptime: 1289939,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from cache: PONG {
+  type: 'PONG',
+  workerName: 'cache',
+  timestamp: 1756752560294,
+  uptime: 1290215,
+  messageCount: 43,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756752560294,
+  uptime: 1289988,
+  messageCount: 43,
+  errorCount: 0
+}
+[2025-09-01T18:49:32.602Z] [monitor] [DEBUG] Monitoring trader { name: 'cup', wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK' }
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752572602,
+  name: 'cup',
+  wallet: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'
+}
+📨 Message from monitor: TRADER_MONITORED {
+  type: 'TRADER_MONITORED',
+  workerName: 'monitor',
+  timestamp: 1756752572602,
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+[2025-09-01T18:49:32.602Z] [monitor] [DEBUG] Monitoring trader {
+  name: 'otta',
+  wallet: 'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5'
+}
+
+📡 Received SIGHUP, initiating graceful shutdown...
+🛑 Starting graceful shutdown...
+🔌 Closing health check server...
+✅ Health check server closed
+🔴 Closing Redis connection...
+[Redis] Shutting down Redis manager...
+[Redis] Redis manager shutdown complete
+✅ Redis connection closed
+📊 Closing database connection...
+[DB] Shutting down database manager...
+[DB] Database manager shutdown complete
+✅ Database connection closed
+✅ Graceful shutdown completed
+🚪 Forcing process exit...

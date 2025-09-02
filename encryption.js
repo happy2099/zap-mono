@@ -42,37 +42,42 @@ async function encrypt(data) {
     
     const authTag = cipher.getAuthTag();
     
-    return {
-        encrypted,
-        iv: iv.toString('hex'),
-        salt: salt.toString('hex'),
-        authTag: authTag.toString('hex')
-    };
+    // We join all parts into a single string for easier database storage.
+    return `${salt.toString('hex')}:${iv.toString('hex')}:${authTag.toString('hex')}:${encrypted}`;
 }
 
 async function decrypt(encryptedData) {
-    const { encrypted, iv, salt, authTag } = encryptedData;
-    
-    const key = crypto.pbkdf2Sync(
-        WALLET_ENCRYPTION_KEY,
-        Buffer.from(salt, 'hex'),
-        100000,
-        32,
-        'sha256'
-    );
-    
-    const decipher = crypto.createDecipheriv(
-        ALGORITHM,
-        key,
-        Buffer.from(iv, 'hex')
-    );
-    
-    decipher.setAuthTag(Buffer.from(authTag, 'hex'));
-    
-    let decrypted = decipher.update(encrypted, 'hex', 'utf8');
-    decrypted += decipher.final('utf8');
-    
-    return decrypted;
+    try {
+        // This is the V1 logic for handling string-based keys from the old data.
+        if (typeof encryptedData === 'string' && !encryptedData.includes(':')) {
+            const decipher = crypto.createDecipheriv(ALGORITHM, WALLET_ENCRYPTION_KEY, Buffer.alloc(16, 0)); // Old IV
+            let decrypted = decipher.update(encryptedData, 'hex', 'utf8');
+            decrypted += decipher.final('utf8');
+            return decrypted;
+        }
+
+        // This is the V2 logic for handling the new, more secure format.
+        const parts = encryptedData.split(':');
+        if (parts.length !== 4) throw new Error("Invalid encrypted data format.");
+        
+        const [saltHex, ivHex, authTagHex, encryptedHex] = parts;
+        const salt = Buffer.from(saltHex, 'hex');
+        const iv = Buffer.from(ivHex, 'hex');
+        const authTag = Buffer.from(authTagHex, 'hex');
+        const encrypted = encryptedHex;
+
+        const key = crypto.pbkdf2Sync(WALLET_ENCRYPTION_KEY, salt, 100000, 32, 'sha256');
+        const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
+        decipher.setAuthTag(authTag);
+        
+        let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+        decrypted += decipher.final('utf8');
+        
+        return decrypted;
+    } catch (error) {
+        console.error("Decryption failed. This can happen with old wallet formats or a wrong key.", error.message);
+        throw new Error("Failed to decrypt wallet. Check your WALLET_ENCRYPTION_KEY.");
+    }
 }
 
 module.exports = {

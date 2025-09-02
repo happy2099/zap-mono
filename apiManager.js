@@ -5,130 +5,120 @@
 // Description: Central manager for all external API interactions (Shyft, Raydium, etc.).
 
 const axios = require('axios');
-const config = require('./patches/config.js'); // CommonJS import for internal module
+const config = require('./config.js'); // CommonJS import for internal module
 const { shortenAddress, logPerformance } = require('./utils.js'); // Added logPerformance
 const { createJupiterApiClient } = require('@jup-ag/api');
-// const jupiterConnection = new Connection("OUR_DEDICATED_JUPITER_RPC_URL");
-const { Client, Datastream } = require('@solana-tracker/data-api'); // Optional dependency
+const { PublicKey } = require('@solana/web3.js');
+const { getMint } = require('@solana/spl-token');
 
 
 class ApiManager {
   constructor(solanaManager) {
-    this.subscribedTraders = new Set();
-    this.solanaManager = solanaManager; 
+    this.solanaManager = solanaManager;
 
-
-    // Raydium API Client (unchanged)
+    // Raydium API Client (unchanged, used for rare fallbacks)
     this.raydiumClient = axios.create({
       baseURL: 'https://api.raydium.io/v2',
       timeout: 10000,
     });
-
-    // Solana Tracker API Client (The NEW SYSTEM) - Optional
-    this.solanaTrackerApi = null;
-    if (config.SOLANA_TRACKER_API_KEY && !config.SOLANA_TRACKER_API_KEY.startsWith('YOUR_KEY_HERE')) {
-      console.log('[APIMANAGER] Solana Tracker API key found, but Client not available');
-    }
-
-    // We will initialize the DataStream (WebSocket) later, when we need it.
-    this.solanaTrackerStream = null;
-
+    
+    console.log("[ApiManager] Initialized with Helius-native logic.");
   }
 
 
 
- startUniversalDataStream(tradingEngine) {
-    // Mission-critical check: Do we have the credentials for this weapon?
-    if (!config.SOLANA_TRACKER_API_KEY || config.SOLANA_TRACKER_API_KEY.startsWith('YOUR_KEY_HERE')) {
-      console.warn('[DATASTREAM] ⚠️ SKIPPING: WebSocket Sniper is a premium feature. No valid Solana Tracker API key found in .env');
-      return;
-    }
+//  startUniversalDataStream(tradingEngine) {
+//     // Mission-critical check: Do we have the credentials for this weapon?
+//     if (!config.HELIUS_API_KEY || config.HELIUS_API_KEY.startsWith('b9a69ad0-d823-429e-8c18-7cbea0e31769')) {
+//       console.warn('[DATASTREAM] ⚠️ SKIPPING: WebSocket Sniper is a premium feature. No valid Solana Tracker API key found in .env');
+//       return;
+//     }
 
-    console.log('[DATASTREAM] Initializing Universal New Pool Sniper...');
+//     console.log('[DATASTREAM] Initializing Universal New Pool Sniper...');
 
-    // 1. Initialize the Datastream client if it doesn't exist
-     if (!this.solanaTrackerStream) {
-      // The intel confirms we must get the AUTHENTICATED URL from the dashboard. 
-      // This is a placeholder for the real URL you will get with a paid plan.
-      // For now, it likely won't connect, but the code is now CORRECT and ready.
-      const PREMIUM_WEBSOCKET_URL = `wss://datastream.solanatracker.io/sdk?apiKey=${config.SOLANA_TRACKER_API_KEY}`;
+//     // 1. Initialize the Datastream client if it doesn't exist
+//      if (!this.solanaTrackerStream) {
+//       // The intel confirms we must get the AUTHENTICATED URL from the dashboard. 
+//       // This is a placeholder for the real URL you will get with a paid plan.
+//       // For now, it likely won't connect, but the code is now CORRECT and ready.
+//       const PREMIUM_WEBSOCKET_URL = `wss://datastream.solanatracker.io/sdk?apiKey=${config.HELIUS_API_KEY}`;
       
-      this.solanaTrackerStream = new Datastream({
-        wsUrl: PREMIUM_WEBSOCKET_URL,
-        autoReconnect: true
-      });
+//       this.solanaTrackerStream = new Datastream({
+//         wsUrl: PREMIUM_WEBSOCKET_URL,
+//         autoReconnect: true
+//       });
 
-      // 2. Set up event listeners for the connection itself
-      this.solanaTrackerStream.on('connected', () => console.log('[DATASTREAM] ✅ Sniper is online. Connected to Solana Tracker.'));
-      this.solanaTrackerStream.on('disconnected', () => console.warn('[DATASTREAM] ⚠️ Sniper is offline. Disconnected.'));
-      this.solanaTrackerStream.on('error', (error) => console.error('[DATASTREAM] ❌ CRITICAL ERROR:', error));
+//       // 2. Set up event listeners for the connection itself
+//       this.solanaTrackerStream.on('connected', () => console.log('[DATASTREAM] ✅ Sniper is online. Connected to Solana Tracker.'));
+//       this.solanaTrackerStream.on('disconnected', () => console.warn('[DATASTREAM] ⚠️ Sniper is offline. Disconnected.'));
+//       this.solanaTrackerStream.on('error', (error) => console.error('[DATASTREAM] ❌ CRITICAL ERROR:', error));
 
-      // 3. Connect to the WebSocket
-      this.solanaTrackerStream.connect();
-    }
+//       // 3. Connect to the WebSocket
+//       this.solanaTrackerStream.connect();
+//     }
 
-    // 4. THIS IS THE FIREHOSE. Subscribe to ALL new tokens and pools.
-    const subscription = this.solanaTrackerStream.subscribe.latest();
-    subscription.on((data) => {
-        // ... ALL of the switch-case logic we wrote before stays here ...
-        if (!data || !data.pools || data.pools.length === 0) return;
-        const primaryPool = data.pools[0];
-        const token = data.token;
-        console.log(`[DATASTREAM] 🔥 NEW POOL DETECTED! Symbol: ${token.symbol}, Market: ${primaryPool.market}`);
+//     // 4. THIS IS THE FIREHOSE. Subscribe to ALL new tokens and pools.
+//     const subscription = this.solanaTrackerStream.subscribe.latest();
+//     subscription.on((data) => {
+//         // ... ALL of the switch-case logic we wrote before stays here ...
+//         if (!data || !data.pools || data.pools.length === 0) return;
+//         const primaryPool = data.pools[0];
+//         const token = data.token;
+//         console.log(`[DATASTREAM] 🔥 NEW POOL DETECTED! Symbol: ${token.symbol}, Market: ${primaryPool.market}`);
 
-      // 6. This is the dispatcher. We look at the 'market' and route to the correct tradingEngine function.
-      switch (primaryPool.market) {
+//       // 6. This is the dispatcher. We look at the 'market' and route to the correct tradingEngine function.
+//       switch (primaryPool.market) {
 
-        case 'pumpfun':
-          // We need to transform their data into the format our tradingEngine expects
-          const pumpData = {
-            Transaction: { Signature: primaryPool.bundleId || `pump_${token.mint}` },
-            Instruction: {
-              Accounts: [{ Address: token.mint }]
-              // Note: We're simulating the structure. All we need is the mint address.
-            }
-          };
-          tradingEngine.processPumpFunCreation(pumpData);
-          break;
+//         case 'pumpfun':
+//           // We need to transform their data into the format our tradingEngine expects
+//           // const pumpData = {
+//           //   Transaction: { Signature: primaryPool.bundleId || `pump_${token.mint}` },
+//           //   Instruction: {
+//           //     Accounts: [{ Address: token.mint }]
+//           //     // Note: We're simulating the structure. All we need is the mint address.
+//           //   }
+//           // };
+//           // tradingEngine.processPumpFunCreation(pumpData);
+//           break;
 
-        case 'raydium-launchpad':
-          // Their Launchpad data is rich. We can pass it all.
-          const launchpadData = {
-            Transaction: { Signature: `launchpad_${primaryPool.poolId}` }, // Create a synthetic signature
-            parsedPoolData: { // Our tradingEngine looks for this specific object
-              poolId: primaryPool.poolId,
-              baseMint: primaryPool.tokenAddress,
-              configId: primaryPool.launchpad?.configId // We'll need to confirm this field exists, but it's a safe bet
-            },
-            // Pass metadata directly
-            Instruction: { Program: { Arguments: [{ Name: "base_mint_param", Value: { json: primaryPool.tokenAddress } }, { Name: "metadata", Value: { json: { symbol: token.symbol, name: token.name } } }] } }
-          };
-          tradingEngine.processLivePoolCreation(launchpadData);
-          break;
+//         case 'raydium-launchpad':
+//           // Their Launchpad data is rich. We can pass it all.
+//           // const launchpadData = {
+//           //   Transaction: { Signature: `launchpad_${primaryPool.poolId}` }, // Create a synthetic signature
+//           //   parsedPoolData: { // Our tradingEngine looks for this specific object
+//           //     poolId: primaryPool.poolId,
+//           //     baseMint: primaryPool.tokenAddress,
+//           //     configId: primaryPool.launchpad?.configId // We'll need to confirm this field exists, but it's a safe bet
+//           //   },
+//           //   // Pass metadata directly
+//           //   Instruction: { Program: { Arguments: [{ Name: "base_mint_param", Value: { json: primaryPool.tokenAddress } }, { Name: "metadata", Value: { json: { symbol: token.symbol, name: token.name } } }] } }
+//           // };
+//           // tradingEngine.processLivePoolCreation(launchpadData);
+//           break;
 
-        case 'meteora-dlmm':
-          const dlmmData = {
-            Transaction: { Signature: `dlmm_${primaryPool.poolId}` },
-            Instruction: { Accounts: [{ Address: primaryPool.poolId }, { Address: token.mint }, { Address: config.NATIVE_SOL_MINT }] }
-          };
-          tradingEngine.processMeteoraDlmmPoolCreation(dlmmData);
-          break;
+//         case 'meteora-dlmm':
+//           // const dlmmData = {
+//           //   Transaction: { Signature: `dlmm_${primaryPool.poolId}` },
+//           //   Instruction: { Accounts: [{ Address: primaryPool.poolId }, { Address: token.mint }, { Address: config.NATIVE_SOL_MINT }] }
+//           // };
+//           // tradingEngine.processMeteoraDlmmPoolCreation(dlmmData);
+//           break;
 
-        case 'meteora-dbc':
-          const dbcData = {
-            Transaction: { Signature: `dbc_${primaryPool.poolId}` },
-            Instruction: { Accounts: [{ Address: primaryPool.poolId }, {}, { Address: config.NATIVE_SOL_MINT }, { Address: token.mint }] } // Simulating the account structure
-          };
-          tradingEngine.processMeteoraDbcPoolCreation(dbcData);
-          break;
+//         case 'meteora-dbc':
+//           // const dbcData = {
+//           //   Transaction: { Signature: `dbc_${primaryPool.poolId}` },
+//           //   Instruction: { Accounts: [{ Address: primaryPool.poolId }, {}, { Address: config.NATIVE_SOL_MINT }, { Address: token.mint }] } // Simulating the account structure
+//           // };
+//           // tradingEngine.processMeteoraDbcPoolCreation(dbcData);
+//           break;
 
-        // You can add more cases here for 'bonk','moonshot' etc. as you implement those strategies
-        default:
-          console.log(`[DATASTREAM] Received pool on unhandled market: ${primaryPool.market}`);
-          break;
-      }
-    });
-  }
+//         // You can add more cases here for 'bonk','moonshot' etc. as you implement those strategies
+//         default:
+//           console.log(`[DATASTREAM] Received pool on unhandled market: ${primaryPool.market}`);
+//           break;
+//       }
+//     });
+//   }
 
 async startTraderMonitoringStream(tradingEngine) {
     if (!this.solanaTrackerStream) {
@@ -174,102 +164,102 @@ async startTraderMonitoringStream(tradingEngine) {
 }
 
 
-  async fetchLatestUniversalPools(page = 1) { // THE FIX: Parameter is 'page', not 'limit'.
-    console.log(`[API_UNIVERSAL_SCAN] Fetching latest tokens from all markets (page ${page}) via SDK...`);
+  // async fetchLatestUniversalPools(page = 1) { // THE FIX: Parameter is 'page', not 'limit'.
+  //   console.log(`[API_UNIVERSAL_SCAN] Fetching latest tokens from all markets (page ${page}) via SDK...`);
 
-    try {
-      // Step 1: Call the single, powerful function that gets EVERYTHING.
-      const tokens = await this.solanaTrackerApi.getLatestTokens(page);
+  //   try {
+  //     // Step 1: Call the single, powerful function that gets EVERYTHING.
+  //     const tokens = await this.solanaTrackerApi.getLatestTokens(page);
 
-   if (!tokens || tokens.length === 0) return [];
-      const processedPools = [];
-      for (const tokenData of tokens) {
-        if (!tokenData.pools || tokenData.pools.length === 0) continue;
-        const mainPool = tokenData.pools[0];
+  //  if (!tokens || tokens.length === 0) return [];
+  //     const processedPools = [];
+  //     for (const tokenData of tokens) {
+  //       if (!tokenData.pools || tokenData.pools.length === 0) continue;
+  //       const mainPool = tokenData.pools[0];
 
-        // This is our new dispatcher, right inside the fetcher.
-        // It standardizes the data regardless of the source DEX.
-        switch (mainPool.market) {
+  //       // This is our new dispatcher, right inside the fetcher.
+  //       // It standardizes the data regardless of the source DEX.
+  //       switch (mainPool.market) {
 
-          case 'pumpfun':
-            processedPools.push({
-              platform: 'Pump.fun',
-              market: 'pumpfun_bc', // A unique key for our switch case later
-              mint: tokenData.mint,
-              name: tokenData.name,
-              symbol: tokenData.symbol,
-              creator: tokenData.creator,
-              timestamp: new Date(tokenData.created_timestamp).getTime(),
-            });
-            break;
+  //         case 'pumpfun':
+  //           processedPools.push({
+  //             platform: 'Pump.fun',
+  //             market: 'pumpfun_bc', // A unique key for our switch case later
+  //             mint: tokenData.mint,
+  //             name: tokenData.name,
+  //             symbol: tokenData.symbol,
+  //             creator: tokenData.creator,
+  //             timestamp: new Date(tokenData.created_timestamp).getTime(),
+  //           });
+  //           break;
 
-          // NOTE: Pump.fun AMM pools are likely not in the "latest tokens" feed
-          // as they are a secondary market. Our real-time sniper is the best tool for this migration.
+  //         // NOTE: Pump.fun AMM pools are likely not in the "latest tokens" feed
+  //         // as they are a secondary market. Our real-time sniper is the best tool for this migration.
 
-          case 'raydium-launchpad':
-            processedPools.push({
-              platform: 'Raydium Launchpad',
-              market: 'raydium_launchpad',
-              poolId: mainPool.poolId,
-              base_mint: mainPool.tokenAddress,
-            });
-            break;
+  //         case 'raydium-launchpad':
+  //           processedPools.push({
+  //             platform: 'Raydium Launchpad',
+  //             market: 'raydium_launchpad',
+  //             poolId: mainPool.poolId,
+  //             base_mint: mainPool.tokenAddress,
+  //           });
+  //           break;
 
-          case 'raydium-amm':
-            processedPools.push({
-              platform: 'Raydium AMM',
-              market: 'raydium_amm',
-              poolId: mainPool.poolId,
-              baseMint: mainPool.tokenAddress,
-              quoteMint: mainPool.quoteToken,
-            });
-            break;
+  //         case 'raydium-amm':
+  //           processedPools.push({
+  //             platform: 'Raydium AMM',
+  //             market: 'raydium_amm',
+  //             poolId: mainPool.poolId,
+  //             baseMint: mainPool.tokenAddress,
+  //             quoteMint: mainPool.quoteToken,
+  //           });
+  //           break;
 
-          case 'raydium-clmm':
-            processedPools.push({
-              platform: 'Raydium CLMM',
-              market: 'raydium_clmm',
-              poolId: mainPool.poolId,
-              baseMint: mainPool.tokenAddress,
-              quoteMint: mainPool.quoteToken,
-            });
-            break;
+  //         case 'raydium-clmm':
+  //           processedPools.push({
+  //             platform: 'Raydium CLMM',
+  //             market: 'raydium_clmm',
+  //             poolId: mainPool.poolId,
+  //             baseMint: mainPool.tokenAddress,
+  //             quoteMint: mainPool.quoteToken,
+  //           });
+  //           break;
 
-          case 'meteora-dlmm':
-            processedPools.push({
-              platform: 'Meteora DLMM',
-              market: 'meteora_dlmm',
-              poolId: mainPool.poolId,
-              baseMint: mainPool.tokenAddress,
-              quoteMint: mainPool.quoteToken,
-            });
-            break;
+  //         case 'meteora-dlmm':
+  //           processedPools.push({
+  //             platform: 'Meteora DLMM',
+  //             market: 'meteora_dlmm',
+  //             poolId: mainPool.poolId,
+  //             baseMint: mainPool.tokenAddress,
+  //             quoteMint: mainPool.quoteToken,
+  //           });
+  //           break;
 
-          case 'meteora-dbc':
-            processedPools.push({
-              platform: 'Meteora DBC',
-              market: 'meteora_dbc',
-              poolId: mainPool.poolId,
-              baseMint: mainPool.tokenAddress,
-              quoteMint: mainPool.quoteToken,
-            });
-            break;
+  //         case 'meteora-dbc':
+  //           processedPools.push({
+  //             platform: 'Meteora DBC',
+  //             market: 'meteora_dbc',
+  //             poolId: mainPool.poolId,
+  //             baseMint: mainPool.tokenAddress,
+  //             quoteMint: mainPool.quoteToken,
+  //           });
+  //           break;
 
-          default:
-            // This is useful for discovering new markets they support.
-            // console.log(`[API_UNIVERSAL_SCAN] Info: Found token on unhandled market: '${mainPool.market}'`);
-            break;
-        }
-      }
+  //         default:
+  //           // This is useful for discovering new markets they support.
+  //           // console.log(`[API_UNIVERSAL_SCAN] Info: Found token on unhandled market: '${mainPool.market}'`);
+  //           break;
+  //       }
+  //     }
 
-      console.log(`[API_UNIVERSAL_SCAN] ✅ Processed ${processedPools.length} new pools from the universal feed.`);
-      return processedPools;
+  //     console.log(`[API_UNIVERSAL_SCAN] ✅ Processed ${processedPools.length} new pools from the universal feed.`);
+  //     return processedPools;
 
-    } catch (error) {
-      console.error(`[API_UNIVERSAL_SCAN] ❌ Error fetching from Solana Tracker SDK:`, error.message);
-      return [];
-    }
-  }
+  //   } catch (error) {
+  //     console.error(`[API_UNIVERSAL_SCAN] ❌ Error fetching from Solana Tracker SDK:`, error.message);
+  //     return [];
+  //   }
+  // }
 
    async getSwapTransactionFromJupiter({ inputMint, outputMint, amount, userWallet, slippageBps }) {
     console.log(`[Jupiter] Getting swap quote: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
@@ -355,32 +345,50 @@ async startTraderMonitoringStream(tradingEngine) {
 
 
 async findAmmPoolForToken(tokenMint) {
-    if (!tokenMint) return null;
-    if (!this.solanaTrackerApi) {
-        console.error('[API-PIVOT] Solana Tracker API client is not initialized.');
-        return null;
+    if (!tokenMint || !config.HELIUS_API_KEY) {
+      console.warn('[API-PIVOT] Skipping migration check: Missing tokenMint or Helius API key.');
+      return null;
     }
 
+    // This is the Helius "Parsed Transaction History" API endpoint. It's incredibly powerful.
+    const url = `${config.RPC_URL.replace('?api-key=', '')}/v0/addresses/${tokenMint}/transactions?api-key=${config.HELIUS_API_KEY}`;
+    
     try {
-        console.log(`[API-PIVOT] Checking migration status for ${shortenAddress(tokenMint)} via SolanaTracker SDK...`);
-        // This is the real API call.
-        const tokenInfo = await this.solanaTrackerApi.getTokenInfo(tokenMint);
-        
-        // Find the first pool that is NOT a pump.fun pool, which indicates a migration has happened.
-        const migratedPool = tokenInfo?.pools?.find(p => p.market && p.market.toLowerCase() !== 'pumpfun' && p.market.toLowerCase() !== 'unknown');
+      console.log(`[API-PIVOT] Checking migration status for ${shortenAddress(tokenMint)} via Helius...`);
 
-        if (migratedPool) {
-            console.log(`[API-PIVOT] ✅ MIGRATION CONFIRMED. Found pool on market: ${migratedPool.market}`);
-            return migratedPool; // Return the full pool object provided by the SDK.
-        }
-        
-        console.log(`[API-PIVOT] ❌ No migrated pool found. Token likely still on bonding curve.`);
+      const response = await axios.get(url, { params: { 'type': 'TOKEN_SWAP' } });
+      const transactions = response.data;
+
+      if (!transactions || transactions.length === 0) {
+        console.log(`[API-PIVOT] ❌ No swap history found on Helius. Token likely still on bonding curve.`);
         return null;
+      }
+      
+      // Find the *first* swap transaction that is NOT on Pump.fun. This confirms migration.
+      for (const tx of transactions) {
+        if (tx.source && tx.source !== 'PUMP_FUN') {
+            const platform = tx.source.replace(/_/g, ' '); // e.g., RAYDIUM_V4 -> Raydium V4
+            
+            // Extract the liquidity pool address from the transaction accounts.
+            // This is a common pattern for Raydium pools.
+            const ammAccount = tx.events?.swap?.amm;
+
+            if (ammAccount) {
+                 console.log(`[API-PIVOT] ✅ MIGRATION CONFIRMED. Found swap on platform: ${platform}. Pool: ${shortenAddress(ammAccount)}`);
+                 return {
+                    market: platform, // 'RAYDIUM V4', 'RAYDIUM CLMM', etc.
+                    poolId: ammAccount
+                 };
+            }
+        }
+      }
+
+      console.log(`[API-PIVOT] ❌ Only Pump.fun swaps found. Token likely not migrated yet.`);
+      return null;
 
     } catch (error) {
-        // If the API call fails (e.g., token not found, or API error), it hasn't migrated.
-        console.warn(`[API-PIVOT] Error or non-migration for ${shortenAddress(tokenMint)}:`, error.message);
-        return null;
+      console.warn(`[API-PIVOT] Error checking Helius for migration of ${shortenAddress(tokenMint)}:`, error.message);
+      return null;
     }
 }
 

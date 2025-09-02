@@ -19,24 +19,24 @@ const traceLogger = require('./traceLogger.js');
 
 // --- PROTOCOL SDKs ---
 const { PumpSdk } = require('@pump-fun/pump-sdk');
-// const RaydiumV2_raw = require('@raydium-io/raydium-sdk');
-// const RaydiumV2 = RaydiumV2_raw.default || RaydiumV2_raw;
+const RaydiumV2_raw = require('@raydium-io/raydium-sdk');
+ const RaydiumV2 = RaydiumV2_raw.default || RaydiumV2_raw;
 
 // Now, safely extract all the tools we might need from the corrected V2 object.
 // This gives every builder access to the same shared toolbox.
-// const {
-//     Liquidity,
-//     Token,
-//     TokenAmount,
-//     Percent,
-//     WSOL,
-//     Clmm,
-//     Cpmm,
-//     LaunchpadPool,
-//     LaunchpadConfig,
-//     SwapMath,
-//     TickUtils,
-// } = RaydiumV2;
+const {
+    Liquidity,
+    Token,
+    TokenAmount,
+    Percent,
+    WSOL,
+    Clmm,
+    Cpmm,
+    LaunchpadPool,
+    LaunchpadConfig,
+    SwapMath,
+    TickUtils,
+} = RaydiumV2;
 
 const { Dlmm } = require('@meteora-ag/dlmm');
 const { CpAmm: MeteoraCpAmm } = require('@meteora-ag/cp-amm-sdk');
@@ -44,7 +44,7 @@ const MeteoraDBC = require('@meteora-ag/dynamic-bonding-curve-sdk');
 
 
 // --- INTERNAL CONFIG & UTILS ---
-const config = require('./patches/config.js');
+const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 
 

@@ -5,11 +5,11 @@
 
 const { PublicKey } = require('@solana/web3.js');
 const { shortenAddress, escapeMarkdownV2 } = require('./utils.js');
-const config = require('./patches/config.js');
+const config = require('./config.js');
 
 class AdminManager {
-    constructor(dataManager, solanaManager, walletManager, tradingEngine) {
-        this.dataManager = dataManager;
+    constructor(databaseManager, solanaManager, walletManager, tradingEngine) {
+        this.databaseManager = databaseManager;
         this.solanaManager = solanaManager;
         this.walletManager = walletManager;
         this.tradingEngine = tradingEngine;
@@ -20,8 +20,14 @@ class AdminManager {
     /**
      * Check if user is admin
      */
-    isAdmin(chatId) {
-        return String(chatId) === String(config.ADMIN_CHAT_ID);
+    async isAdmin(chatId) {
+        try {
+            const user = await this.databaseManager.getUser(chatId);
+            return user && user.is_admin === 1;
+        } catch (error) {
+            console.error('Error checking admin status:', error);
+            return false;
+        }
     }
 
     /**
@@ -29,10 +35,44 @@ class AdminManager {
      */
     async getUserStatistics() {
         try {
-            const users = await this.dataManager.loadUsers();
-            const traders = await this.dataManager.loadTraders();
-            const tradeStats = await this.dataManager.loadTradeStats();
-            const positions = await this.dataManager.loadPositions();
+            // Get users from database
+            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const users = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                users[user.chat_id] = {
+                    username: userSettings.username || user.chat_id,
+                    active: true,
+                    addedAt: user.created_at,
+                    lastActivity: user.updated_at
+                };
+            });
+
+            // Get traders from database
+            const dbTraders = await this.databaseManager.all('SELECT * FROM traders');
+            const traders = { user_traders: {} };
+            dbTraders.forEach(trader => {
+                if (!traders.user_traders[trader.user_id]) {
+                    traders.user_traders[trader.user_id] = {};
+                }
+                traders.user_traders[trader.user_id][trader.name] = {
+                    wallet: trader.wallet,
+                    active: trader.active === 1,
+                    addedAt: trader.created_at
+                };
+            });
+
+            // Get trade stats (placeholder - would need to implement in database)
+            const tradeStats = { totalTrades: 0, successfulCopies: 0, failedCopies: 0, tradesUnder10Secs: "0.00" };
+
+            // Get positions from user settings
+            const positions = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                if (userSettings.positions) {
+                    positions[user.chat_id] = Object.values(userSettings.positions);
+                }
+            });
 
             const stats = {
                 totalUsers: Object.keys(users).length,
@@ -85,9 +125,41 @@ class AdminManager {
      */
     async getUserActivity() {
         try {
-            const users = await this.dataManager.loadUsers();
-            const traders = await this.dataManager.loadTraders();
-            const positions = await this.dataManager.loadPositions();
+            // Get users from database
+            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const users = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                users[user.chat_id] = {
+                    username: userSettings.username || user.chat_id,
+                    active: true,
+                    addedAt: user.created_at,
+                    lastActivity: user.updated_at
+                };
+            });
+
+            // Get traders from database
+            const dbTraders = await this.databaseManager.all('SELECT * FROM traders');
+            const traders = { user_traders: {} };
+            dbTraders.forEach(trader => {
+                if (!traders.user_traders[trader.user_id]) {
+                    traders.user_traders[trader.user_id] = {};
+                }
+                traders.user_traders[trader.user_id][trader.name] = {
+                    wallet: trader.wallet,
+                    active: trader.active === 1,
+                    addedAt: trader.created_at
+                };
+            });
+
+            // Get positions from user settings
+            const positions = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                if (userSettings.positions) {
+                    positions[user.chat_id] = Object.values(userSettings.positions);
+                }
+            });
 
             const activity = [];
 
@@ -128,9 +200,30 @@ class AdminManager {
      */
     async getUserPnl() {
         try {
-            const users = await this.dataManager.loadUsers();
-            const positions = await this.dataManager.loadPositions();
-            const tradeStats = await this.dataManager.loadTradeStats();
+            // Get users from database
+            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const users = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                users[user.chat_id] = {
+                    username: userSettings.username || user.chat_id,
+                    active: true,
+                    addedAt: user.created_at,
+                    lastActivity: user.updated_at
+                };
+            });
+
+            // Get positions from user settings
+            const positions = {};
+            dbUsers.forEach(user => {
+                const userSettings = JSON.parse(user.settings || '{}');
+                if (userSettings.positions) {
+                    positions[user.chat_id] = Object.values(userSettings.positions);
+                }
+            });
+
+            // Get trade stats (placeholder - would need to implement in database)
+            const tradeStats = { totalTrades: 0, successfulCopies: 0, failedCopies: 0, tradesUnder10Secs: "0.00" };
 
             const pnlData = [];
 
@@ -233,21 +326,20 @@ class AdminManager {
         }
 
         try {
-            const users = await this.dataManager.loadUsers();
-            
-            if (users[userId]) {
+            // Check if user already exists
+            const existingUser = await this.databaseManager.getUser(userId);
+            if (existingUser) {
                 throw new Error(`User ${userId} already exists`);
             }
 
-            users[userId] = {
+            // Create new user
+            await this.databaseManager.createUser(userId, {
                 username: username,
                 active: true,
                 addedAt: new Date().toISOString(),
                 lastActivity: new Date().toISOString(),
                 addedBy: chatId
-            };
-
-            await this.dataManager.saveUsers(users);
+            });
             
             console.log(`[ADMIN MANAGER] User ${userId} (${username}) added by admin ${chatId}`);
             
@@ -270,25 +362,17 @@ class AdminManager {
         }
 
         try {
-            const users = await this.dataManager.loadUsers();
-            const traders = await this.dataManager.loadTraders();
-            
-            if (!users[userId]) {
+            // Check if user exists
+            const existingUser = await this.databaseManager.getUser(userId);
+            if (!existingUser) {
                 throw new Error(`User ${userId} not found`);
             }
 
-            const username = users[userId].username || 'Unknown';
+            const userSettings = JSON.parse(existingUser.settings || '{}');
+            const username = userSettings.username || 'Unknown';
             
-            // Remove user data
-            delete users[userId];
-            if (traders.user_traders?.[userId]) {
-                delete traders.user_traders[userId];
-            }
-
-            await Promise.all([
-                this.dataManager.saveUsers(users),
-                this.dataManager.saveTraders(traders)
-            ]);
+            // Remove user and all associated data
+            await this.databaseManager.deleteUser(userId);
             
             console.log(`[ADMIN MANAGER] User ${userId} (${username}) removed by admin ${chatId}`);
             
@@ -307,19 +391,34 @@ class AdminManager {
      */
     async getUserDetails(userId) {
         try {
-            const users = await this.dataManager.loadUsers();
-            const traders = await this.dataManager.loadTraders();
-            const positions = await this.dataManager.loadPositions();
-            const solAmounts = await this.dataManager.loadSolAmounts();
-
-            const userData = users[userId];
-            if (!userData) {
+            // Get user from database
+            const user = await this.databaseManager.getUser(userId);
+            if (!user) {
                 throw new Error(`User ${userId} not found`);
             }
 
-            const userTraders = traders.user_traders?.[userId] || {};
-            const userPositions = positions[userId] || [];
-            const userSolAmount = solAmounts[userId] || config.DEFAULT_SOL_TRADE_AMOUNT;
+            const userSettings = JSON.parse(user.settings || '{}');
+            const userData = {
+                username: userSettings.username || userId,
+                active: true,
+                addedAt: user.created_at,
+                lastActivity: user.updated_at
+            };
+
+            // Get user's traders
+            const dbTraders = await this.databaseManager.getTraders(userId);
+            const userTraders = {};
+            dbTraders.forEach(trader => {
+                userTraders[trader.name] = {
+                    wallet: trader.wallet,
+                    active: trader.active === 1,
+                    addedAt: trader.created_at
+                };
+            });
+
+            // Get user's positions from settings
+            const userPositions = userSettings.positions ? Object.values(userSettings.positions) : [];
+            const userSolAmount = userSettings.solAmount || config.DEFAULT_SOL_TRADE_AMOUNT;
 
             const details = {
                 userId: userId,
@@ -396,12 +495,12 @@ class AdminManager {
         const pagePnl = pnlData.slice(start, end);
         const totalPages = Math.ceil(pnlData.length / perPage);
 
-        let message = `💹 *User P&L* (Page ${page + 1}/${totalPages})\n\n`;
+        let message = `💹 *User PnL* (Page ${page + 1}/${totalPages})\n\n`;
 
         pagePnl.forEach((user, index) => {
             const pnlColor = parseFloat(user.pnlPercentage) >= 0 ? '🟢' : '🔴';
             message += `${index + 1}. *${escapeMarkdownV2(user.username)}*\n` +
-                      `   ${pnlColor} P&L: ${user.pnlPercentage}%\n` +
+                      `   ${pnlColor} PnL: ${user.pnlPercentage}%\n` +
                       `   Spent: ${user.totalSpent} SOL\n` +
                       `   Value: ${user.totalValue} SOL\n` +
                       `   Positions: ${user.activePositions}/${user.positions}\n\n`;

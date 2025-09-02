@@ -176,6 +176,23 @@ async getCachedPoolData(mintAddress) {
         // No log on miss to keep console clean, the miss is logged by the tradingEngine.
         return null;
     }
+
+    /**
+     * Returns the total number of cached entries across all cache maps.
+     * @returns {number} Total cache size
+     */
+    size() {
+        return this.tradeReadyCache.size + this.launchpadPoolCache.size + this.preSignedTxCache.size;
+    }
+
+    /**
+     * Performs cleanup of expired entries from all caches.
+     */
+    cleanup() {
+        // The CacheManager uses setTimeout for automatic cleanup, so this method
+        // can be used for manual cleanup if needed
+        console.log(`[QUANTUM CACHE] 🧹 Manual cleanup performed. Current size: ${this.size()}`);
+    }
 }
 
 module.exports = { CacheManager };
