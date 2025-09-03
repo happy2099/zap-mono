@@ -61,7 +61,7 @@ class SchemaMigration {
                 label TEXT NOT NULL,
                 public_key TEXT NOT NULL,
                 private_key_encrypted TEXT,
-                is_primary BOOLEAN DEFAULT 0,
+
                 balance REAL DEFAULT 0.0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -108,7 +108,7 @@ class SchemaMigration {
         // Create indexes
         const indexes = [
             'CREATE INDEX IF NOT EXISTS idx_user_wallets_user_id ON user_wallets(user_id)',
-            'CREATE INDEX IF NOT EXISTS idx_user_wallets_primary ON user_wallets(user_id, is_primary)',
+
             'CREATE INDEX IF NOT EXISTS idx_user_trading_settings_user_id ON user_trading_settings(user_id)',
             'CREATE INDEX IF NOT EXISTS idx_user_positions_user_id ON user_positions(user_id)',
             'CREATE INDEX IF NOT EXISTS idx_user_positions_active ON user_positions(user_id, is_active)'
@@ -158,13 +158,12 @@ class SchemaMigration {
                 for (const [label, walletData] of Object.entries(settings.wallets)) {
                     try {
                         await this.db.run(
-                            'INSERT OR REPLACE INTO user_wallets (user_id, label, public_key, private_key_encrypted, is_primary, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                            'INSERT OR REPLACE INTO user_wallets (user_id, label, public_key, private_key_encrypted, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
                             [
                                 user.id, 
                                 label, 
                                 walletData.publicKey, 
                                 walletData.privateKey || null,
-                                label === settings.primaryCopyWalletLabel ? 1 : 0,
                                 user.created_at, 
                                 user.updated_at
                             ]
@@ -227,10 +226,10 @@ class SchemaMigration {
             SELECT 
                 u.chat_id,
                 uts.sol_amount,
-                uw.label as primary_wallet
+                uw.label as wallet
             FROM users u
             LEFT JOIN user_trading_settings uts ON u.id = uts.user_id
-            LEFT JOIN user_wallets uw ON u.id = uw.user_id AND uw.is_primary = 1
+            LEFT JOIN user_wallets uw ON u.id = uw.user_id ORDER BY uw.id ASC LIMIT 1
             LIMIT 1
         `);
 

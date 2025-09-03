@@ -370,19 +370,7 @@ class DataMigration {
             
             const settingsData = await this.readJsonFile('settings.json');
             
-            // Migrate global settings
-            if (settingsData.primaryCopyWalletLabel) {
-                // Store as global setting in first user or create a system user
-                const users = await this.databaseManager.all('SELECT * FROM users LIMIT 1');
-                if (users.length > 0) {
-                    const user = users[0];
-                    const currentSettings = JSON.parse(user.settings || '{}');
-                    currentSettings.globalSettings = {
-                        primaryCopyWalletLabel: settingsData.primaryCopyWalletLabel
-                    };
-                    await this.databaseManager.updateUserSettings(user.chat_id, currentSettings);
-                }
-            }
+
             
             // Migrate user-specific settings
             if (settingsData.userSettings) {

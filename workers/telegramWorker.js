@@ -68,7 +68,7 @@ class TelegramWorker extends BaseWorker {
         this.actionHandlers.set('SET_SOL_AMOUNT', this.handleSetSolAmount.bind(this));
         this.actionHandlers.set('GENERATE_WALLET', this.handleGenerateWallet.bind(this));
         this.actionHandlers.set('IMPORT_WALLET', this.handleImportWallet.bind(this));
-        this.actionHandlers.set('SET_PRIMARY_WALLET', this.handleSetPrimaryWallet.bind(this));
+
         this.actionHandlers.set('DELETE_WALLET', this.handleDeleteWallet.bind(this));
         this.actionHandlers.set('WITHDRAW', this.handleWithdraw.bind(this));
         this.actionHandlers.set('CONFIRM_WITHDRAW', this.handleConfirmWithdraw.bind(this));
@@ -85,7 +85,7 @@ class TelegramWorker extends BaseWorker {
             onGenerateWallet: this.handleGenerateWallet.bind(this),
             onImportWallet: this.handleImportWallet.bind(this),
             onResetData: this.handleResetData.bind(this),
-            onSetPrimaryWallet: this.handleSetPrimaryWallet.bind(this),
+
             onDeleteWallet: this.handleDeleteWallet.bind(this),
             onWithdraw: this.handleWithdraw.bind(this),
             onConfirmWithdraw: this.handleConfirmWithdraw.bind(this),
@@ -94,23 +94,31 @@ class TelegramWorker extends BaseWorker {
     }
 
     async handleMessage(message) {
-        // Handle Telegram-specific messages
-        if (message.type === 'TELEGRAM_ACTION') {
-            const handler = this.actionHandlers.get(message.action);
-            if (handler) {
-                await handler(message.chatId, ...message.args);
-            } else {
-                this.logWarn('Unknown Telegram action', { action: message.action });
+        if (message.type === 'SEND_MESSAGE') {
+            const { chatId, text, options } = message.payload;
+            try {
+                // Use the internal TelegramUI instance to send the message
+                await this.telegramUi.sendOrEditMessage(chatId, text, options);
+                this.logInfo('Sent message via worker', { chatId });
+            } catch (error) {
+                this.logError('Failed to send message via worker', { chatId, error: error.message });
             }
-        } else if (message.type === 'SEND_MESSAGE') {
-            await this.sendMessage(message.chatId, message.text, message.options);
-        } else if (message.type === 'SHOW_MENU') {
-            await this.showMenu(message.chatId, message.menuType);
+        } else if (message.type === 'PIN_MESSAGE') {
+            const { chatId, messageId, disable_notification } = message.payload;
+            try {
+                if (this.telegramUi && this.telegramUi.bot) {
+                    await this.telegramUi.bot.pinChatMessage(chatId, messageId, { disable_notification });
+                    this.logInfo('Message pinned via worker', { chatId, messageId });
+                }
+            } catch (error) {
+                this.logError('Failed to pin message via worker', { chatId, error: error.message });
+            }
         } else {
-            // Call parent handler for base messages
+            // This is the existing line, keep it
             await super.handleMessage(message);
         }
     }
+
 
     async sendMessage(chatId, text, options = {}) {
         try {
@@ -249,8 +257,27 @@ class TelegramWorker extends BaseWorker {
 
     async handleAddTrader(chatId, traderName, walletAddress) {
         this.logInfo('Adding trader', { chatId, traderName, walletAddress });
-        // Implementation would go here
-        this.signalMessage('TRADER_ADDED', { chatId, traderName });
+        try {
+            // Get user to get internal user ID
+            const user = await this.databaseManager.getUser(chatId);
+            if (!user) {
+                throw new Error('User not found');
+            }
+            
+            // Add trader to database
+            await this.databaseManager.addTrader(user.id, traderName, walletAddress);
+            
+            this.logInfo('Trader added successfully to database', { chatId, traderName, userId: user.id });
+            
+            // Notify monitor worker to refresh LaserStream subscriptions
+            this.sendMessage('TRADER_ADDED', { chatId, traderName, walletAddress }, 'monitor');
+            
+            // Also signal main thread
+            this.signalMessage('TRADER_ADDED', { chatId, traderName });
+        } catch (error) {
+            this.logError('Failed to add trader to database', { chatId, traderName, error: error.message });
+            throw error; // Re-throw to let the UI handle the error
+        }
     }
 
     async handleRemoveTrader(chatId, traderName) {
@@ -265,7 +292,7 @@ class TelegramWorker extends BaseWorker {
             // Remove trader from database
             await this.databaseManager.deleteTrader(user.id, traderName);
             
-            const message = `✅ Trader *${traderName}* has been removed successfully!`;
+            const message = `✅ Trader *${escapeMarkdownV2(traderName)}* has been removed successfully`; 
             await this.telegramUi.sendOrEditMessage(chatId, message, {
                 reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Traders List", callback_data: "traders_list" }]] }
             });
@@ -410,56 +437,9 @@ class TelegramWorker extends BaseWorker {
         }
     }
 
-    async handleSetPrimaryWallet(chatId, walletLabel) {
-        this.logInfo('Setting primary wallet', { chatId, walletLabel });
-        
-        try {
-            // Get the user from database
-            console.log(`[DEBUG] Getting user for chatId: ${chatId} (type: ${typeof chatId})`);
-            const user = await this.databaseManager.getUser(chatId);
-            console.log(`[DEBUG] User found:`, user);
-            if (!user) {
-                throw new Error('User not found');
-            }
 
-            // First, let's see what wallets exist for this user
-            const allUserWallets = await this.databaseManager.all(
-                'SELECT * FROM user_wallets WHERE user_id = ?', 
-                [user.id]
-            );
-            console.log(`[DEBUG] All wallets for user ${user.id}:`, allUserWallets);
 
-            // Get the wallet by label to find its ID
-            console.log(`[DEBUG] Looking for wallet with label: ${walletLabel} for user_id: ${user.id}`);
-            const wallet = await this.databaseManager.get(
-                'SELECT id FROM user_wallets WHERE user_id = ? AND label = ?', 
-                [user.id, walletLabel]
-            );
-            console.log(`[DEBUG] Wallet found:`, wallet);
-            
-            if (!wallet) {
-                throw new Error(`Wallet "${walletLabel}" not found`);
-            }
 
-            // Set the wallet as primary in database
-            await this.databaseManager.setPrimaryWallet(user.id, wallet.id);
-
-            // Also update user settings for backward compatibility
-            const currentSettings = JSON.parse(user.settings || '{}');
-            currentSettings.primaryCopyWalletLabel = walletLabel;
-            await this.databaseManager.updateUserSettings(chatId, currentSettings);
-
-            this.logInfo('Primary wallet set successfully', { chatId, walletLabel, userId: user.id, walletId: wallet.id });
-            this.signalMessage('PRIMARY_WALLET_SET', { chatId, walletLabel });
-
-            // Show success message
-            await this.telegramUi.displayPrimaryWalletSelection(chatId, `✅ Primary wallet set to: ${walletLabel}`);
-
-        } catch (error) {
-            this.logError('Failed to set primary wallet', { chatId, walletLabel, error: error.message });
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to set primary wallet: ${error.message}`);
-        }
-    }
 
     async handleDeleteWallet(chatId, walletLabel) {
         this.logInfo('Deleting wallet', { chatId, walletLabel });

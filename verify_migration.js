@@ -60,7 +60,7 @@ class MigrationVerifier {
             JOIN users u ON w.user_id = u.id
         `);
         for (const wallet of wallets) {
-            console.log(`  - User: ${wallet.chat_id}, Label: ${wallet.label}, Public Key: ${wallet.public_key}, Balance: ${wallet.balance}, Primary: ${wallet.is_primary ? 'Yes' : 'No'}`);
+            console.log(`  - User: ${wallet.chat_id}, Label: ${wallet.label}, Public Key: ${wallet.public_key}, Balance: ${wallet.balance}`);
         }
         
         // Show trade stats

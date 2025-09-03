@@ -1,337 +1,329 @@
-// ==========================================
-// ========== Trader Monitor Worker ==========
-// ==========================================
-// File: workers/traderMonitorWorker.js
-// Description: Monitors trader activities and processes transactions
-
-const { workerData } = require('worker_threads');
 const BaseWorker = require('./templates/baseWorker');
-const { DatabaseManager } = require('../database/databaseManager');
-const { SolanaManager } = require('../solanaManager');
-const { TransactionAnalyzer } = require('../transactionAnalyzer');
-const { ApiManager } = require('../apiManager');
+const { LaserStreamManager } = require('../laserstreamManager');
+const { TradingEngine } = require('../tradingEngine'); // Required to get the trader list
+const { DatabaseManager } = require('../database/databaseManager'); // Required for the temp engine
 
 class TraderMonitorWorker extends BaseWorker {
     constructor() {
         super();
+        this.laserStreamManager = null;
         this.databaseManager = null;
-        this.solanaManager = null;
-        this.transactionAnalyzer = null;
-        this.apiManager = null;
-        this.monitoredTraders = new Map();
-        this.monitoringInterval = null;
-        this.isMonitoring = false;
     }
 
     async customInitialize() {
+        this.logInfo('Initializing High-Speed Trader Monitor with LaserStream...');
+        
         try {
-            // Initialize core managers
             this.databaseManager = new DatabaseManager();
             await this.databaseManager.initialize();
             
-            this.solanaManager = new SolanaManager();
-            await this.solanaManager.initialize();
+            // CRITICAL: We create a 'dummy' engine instance here. Its ONLY purpose
+            // is to provide the `getMasterTraderWallets` method to the LaserStreamManager.
+            // This is a clean way to share logic without complex dependencies in a worker.
+            const tempEngineForTraderList = new TradingEngine({ databaseManager: this.databaseManager }, { partialInit: true });
             
-            this.apiManager = new ApiManager(this.solanaManager);
-            this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
+            // Initialize LaserStreamManager and tell it that this worker is its parent
+            this.laserStreamManager = new LaserStreamManager(this); 
+            
+            // Pass the temporary engine to the laser stream manager
+            // so it can fetch the list of traders to watch.
+            this.laserStreamManager.tradingEngine = tempEngineForTraderList;
 
-            this.logInfo('Trader monitor worker initialized successfully');
+            this.logInfo('Starting real-time LaserStream monitoring...');
+            await this.laserStreamManager.startMonitoring(); // Start the stream
+            
+            // CRITICAL FALLBACK: If LaserStream fails, start direct RPC polling
+            this.logInfo('Starting direct RPC polling as backup...');
+            await this.startDirectRPCPolling();
+            
+            // PERIODIC REFRESH: Check for new traders every 5 minutes
+            this.logInfo('Starting periodic subscription refresh...');
+            this.startPeriodicRefresh();
+            
         } catch (error) {
-            this.logError('Failed to initialize trader monitor worker', { error: error.message });
+            this.logError('FATAL: Failed to initialize or start LaserStream', { error: error.message });
+            this.signalError(error);
             throw error;
         }
     }
-
-    async handleMessage(message) {
-        if (message.type === 'START_MONITORING') {
-            await this.startMonitoring(message.traders);
-        } else if (message.type === 'STOP_MONITORING') {
-            await this.stopMonitoring();
-        } else if (message.type === 'ADD_TRADER') {
-            await this.addTrader(message.trader);
-        } else if (message.type === 'REMOVE_TRADER') {
-            await this.removeTrader(message.traderName);
-        } else if (message.type === 'UPDATE_TRADER') {
-            await this.updateTrader(message.trader);
-        } else if (message.type === 'PROCESS_SIGNATURE') {
-            await this.processSignature(message.traderWallet, message.signature);
-        } else {
-            await super.handleMessage(message);
-        }
-    }
-
-    async startMonitoring(traders = null) {
-        try {
-            if (this.isMonitoring) {
-                this.logWarn('Monitoring already active');
-                await this.databaseManager.logWarning('TRADER_MONITOR', 'Monitoring already active');
-                return;
-            }
-
-            this.isMonitoring = true;
-            await this.databaseManager.logInfo('TRADER_MONITOR', 'Starting trader monitoring');
-            
-            // Load traders if not provided
-            if (!traders) {
-                traders = await this.extractActiveTraders();
-                await this.databaseManager.logInfo('TRADER_MONITOR', 'Extracted active traders', { 
-                    traderCount: traders.length,
-                    traders: traders.map(t => ({ name: t.name, wallet: t.wallet }))
-                });
-            }
-
-            // Add traders to monitoring
-            for (const trader of traders) {
-                await this.addTrader(trader);
-            }
-
-            
-            this.logInfo('Trader monitoring started', { traderCount: this.monitoredTraders.size });
-            await this.databaseManager.logInfo('TRADER_MONITOR', 'Trader monitoring started successfully', { 
-                traderCount: this.monitoredTraders.size,
-                monitoredTraders: Array.from(this.monitoredTraders.keys())
-            });
-            this.signalMessage('MONITORING_STARTED', { traderCount: this.monitoredTraders.size });
-        } catch (error) {
-            this.logError('Failed to start monitoring', { error: error.message });
-            await this.databaseManager.logError('TRADER_MONITOR', 'Failed to start monitoring', { error: error.message });
-            this.isMonitoring = false;
-        }
-    }
-
-    async stopMonitoring() {
-        try {
-            this.isMonitoring = false;
-            
-            if (this.monitoringInterval) {
-                clearInterval(this.monitoringInterval);
-                this.monitoringInterval = null;
-            }
-
-            this.monitoredTraders.clear();
-            
-            this.logInfo('Trader monitoring stopped');
-            this.signalMessage('MONITORING_STOPPED');
-        } catch (error) {
-            this.logError('Failed to stop monitoring', { error: error.message });
-        }
-    }
-
-    async addTrader(trader) {
-        try {
-            if (!trader || !trader.wallet || !trader.name) {
-                throw new Error('Invalid trader data');
-            }
-
-            const traderInfo = {
-                name: trader.name,
-                wallet: trader.wallet,
-                userChatId: trader.userChatId,
-                active: trader.active || false,
-                addedAt: Date.now()
-            };
-
-            this.monitoredTraders.set(trader.name, traderInfo);
-            
-            this.logInfo('Trader added to monitoring', { 
-                name: trader.name, 
-                wallet: trader.wallet,
-                userChatId: trader.userChatId 
-            });
-            
-            this.signalMessage('TRADER_ADDED_TO_MONITORING', { 
-                name: trader.name,
-                wallet: trader.wallet 
-            });
-        } catch (error) {
-            this.logError('Failed to add trader', { error: error.message, trader });
-        }
-    }
-
-    async removeTrader(traderName) {
-        try {
-            if (this.monitoredTraders.has(traderName)) {
-                this.monitoredTraders.delete(traderName);
-                this.logInfo('Trader removed from monitoring', { name: traderName });
-                this.signalMessage('TRADER_REMOVED_FROM_MONITORING', { name: traderName });
-            } else {
-                this.logWarn('Trader not found in monitoring', { name: traderName });
-            }
-        } catch (error) {
-            this.logError('Failed to remove trader', { error: error.message, traderName });
-        }
-    }
-
-    async updateTrader(trader) {
-        try {
-            if (this.monitoredTraders.has(trader.name)) {
-                const existingTrader = this.monitoredTraders.get(trader.name);
-                const updatedTrader = { ...existingTrader, ...trader };
-                this.monitoredTraders.set(trader.name, updatedTrader);
-                
-                this.logInfo('Trader updated in monitoring', { name: trader.name });
-                this.signalMessage('TRADER_UPDATED_IN_MONITORING', { name: trader.name });
-            } else {
-                this.logWarn('Trader not found for update', { name: trader.name });
-            }
-        } catch (error) {
-            this.logError('Failed to update trader', { error: error.message, trader });
-        }
-    }
-
-    async processSignature(traderWallet, signature) {
-        try {
-            this.logInfo('Processing signature', { traderWallet, signature });
-            
-            // Find the trader by wallet
-            const trader = Array.from(this.monitoredTraders.values())
-                .find(t => t.wallet === traderWallet);
-            
-            if (!trader) {
-                this.logWarn('Trader not found for signature', { traderWallet });
-                return;
-            }
-
-            // Process the transaction
-            const result = await this.transactionAnalyzer.analyzeTransaction(signature);
-            
-            if (result) {
-                this.signalMessage('TRANSACTION_ANALYZED', {
-                    traderName: trader.name,
-                    traderWallet,
-                    signature,
-                    result
-                });
-            }
-        } catch (error) {
-            this.logError('Failed to process signature', { 
-                error: error.message, 
-                traderWallet, 
-                signature 
-            });
-        }
-    }
-
-    startPeriodicMonitoring() {
-        const MONITORING_INTERVAL = 25000; // 25 seconds
+    
+    // This is the function the LaserStreamManager will call when it gets a new transaction
+    handleTraderActivity(sourceWallet, signature, txData) {
+        this.logInfo(`🚀 STREAM EVENT RECEIVED for ${sourceWallet.substring(0,4)}...${sourceWallet.slice(-4)} | Sig: ${signature.substring(0,8)}...`);
+        this.logInfo(`📊 Transaction data type: ${txData?.type || 'unknown'}`);
+        this.logInfo(`📋 Transaction has ${txData?.transaction?.message?.instructions?.length || 0} instructions`);
         
-        this.monitoringInterval = setInterval(async () => {
-            if (!this.isMonitoring || this.isShuttingDown) {
-                return;
-            }
-
-            try {
-                await this.databaseManager.logDebug('TRADER_MONITOR', 'Starting monitoring cycle');
-                await this.monitorTraders();
-                await this.databaseManager.logDebug('TRADER_MONITOR', 'Completed monitoring cycle');
-            } catch (error) {
-                this.logError('Error in periodic monitoring', { error: error.message });
-                await this.databaseManager.logError('TRADER_MONITOR', 'Error in periodic monitoring', { error: error.message });
-            }
-        }, MONITORING_INTERVAL);
-
-        this.logInfo('Periodic monitoring started', { interval: MONITORING_INTERVAL });
-        this.databaseManager.logInfo('TRADER_MONITOR', 'Periodic monitoring started', { interval: MONITORING_INTERVAL });
+        // We receive the real-time data and immediately forward it to the main thread,
+        // which will then pass it to the executor worker.
+        this.signalMessage('EXECUTE_COPY_TRADE', {
+            traderName: 'Unknown (LaserStream)', // The name is not needed for execution logic
+            traderWallet: sourceWallet,
+            signature: signature,
+            userChatId: 'ALL_USERS', // A special flag for the main thread
+            preFetchedTxData: txData // PASS THE FULL HELIUS DATA FOR MAX SPEED
+        });
     }
 
-    async monitorTraders() {
+    // Handle messages from other workers
+    async handleMessage(message) {
         try {
-            const activeTraders = Array.from(this.monitoredTraders.values())
-                .filter(trader => trader.active);
+            switch (message.type) {
+                case 'REFRESH_SUBSCRIPTIONS':
+                    this.logInfo('📨 Received refresh request from main thread');
+                    await this.refreshTraderSubscriptions();
+                    break;
+                case 'TRADER_ADDED':
+                case 'TRADER_REMOVED':
+                case 'TRADER_UPDATED':
+                    this.logInfo('📨 Trader list changed, refreshing subscriptions');
+                    await this.refreshTraderSubscriptions();
+                    break;
+                default:
+                    await super.handleMessage(message);
+            }
+        } catch (error) {
+            this.logError('Error handling message in monitor worker', { 
+                messageType: message.type, 
+                error: error.message 
+            });
+        }
+    }
 
-            for (const trader of activeTraders) {
-                try {
-                    await this.monitorTrader(trader);
-                } catch (error) {
-                    this.logError('Error monitoring trader', { 
-                        error: error.message, 
-                        traderName: trader.name 
-                    });
+    // Refresh LaserStream subscriptions when traders change
+    async refreshTraderSubscriptions() {
+        this.logInfo('🔄 Refreshing LaserStream subscriptions...');
+        try {
+            if (this.laserStreamManager) {
+                const refreshed = await this.laserStreamManager.refreshSubscriptions();
+                if (refreshed) {
+                    this.logInfo('✅ LaserStream subscriptions refreshed successfully');
+                    // Also refresh RPC polling list
+                    await this.refreshRPCPolling();
+                } else {
+                    this.logInfo('ℹ️ No changes detected, subscriptions unchanged');
                 }
             }
         } catch (error) {
-            this.logError('Error in trader monitoring cycle', { error: error.message });
+            this.logError('❌ Failed to refresh LaserStream subscriptions', { error: error.message });
         }
     }
 
-    async monitorTrader(trader) {
-        try {
-            // This is a simplified monitoring implementation
-            // In a real implementation, you would:
-            // 1. Check for new transactions
-            // 2. Analyze transaction patterns
-            // 3. Detect trading activities
-            // 4. Send notifications to other workers
-
-            this.logDebug('Monitoring trader', { 
-                name: trader.name, 
-                wallet: trader.wallet 
-            });
-
-            // Signal that we're actively monitoring this trader
-            this.signalMessage('TRADER_MONITORED', {
-                name: trader.name,
-                wallet: trader.wallet,
-                timestamp: Date.now()
-            });
-        } catch (error) {
-            this.logError('Error monitoring individual trader', { 
-                error: error.message, 
-                traderName: trader.name 
-            });
+    // Direct RPC polling as fallback when LaserStream fails  
+    async startDirectRPCPolling() {
+        this.logInfo('🚀 Starting dynamic direct RPC polling...');
+        
+        // Get the list of wallets to monitor dynamically from database
+        const walletsToMonitor = await this.getDynamicWalletsToMonitor();
+        
+        // Store last signatures to detect new transactions
+        this.lastSignatures = new Map();
+        
+        if (walletsToMonitor.length === 0) {
+            this.logInfo('⚠️ No active traders found for RPC polling');
+            return;
         }
-    }
 
-    async extractActiveTraders() {
-        try {
-            const traders = [];
-            
-            // Get all active traders from database
-            const activeTraders = await this.databaseManager.all(
-                'SELECT t.*, u.chat_id FROM traders t JOIN users u ON t.user_id = u.id WHERE t.active = 1'
-            );
-            
-            for (const trader of activeTraders) {
-                traders.push({
-                    id: trader.id,
-                    name: trader.name,
-                    wallet: trader.wallet,
-                    userChatId: trader.chat_id,
-                    active: trader.active === 1,
-                    addedAt: trader.created_at
-                });
+        this.logInfo(`📊 Monitoring ${walletsToMonitor.length} wallets via RPC polling`);
+        
+        // Poll every 2 seconds for new transactions
+        this.rpcPollingInterval = setInterval(async () => {
+            try {
+                const currentWallets = await this.getDynamicWalletsToMonitor();
+                for (const wallet of currentWallets) {
+                    await this.checkWalletForNewTransactions(wallet);
+                }
+            } catch (error) {
+                this.logError('Error in RPC polling:', { error: error.message });
             }
-            
-            return traders;
+        }, 2000); // 2 seconds - More aggressive polling
+        
+        this.logInfo('✅ Dynamic direct RPC polling started successfully');
+    }
+
+    // Get dynamic list of wallets from database
+    async getDynamicWalletsToMonitor() {
+        try {
+            const tempEngine = new TradingEngine({ databaseManager: this.databaseManager }, { partialInit: true });
+            const wallets = await tempEngine.getMasterTraderWallets();
+            return wallets;
         } catch (error) {
-            this.logError('Failed to extract active traders', { error: error.message });
+            this.logError('Error getting dynamic wallet list:', { error: error.message });
             return [];
         }
     }
 
-    async customCleanup() {
+    // Refresh RPC polling with new wallet list
+    async refreshRPCPolling() {
+        this.logInfo('🔄 Refreshing RPC polling wallet list...');
         try {
-            await this.stopMonitoring();
-            if (this.databaseManager) {
-                await this.databaseManager.close();
-            }
-            this.logInfo('Trader monitor worker cleanup completed');
+            const newWallets = await this.getDynamicWalletsToMonitor();
+            this.logInfo(`📊 Updated RPC polling list: ${newWallets.length} wallets`);
+            // The polling interval will automatically pick up the new list
         } catch (error) {
-            this.logError('Error during cleanup', { error: error.message });
+            this.logError('Error refreshing RPC polling:', { error: error.message });
         }
     }
 
-    async customHealthCheck() {
-        try {
-            return this.isMonitoring && this.monitoredTraders.size > 0;
-        } catch (error) {
-            this.logError('Health check failed', { error: error.message });
-            return false;
+    // Start periodic refresh every 5 minutes
+    startPeriodicRefresh() {
+        const REFRESH_INTERVAL = 5 * 60 * 1000; // 5 minutes
+        
+        this.periodicRefreshInterval = setInterval(async () => {
+            try {
+                this.logInfo('⏰ Periodic subscription refresh triggered');
+                await this.refreshTraderSubscriptions();
+            } catch (error) {
+                this.logError('Error in periodic refresh:', { error: error.message });
+            }
+        }, REFRESH_INTERVAL);
+        
+        this.logInfo(`✅ Periodic refresh started (every ${REFRESH_INTERVAL / 60000} minutes)`);
+    }
+
+    // Stop periodic refresh (called during shutdown)
+    stopPeriodicRefresh() {
+        if (this.periodicRefreshInterval) {
+            clearInterval(this.periodicRefreshInterval);
+            this.periodicRefreshInterval = null;
+            this.logInfo('🛑 Periodic refresh stopped');
         }
+    }
+    
+    async checkWalletForNewTransactions(wallet) {
+        try {
+            const response = await fetch('https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 1,
+                    method: 'getSignaturesForAddress',
+                    params: [wallet, { limit: 5 }] // Check last 5 transactions instead of just 1
+                })
+            });
+            
+            const data = await response.json();
+            if (data.result && data.result.length > 0) {
+                const lastSignature = this.lastSignatures.get(wallet);
+                
+                // Find the first new transaction that's a trading transaction
+                for (const txInfo of data.result) {
+                    if (txInfo.signature === lastSignature) {
+                        break; // We've reached a transaction we've already processed
+                    }
+                    
+                    // Skip failed transactions
+                    if (txInfo.err) {
+                        this.logInfo(`⏭️ Failed transaction skipped for ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}... | Error: ${JSON.stringify(txInfo.err)}`);
+                        continue;
+                    }
+                    
+                    this.logInfo(`🚀 New transaction detected for wallet ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}...`);
+                    
+                    // 🔍 ENHANCED: Get full transaction details to check if it's a trade
+                    try {
+                        const txResponse = await fetch('https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                jsonrpc: '2.0',
+                                id: 1,
+                                method: 'getTransaction',
+                                params: [txInfo.signature, { maxSupportedTransactionVersion: 0 }]
+                            })
+                        });
+                        
+                        const txData = await txResponse.json();
+                        if (txData.result && txData.result.transaction) {
+                            // 🔥 AGGRESSIVE APPROACH: We'll let the transaction analyzer decide what's copyable
+                            // based on actual balance changes and trade detection, not just program IDs
+                            
+                            // 🔥 AGGRESSIVE APPROACH: Forward ALL successful transactions to the transaction analyzer
+                            // Let the analyzer decide what's copyable based on balance changes and actual trade detection
+                            this.logInfo(`🎯 Transaction detected for ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}... | Forwarding to analyzer...`);
+                            
+                            // Store the new signature
+                            this.lastSignatures.set(wallet, txInfo.signature);
+                            
+                            // Forward to executor for copy trading analysis
+                            this.signalMessage('EXECUTE_COPY_TRADE', {
+                                traderName: this.getTraderName(wallet),
+                                traderWallet: wallet,
+                                signature: txInfo.signature,
+                                userChatId: 'ALL_USERS',
+                                preFetchedTxData: txData.result
+                            });
+                            
+                            // Found a transaction, stop looking
+                            break;
+                        }
+                    } catch (txError) {
+                        this.logError(`Error fetching transaction details for ${txInfo.signature}:`, { error: txError.message });
+                        // Continue to next transaction
+                        continue;
+                    }
+                }
+                
+                // If we didn't find any new trading transactions, store the latest signature to avoid re-processing
+                if (data.result.length > 0) {
+                    const latestSignature = data.result[0].signature;
+                    if (!this.lastSignatures.has(wallet)) {
+                        this.lastSignatures.set(wallet, latestSignature);
+                    }
+                }
+            }
+        } catch (error) {
+            this.logError(`Error checking wallet ${wallet}:`, { error: error.message });
+        }
+    }
+    
+    getTraderName(wallet) {
+        const traderNames = {
+            'DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj': 'eu',
+            'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK': 'cup',
+            'As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5': 'otta',
+            '96sErVjEN7LNJ6Uvj63bdRWZxNuBngj56fnT9biHLKBf': 'orange'
+        };
+        return traderNames[wallet] || 'Unknown';
+    }
+    
+    async customCleanup() {
+        if (this.laserStreamManager) {
+            this.logInfo('Stopping LaserStream...');
+            await this.laserStreamManager.stop();
+        }
+        if (this.rpcPollingInterval) {
+            this.logInfo('Stopping RPC polling...');
+            clearInterval(this.rpcPollingInterval);
+        }
+                // Stop periodic refresh
+        this.stopPeriodicRefresh();
+        
+        if (this.databaseManager) {
+            await this.databaseManager.close();
+        }
+    }
+
+    async cleanup() {
+        this.logInfo('Cleaning up trader monitor worker...');
+        
+        if (this.laserStreamManager) {
+            await this.laserStreamManager.stop();
+        }
+        
+        if (this.rpcPollingInterval) {
+            clearInterval(this.rpcPollingInterval);
+            this.rpcPollingInterval = null;
+        }
+        
+        // Stop periodic refresh
+        this.stopPeriodicRefresh();
+        
+        await super.cleanup();
     }
 }
 
-// Initialize worker if this file is run directly
+// Standard worker startup
 if (require.main === module) {
     const worker = new TraderMonitorWorker();
     worker.initialize().catch(error => {

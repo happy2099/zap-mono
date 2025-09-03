@@ -18,7 +18,6 @@ CREATE TABLE IF NOT EXISTS user_wallets (
     label TEXT NOT NULL,
     public_key TEXT NOT NULL,
     private_key_encrypted TEXT,
-    is_primary BOOLEAN DEFAULT 0,
     balance REAL DEFAULT 0.0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -123,7 +122,7 @@ CREATE INDEX IF NOT EXISTS idx_users_chat_id ON users(chat_id);
 
 -- Wallet indexes
 CREATE INDEX IF NOT EXISTS idx_user_wallets_user_id ON user_wallets(user_id);
-CREATE INDEX IF NOT EXISTS idx_user_wallets_primary ON user_wallets(user_id, is_primary);
+
 CREATE INDEX IF NOT EXISTS idx_user_wallets_public_key ON user_wallets(public_key);
 
 -- Trading settings indexes
@@ -154,15 +153,15 @@ SELECT
     u.id,
     u.chat_id,
     uts.sol_amount,
-    uw.label as primary_wallet_label,
-    uw.public_key as primary_wallet_address,
+    uw.label as first_wallet_label,
+    uw.public_key as first_wallet_address,
     COUNT(t.id) as trader_count,
     COUNT(CASE WHEN t.active = 1 THEN 1 END) as active_traders,
     COALESCE(SUM(up.current_value), 0) as total_portfolio_value,
     COALESCE(SUM(up.pnl), 0) as total_pnl
 FROM users u
 LEFT JOIN user_trading_settings uts ON u.id = uts.user_id
-LEFT JOIN user_wallets uw ON u.id = uw.user_id AND uw.is_primary = 1
+LEFT JOIN user_wallets uw ON u.id = uw.user_id ORDER BY uw.id ASC LIMIT 1
 LEFT JOIN traders t ON u.id = t.user_id
 LEFT JOIN user_positions up ON u.id = up.user_id AND up.is_active = 1
 GROUP BY u.id, u.chat_id, uts.sol_amount, uw.label, uw.public_key;

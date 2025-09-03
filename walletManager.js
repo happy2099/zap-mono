@@ -5,19 +5,12 @@
 
 const { Keypair, PublicKey, Connection, LAMPORTS_PER_SOL } = require('@solana/web3.js');
 const bs58 = require('bs58');
-const fs = require('fs/promises'); // Use fs.promises for async file operations
 const crypto = require('crypto');
 const { EventEmitter } = require('events');
-const path = require('path');
 const { encrypt, decrypt } = require('./encryption.js'); // Assuming encryption.js for CJS
 const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
 const BN = require('bn.js'); // CommonJS import for BN.js
-const config = require('./config.js'); // Import our config for file paths etc.
 const { shortenAddress } = require('./utils.js'); // Import common utility
-
-// File paths from config (recommended way to get paths from config.js)
-const WALLETS_FILE = config.WALLET_FILE; // Use path from config.js
-const DATA_DIR = config.DATA_DIR; // Use path from config.js
 
 // Encryption key from environment variables
 const WALLET_ENCRYPTION_KEY = process.env.WALLET_ENCRYPTION_KEY;
@@ -35,11 +28,6 @@ class WalletManager extends EventEmitter {
     this.databaseManager = databaseManager; // Store the databaseManager
     this.connection = null; // Connection will be set via setConnection(conn) method
     this.solanaManager = null; 
-    this.walletsFile = WALLETS_FILE;
-    this.wallets = {
-      user_wallets: {} // A map of { [chatId]: { trading: [], withdrawal: [] } }
-    };// Deep copy default structure
-    this.dataDir = DATA_DIR;
     this.initialized = false;
     this.encryptionKey = WALLET_ENCRYPTION_KEY;
 
@@ -68,85 +56,18 @@ class WalletManager extends EventEmitter {
   }
 
   // Initialization method (called by ZapBot.js)
- async initialize() {
-    if (this.initialized) return;
-    console.log("[WM Init] Initializing WalletManager...");
-    try {
-      await fs.mkdir(this.dataDir, { recursive: true });
+  async initialize() {
+     if (this.initialized) return;
+     console.log("[WM Init] Initializing WalletManager in DATABASE-ONLY mode...");
+     
+     // In DB mode, there are no files to load. We just confirm dependencies are set.
+     if (!this.databaseManager) throw new Error("WalletManager cannot initialize: DatabaseManager is missing.");
+     if (!this.connection) throw new Error("WalletManager cannot initialize: Solana connection is missing.");
 
-      try {
-        await fs.access(this.walletsFile);
-      } catch (error) {
-        if (error.code === 'ENOENT') {
-          console.log(`[WM Init] Wallets file not found. Creating default: ${this.walletsFile}`);
-          // Create the file with the correct empty multi-user structure
-          await this._saveWalletsInternal({ user_wallets: {} });
-        } else {
-          throw error;
-        }
-      }
-      // CLEAR ALL MEMORY STORAGE - USE DATABASE ONLY
-      this.wallets = { user_wallets: {} };
-      console.log(`[WM Init] Memory storage cleared - using database only mode.`);
-      
-      this.initialized = true;
-      console.log(`[WM Init] Successfully initialized in DATABASE-ONLY mode.`);
-   } catch (error) {
-    console.error('❌ [WM Init] Error initializing WalletManager:', error.message);
-    // On a fatal init error, reset to the correct, empty multi-user structure.
-    this.wallets = { user_wallets: {} };
-    this.initialized = false;
-    throw new Error(`WalletManager initialization failed: ${error.message}`);
+     this.initialized = true;
+     console.log(`[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.`);
   }
-}
 
- async loadWallets() {
-    if (!this.encryptionKey) {
-      console.error("[WM Load] Cannot load wallets: WALLET_ENCRYPTION_KEY not set.");
-      this.wallets = { user_wallets: {} };
-      return;
-    }
-    try {
-      const data = await fs.readFile(this.walletsFile, 'utf8');
-      if (!data || data.trim().length < 2) {
-        // File is empty or just contains "{}", so we start fresh.
-        this.wallets = { user_wallets: {} };
-        return;
-      }
-
-      const parsedData = JSON.parse(data);
-      // We explicitly check for the top-level 'user_wallets' key.
-      if (!parsedData || typeof parsedData.user_wallets !== 'object') {
-        console.warn("[WM Load] Wallet file is malformed or in old format. Resetting to new structure.");
-        this.wallets = { user_wallets: {} };
-        return;
-      }
-      
-      this.wallets = parsedData;
-
-      // Convert all string public keys back into PublicKey objects for each user.
-      for (const userId in this.wallets.user_wallets) {
-        const userWalletSet = this.wallets.user_wallets[userId];
-        if (userWalletSet.trading) {
-          userWalletSet.trading.forEach(w => {
-            if (typeof w.publicKey === 'string') w.publicKey = new PublicKey(w.publicKey);
-          });
-        }
-        if (userWalletSet.withdrawal) {
-          userWalletSet.withdrawal.forEach(w => {
-             if (typeof w.publicKey === 'string') w.publicKey = new PublicKey(w.publicKey);
-          });
-        }
-      }
-
-    } catch (error) {
-      console.error(`❌ [WM Load] Error loading wallets file:`, error.message);
-      this.wallets = { user_wallets: {} }; // Reset on any catastrophic failure
-      if (error.code === 'ENOENT') {
-        await this._saveWalletsInternal(this.wallets); // Create a fresh empty file
-      }
-    }
-}
 
   // Fetches the token balance for a given owner and mint address
   async getTokenBalance(ownerPublicKey, mintAddress) {
@@ -177,39 +98,6 @@ class WalletManager extends EventEmitter {
   }
 
   // Internal helper for saving, converts PublicKey back to string for JSON
-  async _saveWalletsInternal(walletData) {
-    try {
-      const dataToSave = { user_wallets: {} };
-
-      for (const userId in walletData.user_wallets) {
-        const userWallets = walletData.user_wallets[userId];
-        dataToSave.user_wallets[userId] = {
-          trading: userWallets.trading.map(w => ({
-            ...w,
-            publicKey: w.publicKey?.toBase58(),
-            // NEW: Convert nonceAccountPubkey to string for saving
-            nonceAccountPubkey: w.nonceAccountPubkey ? w.nonceAccountPubkey.toBase58() : undefined,
-            // Exclude nonceAccountKeypair from direct save if it's there
-            nonceAccountKeypair: undefined
-          })),
-          withdrawal: userWallets.withdrawal.map(w => ({
-            ...w,
-            publicKey: w.publicKey?.toBase58()
-          }))
-        };
-      }
-
-      await fs.writeFile(this.walletsFile, JSON.stringify(dataToSave, null, 2), 'utf8');
-    } catch (error) {
-      console.error(`❌ [WM Save] Error saving wallets:`, error.message);
-      throw error;
-    }
-  }
-
-  // Public save method
-  async saveWallets() {
-    await this._saveWalletsInternal(this.wallets);
-  }
 
   async generateAndAddWallet(label, category = 'trading', ownerChatId) { // <-- ADD ownerChatId
     if (!this.initialized) throw new Error("WalletManager not initialized. Call initialize().");
@@ -376,14 +264,7 @@ class WalletManager extends EventEmitter {
         [user.id]
       );
 
-      // Get primary wallet label from database
-      let primaryLabel = null;
-      try {
-        const userSettings = JSON.parse(user.settings || '{}');
-        primaryLabel = userSettings.primaryCopyWalletLabel;
-      } catch (error) {
-        console.error(`[WM] Error getting primary wallet for user ${chatId}:`, error);
-      }
+
 
       // Convert database wallets to the expected format
       const tradingWallets = dbWallets.map(w => ({
@@ -395,7 +276,7 @@ class WalletManager extends EventEmitter {
         ownerChatId: String(chatId),
         balance: w.balance || 0,
         createdAt: w.created_at,
-        is_primary: w.label === primaryLabel || w.is_primary === 1
+
       }));
 
       return {
@@ -424,67 +305,102 @@ class WalletManager extends EventEmitter {
     }
   }
 
-   getTradingWallets(chatId) {
-    const userWalletSet = this.wallets.user_wallets?.[String(chatId)];
-    if (!userWalletSet) return [];
-    return (userWalletSet.trading || []).map(w => ({
-      ...w,
-      publicKey: w.publicKey?.toBase58(),
-      encryptedPrivateKey: 'REDACTED',
-      nonceAccountPubkey: w.nonceAccountPubkey?.toBase58(),
-      encryptedNonceAccountPrivateKey: 'REDACTED'
-    }));
+   async getTradingWallets(chatId) {
+    try {
+      const user = await this.databaseManager.getUser(String(chatId));
+      if (!user) return [];
+
+      const wallets = await this.databaseManager.all(
+        'SELECT * FROM user_wallets WHERE user_id = ?',
+        [user.id]
+      );
+
+      return wallets.map(w => ({
+        id: w.id,
+        label: w.label,
+        publicKey: w.public_key,
+        encryptedPrivateKey: 'REDACTED',
+        category: 'trading',
+        ownerChatId: String(chatId),
+        balance: w.balance || 0,
+        createdAt: w.created_at,
+        nonceAccountPubkey: w.nonce_account_pubkey,
+        encryptedNonceAccountPrivateKey: 'REDACTED'
+      }));
+    } catch (error) {
+      console.error(`[WM] Error getting trading wallets for user ${chatId}:`, error);
+      return [];
+    }
   }
 
-  // Finds wallet by label (case-sensitive), returns the INTERNAL object reference
-  getWalletByLabel(chatId, label) {
-    if (!chatId || !label) {
+
+
+
+
+
+  async getFirstTradingKeypair(chatId) {
+    if (!chatId) {
+      console.warn("[WM] getFirstTradingKeypair requires chatId parameter");
       return null;
     }
-    const userChatIdStr = String(chatId);
-    const userWalletSet = this.wallets.user_wallets?.[userChatIdStr];
-    if (!userWalletSet) {
-      return null; // User has no wallet set at all
-    }
-    const lowerCaseLabel = label.toLowerCase();
-    const allUserWallets = [
-      ...(userWalletSet.trading || []),
-      ...(userWalletSet.withdrawal || [])
-    ];
-    return allUserWallets.find(w => w.label.toLowerCase() === lowerCaseLabel) || null;
-  }
+    
+    try {
+      const user = await this.databaseManager.getUser(String(chatId));
+      if (!user) return null;
 
+      // Get the first trading wallet for this user
+      const walletRow = await this.databaseManager.get(
+        'SELECT * FROM user_wallets WHERE user_id = ? ORDER BY id ASC LIMIT 1',
+        [user.id]
+      );
 
-  getPrimaryTradingWallet() {
-    // Find the label from settings
-    const primaryLabel = this.primaryWalletLabel; // Assuming primaryWalletLabel is set during config/settings load or in bot init
-    if (primaryLabel) {
-      const wallet = this.getWalletByLabel(primaryLabel);
-      if (wallet) {
-        return wallet;
-      } else {
-        this.primaryWalletLabel = null; // Reset if wallet not found (e.g., deleted)
+      if (walletRow) {
+        const wallet = await this.getWalletById(walletRow.id);
+        if (wallet) {
+          const keypair = await this.getKeypairById(wallet.id);
+          return { keypair, wallet };
+        }
       }
+      return null;
+    } catch (error) {
+      console.error(`[WM] Error getting first trading keypair for user ${chatId}:`, error);
+      return null;
     }
-    // If no primary is set, or it's missing, try to get the first trading wallet
-    return this.wallets.trading?.[0] || null;
   }
 
-  getAdminFallbackWallet() {
-    // This method should return a FULL wallet object, not just a label.
-    // We use getAllWallets() which returns structured, safe-to-use wallet data.
-    const allWallets = this.getAllWallets();
-    const firstTradingWallet = allWallets?.tradingWallets?.[0];
-
-    if (firstTradingWallet) {
-      // Return the actual wallet object from our internal list by its label
-      return this.getWalletByLabel(firstTradingWallet.label);
+  async getAdminFallbackWallet(chatId) {
+    if (!chatId) {
+      console.warn("[WM] getAdminFallbackWallet requires chatId parameter");
+      return null;
     }
-    return null; // Return null if no trading wallets exist
+    
+    try {
+      const user = await this.databaseManager.getUser(String(chatId));
+      if (!user) return null;
+
+      // Get the first trading wallet for this user
+      const walletRow = await this.databaseManager.get(
+        'SELECT * FROM user_wallets WHERE user_id = ? ORDER BY id ASC LIMIT 1',
+        [user.id]
+      );
+
+      if (walletRow) {
+        return await this.getWalletById(walletRow.id);
+      }
+      return null;
+    } catch (error) {
+      console.error(`[WM] Error getting admin fallback wallet for user ${chatId}:`, error);
+      return null;
+    }
   }
 
-  async getKeypairByLabel(label) {
-    const wallet = this.getWalletByLabel(label);
+  async getKeypairByLabel(chatId, label) {
+    if (!chatId || !label) {
+      console.warn("[WM] getKeypairByLabel requires both chatId and label parameters");
+      return null;
+    }
+    
+    const wallet = await this.getWalletByLabel(chatId, label);
     if (!wallet) return null;
     return this.getKeypairById(wallet.id);
   }
@@ -508,7 +424,7 @@ class WalletManager extends EventEmitter {
             id: walletRow.id,
             label: walletRow.label,
             publicKey: new PublicKey(walletRow.public_key),
-            encryptedPrivateKey: walletRow.encrypted_private_key,
+            encryptedPrivateKey: walletRow.private_key_encrypted,
             category: 'trading',
             ownerChatId: String(walletRow.chat_id),
             balance: walletRow.balance,
@@ -525,56 +441,45 @@ class WalletManager extends EventEmitter {
   // Checks label existence (case-insensitive)
   async labelExists(chatId, label) {
     // This now just becomes a simple check using our corrected getWalletByLabel
-    return this.getWalletByLabel(chatId, label) !== null;
+    return await this.getWalletByLabel(chatId, label) !== null;
 }
 
-  // Delete by ID - operates on internal state
+  // Delete by ID - operates on database
   async deleteWalletById(id) {
     if (!id) { console.error("[WM Delete] Invalid ID."); return false; }
     if (!this.initialized) await this.initialize();
 
-    let initialTradingLength = this.wallets.trading?.length || 0;
-    this.wallets.trading = this.wallets.trading?.filter(w => w.id !== id);
-    let removed = initialTradingLength > (this.wallets.trading?.length || 0);
+    try {
+      // Get wallet info to find the user
+      const wallet = await this.getWalletById(id);
+      if (!wallet) return false; // Wallet doesn't exist
 
-    if (!removed) {
-      let initialWithdrawalLength = this.wallets.withdrawal?.length || 0;
-      this.wallets.withdrawal = this.wallets.withdrawal?.filter(w => w.id !== id);
-      removed = initialWithdrawalLength > (this.wallets.withdrawal?.length || 0);
-    }
+      const user = await this.databaseManager.getUser(wallet.ownerChatId);
+      if (!user) throw new Error("User not found.");
 
-    if (removed) {
-      try {
-        await this.saveWallets();
-        // console.log(`[WM Delete] Wallet ID ${id} removed and saved.`);
-        return true;
-      } catch (error) {
-        console.error(`[WM Delete] SAVE FAILED after removing wallet ID ${id}:`, error.message);
-        throw new Error(`Failed to save after deleting wallet.`); // Indicate failure if save fails
-      }
-    } else {
-      return false; // Not found
+      await this.databaseManager.deleteWallet(user.id, id);
+      console.log(`[WM Delete] Wallet ID ${id} deleted from database.`);
+      return true;
+    } catch (error) {
+      console.error(`[WM Delete] Error deleting wallet ID ${id}:`, error.message);
+      throw error;
     }
   }
 
  async deleteWalletByLabel(chatId, label) {
-    const walletToDelete = this.getWalletByLabel(chatId, label);
-    if (!walletToDelete) return false;
+     try {
+         const user = await this.databaseManager.getUser(chatId);
+         if (!user) throw new Error("User not found.");
 
-    const userWalletSet = this.wallets.user_wallets?.[String(chatId)];
-    if (!userWalletSet) return false; // Should be impossible if wallet was found, but safe
-
-    // Remove from either list if it exists.
-    if (userWalletSet.trading) {
-        userWalletSet.trading = userWalletSet.trading.filter(w => w.id !== walletToDelete.id);
-    }
-    if (userWalletSet.withdrawal) {
-        userWalletSet.withdrawal = userWalletSet.withdrawal.filter(w => w.id !== walletToDelete.id);
-    }
-
-    await this.saveWallets(); // Persist the change
-    return true;
-  }
+         // Use the new direct method from database manager
+         await this.databaseManager.deleteWalletByLabel(user.id, label);
+         console.log(`[WM Delete] Wallet "${label}" for user ${chatId} deleted from database.`);
+         return true;
+     } catch (error) {
+         console.error(`[WM Delete] Error deleting wallet "${label}" for user ${chatId}:`, error.message);
+         throw error;
+     }
+ }
 
   // Updates the internal wallet object reference with fetched balance
   async updateWalletBalance(wallet) {
@@ -610,8 +515,7 @@ class WalletManager extends EventEmitter {
     const wallet = await this.getWalletById(id);
 
     if (!wallet) {
-      console.error(`[DIAGNOSTIC] ‼️ FATAL: Wallet with ID "${id}" could not be found in the WalletManager's list.`);
-      console.error(`[DIAGNOSTIC] Current loaded trading wallet IDs:`, this.wallets.trading.map(w => w.id));
+      console.error(`[DIAGNOSTIC] ‼️ FATAL: Wallet with ID "${id}" could not be found in the database.`);
       throw new Error(`[DIAGNOSTIC] Wallet not found by ID: ${id}`);
     }
 
@@ -674,7 +578,7 @@ async getNonceKeypairByWalletId(walletId) {
 
   // Used by tradingEngine/zapbot.js - Gets keypair by label - finds internal object ref
   async getKeypairForWallet(chatId, label) {
-    const wallet = this.getWalletByLabel(chatId, label);
+    const wallet = await this.getWalletByLabel(chatId, label);
     if (!wallet) {
       console.error(`[WM Keypair] Wallet "${label}" not found for user ${chatId}.`);
       return null;
@@ -684,63 +588,41 @@ async getNonceKeypairByWalletId(walletId) {
 
   async getPrimaryTradingKeypair(chatId) {
     if (!chatId) {
-        throw new Error("[KeypairProvider] CRITICAL: A chatId is required to find the correct user's keypair.");
+        throw new Error("[KeypairProvider] CRITICAL: A chatId is required to find a keypair.");
     }
-    const userChatIdStr = String(chatId);
-
+    
     try {
-        const user = await this.databaseManager.getUser(userChatIdStr);
+        const user = await this.databaseManager.getUser(String(chatId));
         if (!user) {
-            console.warn(`[KeypairProvider] ❌ No user found for chatId ${userChatIdStr}.`);
+            console.warn(`[KeypairProvider] ❌ No user found for chatId ${chatId}.`);
             return null;
         }
-        
-        const userSettings = JSON.parse(user.settings || '{}');
-        const primaryLabel = userSettings.primaryCopyWalletLabel;
 
-        let walletRow = null;
-
-        if (primaryLabel) {
-            walletRow = await this.databaseManager.get(
-                'SELECT * FROM user_wallets WHERE user_id = ? AND label = ?',
-                [user.id, primaryLabel]
-            );
-            if (!walletRow) {
-                 console.warn(`[KeypairProvider] User ${userChatIdStr}'s primary wallet "${primaryLabel}" not found. Falling back...`);
-            }
-        }
-        
-        // If no primary is set or found, get the first wallet for that user
-        if (!walletRow) {
-            walletRow = await this.databaseManager.get(
-                'SELECT * FROM user_wallets WHERE user_id = ? ORDER BY created_at ASC LIMIT 1',
-                [user.id]
-            );
-             if (walletRow) {
-                console.log(`[KeypairProvider] Using fallback wallet for user ${userChatIdStr}: "${walletRow.label}".`);
-            }
-        }
+        // Get the user's first available wallet for trading
+        const walletRow = await this.databaseManager.get(
+            'SELECT * FROM user_wallets WHERE user_id = ? ORDER BY id ASC LIMIT 1',
+            [user.id]
+        );
 
         if (walletRow) {
             const walletObject = await this.getWalletById(walletRow.id);
-            if(!walletObject){
-                 throw new Error(`Failed to reconstruct wallet object for ID ${walletRow.id}`);
-            }
+            if (!walletObject) throw new Error(`Failed to reconstruct wallet object for ID ${walletRow.id}`);
+            
             const keypair = await this.getKeypairById(walletRow.id);
-
             if (keypair) {
+                console.log(`[KeypairProvider] ✅ Resolved wallet "${walletObject.label}" for user ${user.id}.`);
                 return { keypair: keypair, wallet: walletObject };
             }
         }
         
-        console.warn(`[KeypairProvider] ❌ No trading wallets found for user ${userChatIdStr}. Trade cannot proceed.`);
+        console.warn(`[KeypairProvider] ❌ No trading wallets found for user ${user.id}. Trade cannot proceed.`);
         return null;
 
     } catch (error) {
-        console.error(`[KeypairProvider] FATAL: Could not resolve a keypair for user ${userChatIdStr}: ${error.message}`);
+        console.error(`[KeypairProvider] FATAL: Could not resolve a keypair for user ${chatId}: ${error.message}`);
         return null;
     }
-  }
+}
 
   async getWalletByLabel(chatId, label) {
     if (!chatId || !label) {
@@ -756,8 +638,8 @@ async getNonceKeypairByWalletId(walletId) {
         }
 
         const walletRow = await this.databaseManager.get(
-            'SELECT * FROM user_wallets WHERE user_id = ? AND lower(label) = ?',
-            [user.id, lowerCaseLabel]
+            'SELECT * FROM user_wallets WHERE user_id = ? AND label = ?',
+            [user.id, label]
         );
 
         if (!walletRow) {
@@ -784,8 +666,12 @@ async getNonceKeypairByWalletId(walletId) {
   }
 
   // Signs a transaction with a given wallet label
-  async signTransaction(walletLabel, transaction) {
-    const wallet = this.getWalletByLabel(walletLabel);
+  async signTransaction(chatId, walletLabel, transaction) {
+    if (!chatId || !walletLabel) {
+      throw new Error("signTransaction requires both chatId and walletLabel parameters");
+    }
+    
+    const wallet = await this.getWalletByLabel(chatId, walletLabel);
     if (!wallet) throw new Error("Wallet not found to sign transaction.");
 
     try {
@@ -798,64 +684,42 @@ async getNonceKeypairByWalletId(walletId) {
     }
   }
 
-  // Force-update all balances and save
- async updateAllBalances(force = false) {
+  // Force-update all balances for all users
+  async updateAllBalances(force = false) {
     if (!this.initialized) throw new Error("WalletManager not initialized. Call initialize().");
     if (!this.connection) { console.warn("[WM Balances] Cannot update balances, connection not set."); return; }
 
-    const updatePromises = [];
-    
-    // Iterate through EVERY user's wallets
-    for (const userId in this.wallets.user_wallets) {
-        const userWalletSet = this.wallets.user_wallets[userId];
-        
-        // Collect update promises for trading wallets
-        if (userWalletSet.trading && Array.isArray(userWalletSet.trading)) {
-            for (const walletRef of userWalletSet.trading) {
-                updatePromises.push(this.updateWalletBalance(walletRef).catch(e => {
-                    console.error(`[WM Balances] Failed balance update for user ${userId}, wallet ${walletRef.label || 'Unknown'} (${shortenAddress(walletRef.publicKey?.toBase58() || 'N/A')}): ${e.message}`);
-                }));
-            }
-        }
-
-        // Collect update promises for withdrawal wallets
-        if (userWalletSet.withdrawal && Array.isArray(userWalletSet.withdrawal)) {
-            for (const walletRef of userWalletSet.withdrawal) {
-                updatePromises.push(this.updateWalletBalance(walletRef).catch(e => {
-                    console.error(`[WM Balances] Failed balance update for user ${userId}, withdrawal wallet ${walletRef.label || 'Unknown'} (${shortenAddress(walletRef.publicKey?.toBase58() || 'N/A')}): ${e.message}`);
-                }));
-            }
-        }
-    }
-
     try {
+      // Get all users from database
+      const users = await this.databaseManager.all('SELECT id, chat_id FROM users');
+      const updatePromises = [];
+      
+      for (const user of users) {
+        // Get all wallets for this user
+        const wallets = await this.databaseManager.all(
+          'SELECT * FROM user_wallets WHERE user_id = ?',
+          [user.id]
+        );
+        
+        for (const walletRow of wallets) {
+          const wallet = await this.getWalletById(walletRow.id);
+          if (wallet) {
+            updatePromises.push(this.updateWalletBalance(wallet).catch(e => {
+              console.error(`[WM Balances] Failed balance update for user ${user.chat_id}, wallet ${wallet.label || 'Unknown'}: ${e.message}`);
+            }));
+          }
+        }
+      }
+
       await Promise.all(updatePromises);
-      await this.saveWallets(); // Save all updates to disk
       console.log(`[WM Balances] Finished balance updates for ${updatePromises.length} wallet entries across all users.`);
     } catch (error) {
-      console.error("❌ [WM Balances] Error during final save after bulk balance update:", error.message);
+      console.error("❌ [WM Balances] Error during bulk balance update:", error.message);
       throw error; // Re-throw critical errors
     }
   }
 
-  // Reset state and delete file
-async reset() {
-    console.warn("--- RESETTING ALL WALLETS in WalletManager ---");
-    this.wallets = { user_wallets: {} }; // <-- THE FIX
-    this.initialized = false; // Mark as not initialized
-    // ... rest of the function remains the same ...
-    try {
-      await fs.unlink(this.walletsFile); // Delete the wallets file
-      console.log(`[WM Reset] Deleted wallets file: ${this.walletsFile}`);
-    } catch (error) {
-      if (error.code === 'ENOENT') {
-        console.log("[WM Reset] Wallet file already deleted or never existed.");
-      } else {
-        console.error("CRITICAL ERROR: Failed to delete wallet file during reset:", error.message);
-        throw error; // Indicate failure
-      }
-    }
-}
+
 }
 
 module.exports = WalletManager;

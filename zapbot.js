@@ -11,7 +11,7 @@ const fs = require('fs/promises');
 
 // Project Modules (CommonJS requires)
 const config = require('./config.js');
-const { DataManager } = require('./dataManager.js');
+const { DatabaseManager } = require('./database/databaseManager.js');
 const { SolanaManager } = require('./solanaManager.js');
 const TelegramUI = require('./telegramUi.js');
 const WalletManager = require('./walletManager.js');
@@ -20,7 +20,7 @@ const { ApiManager } = require('./apiManager.js');
 const TradeNotificationManager = require('./tradeNotifications.js');
 const { escapeMarkdownV2, shortenAddress } = require('./utils.js');
 const { PublicKey } = require('@solana/web3.js');
-const { CacheManager } = require('./cacheManager.js');
+const { RedisManager } = require('./redis/redisManager.js');
 const { LaserStreamManager } = require('./laserstreamManager.js');
 const platformBuilders = require('./platformBuilders.js');
 
@@ -41,7 +41,7 @@ class ZapBot {
         // Pass null for now, it will be injected.
         this.walletManager = new WalletManager(this.databaseManager);
         this.walletManager.setSolanaManager(this.solanaManager);
-        this.cacheManager = new CacheManager();
+        this.redisManager = new RedisManager();
 
         // Pass null for now, it will be injected.
         this.telegramUi = new TelegramUI(
@@ -123,7 +123,7 @@ class ZapBot {
                     onGenerateWallet: this.handleGenerateWallet.bind(this),
                     onImportWallet: this.handleImportWallet.bind(this),
                     onResetData: this.handleResetData.bind(this),
-                    onSetPrimaryWallet: this.handleSetPrimaryWallet.bind(this),
+            
                     onDeleteWallet: this.handleDeleteWallet.bind(this),
                     onWithdraw: this.handleWithdraw.bind(this),
                     onConfirmWithdraw: this.handleConfirmWithdraw.bind(this),
@@ -153,15 +153,15 @@ class ZapBot {
     console.log('✅ TransactionAnalyzer created with live connection.');
 
             const { TradingEngine } = require('./tradingEngine.js');
-            this.tradingEngine = new TradingEngine(
-                this.solanaManager,
-                this.databaseManager,
-                this.walletManager,
-                this.transactionAnalyzer,
-                this.notificationManager,
-                this.apiManager,
-                this.cacheManager
-            );
+            this.tradingEngine = new TradingEngine({
+                solanaManager: this.solanaManager,
+                databaseManager: this.databaseManager,
+                walletManager: this.walletManager,
+                transactionAnalyzer: this.transactionAnalyzer,
+                notificationManager: this.notificationManager,
+                apiManager: this.apiManager,
+                redisManager: this.redisManager
+            });
             console.log('✅ TradingEngine created with all modules.');
 
             // ---- Link the LaserStream Manager ----
@@ -252,7 +252,7 @@ class ZapBot {
     //                 for (const userId in users) {
     //                     try {
     //                         const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(userId);
-    //                         if (!keypairPacket) continue; // Skip user if no primary wallet
+    //                         if (!keypairPacket) continue; // Skip user if no trading wallet
 
     //                         let tradeData = {
     //                             tradeType: 'buy',
@@ -313,7 +313,7 @@ class ZapBot {
     //                                     amountBN: new BN(10000000), // 0.01 SOL placeholder
     //                                     slippageBps: 1000, // 1% for launchpad buys
     //                                     cachedPoolData: null,
-    //                                     updateCache: (data) => this.cacheManager.addLaunchpadPoolData(pool.poolId, data)
+    //                                     updateCache: (data) => this.redisManager.addLaunchpadPoolData(pool.poolId, data)
     //                                 });
     //                                 if (tradeData.prebuiltInstructions) {
     //                                     this._precacheSellInstruction(pool.poolId, {
@@ -401,7 +401,7 @@ class ZapBot {
 
     //                         // 5. If we successfully pre-built instructions, cache them (except Launchpad, handled above)
     //                         if (outputMint && tradeData.prebuiltInstructions && pool.market !== 'raydium_launchpad') {
-    //                             this.cacheManager.addTradeData(outputMint, tradeData);
+    //                             this.redisManager.addTradeData(outputMint, tradeData);
     //                         }
 
     //                     } catch (error) {
@@ -428,7 +428,7 @@ class ZapBot {
             if (this.isShuttingDown) return;
 
             try {
-                const allCachedMints = Array.from(this.cacheManager.tradeReadyCache.keys());
+                const allCachedMints = Array.from(this.redisManager.tradeReadyCache.keys());
                 if (allCachedMints.length === 0) return;
 
                 // Batch fetch prices and metadata
@@ -438,7 +438,7 @@ class ZapBot {
                 ]);
 
                 for (const mint of allCachedMints) {
-                    const cacheEntry = this.cacheManager.tradeReadyCache.get(mint);
+                    const cacheEntry = this.redisManager.tradeReadyCache.get(mint);
                     if (!cacheEntry) continue;
 
                     // Enhanced metadata handling
@@ -490,7 +490,7 @@ class ZapBot {
                     }
 
                     if (prune) {
-                        this.cacheManager.tradeReadyCache.delete(mint);
+                        this.redisManager.tradeReadyCache.delete(mint);
                         console.log(`[JANITOR] 🧹 Pruned ${shortenAddress(mint)} (${platform}): ${reason}`);
                     }
                 }
@@ -602,7 +602,7 @@ class ZapBot {
 
             await this.telegramUi.sendOrEditMessage(
                 chatId,
-                `✅ Trader *${escapeMarkdownV2(traderName)}* added successfully\\!`,
+                `✅ Trader *${escapeMarkdownV2(traderName)}* added successfully!`, 
                 {
                     reply_markup: {
                         inline_keyboard: [[{ text: "🔙 Main Menu", callback_data: "main_menu" }]]
@@ -619,9 +619,7 @@ class ZapBot {
         try {
             const deleted = await this.walletManager.deleteWalletByLabel(chatId, walletLabel);
             if (deleted) {
-                            // Clear primary wallet setting in database if this was the primary
-            await this.databaseManager.updateUserTradingSettings(chatId, { primary_wallet_label: null });
-            console.log(`[Action] Primary wallet reset for user ${chatId} as ${walletLabel} was deleted.`);
+                console.log(`[Action] Wallet ${walletLabel} deleted for user ${chatId}.`);
             }
             await this.telegramUi.displayWalletList(chatId);
         } catch (e) {
@@ -629,26 +627,7 @@ class ZapBot {
         }
     }
 
-    async handleSetPrimaryWallet(chatId, walletLabel) {
-        console.log(`[Action] SET PRIMARY wallet for user ${chatId} to label "${walletLabel}"`);
-        try {
-            // THE FIX: This call now uses the new case-insensitive getWalletByLabel function.
-            const walletToSet = this.walletManager.getWalletByLabel(chatId, walletLabel);
 
-            // This ownership check is now reliable.
-            if (!walletToSet || String(walletToSet.ownerChatId) !== String(chatId)) {
-                throw new Error(`Wallet "${walletLabel}" not found or you don't own it.`);
-            }
-
-            // Update primary wallet in database
-            await this.databaseManager.updateUserTradingSettings(chatId, { primary_wallet_label: walletLabel });
-
-            await this.telegramUi.displayPrimaryWalletSelection(chatId, `✅ Primary wallet set to: ${escapeMarkdownV2(walletLabel)}`);
-
-        } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to set primary wallet: ${e.message}`);
-        }
-    }
 
     // REPLACE this entire function
     async handleSetSolAmount(chatId, amount) {
@@ -714,10 +693,11 @@ class ZapBot {
 
             const message = `✅ Wallet *${escapeMarkdownV2(label)}* Imported Successfully\\!\n` +
                 `Address: \`${escapeMarkdownV2(walletInfo.publicKey.toBase58())}\`\n\n` +
-                `Now, please select your primary wallet for trading\\.`;
+                `Your wallet is ready for copy trading\\!`;
 
-            await this.telegramUi.sendOrEditMessage(chatId, message, {});
-            await this.telegramUi.displayPrimaryWalletSelection(chatId);
+            await this.telegramUi.sendOrEditMessage(chatId, message, {
+                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Wallet Menu", callback_data: "wallets_menu" }]] }
+            });
 
         } catch (e) {
             await this.telegramUi.sendErrorMessage(chatId, `Failed to import wallet: ${e.message}`);
@@ -739,9 +719,9 @@ class ZapBot {
                 throw new Error("Invalid destination wallet address.");
             }
 
-            const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
+            const keypairPacket = await this.walletManager.getFirstTradingKeypair(chatId);
             if (!keypairPacket || !keypairPacket.wallet.publicKey) {
-                throw new Error("No primary wallet configured or invalid public key.");
+                throw new Error("No trading wallet configured or invalid public key.");
             }
 
             const balance = await this.solanaManager.getBalance(keypairPacket.wallet.publicKey.toBase58());
@@ -787,9 +767,9 @@ class ZapBot {
                 throw new Error("Invalid amount.");
             }
 
-            const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
+            const keypairPacket = await this.walletManager.getFirstTradingKeypair(chatId);
             if (!keypairPacket) {
-                throw new Error("No primary wallet available.");
+                throw new Error("No trading wallet available.");
             }
 
             await this.telegramUi.sendOrEditMessage(
@@ -958,7 +938,11 @@ syncAndStartMonitoring() {
 
     async processTrade(tradeDetails, traderName) {
         try {
-            const walletInfo = (await this.walletManager.getPrimaryTradingKeypair())?.wallet;
+            // Get the first available trading wallet for the default user
+            const defaultUser = await this.databaseManager.all('SELECT * FROM users LIMIT 1');
+            if (defaultUser.length === 0) throw new Error('No users configured');
+            
+            const walletInfo = (await this.walletManager.getFirstTradingKeypair(defaultUser[0].chat_id))?.wallet;
             if (!walletInfo) throw new Error('No trading wallet available');
 
             await this.tradingEngine.executeTrade(tradeDetails, walletInfo, traderName);

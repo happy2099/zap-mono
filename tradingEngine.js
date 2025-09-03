@@ -14,32 +14,46 @@ const platformBuilders = require('./platformBuilders.js');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 const traceLogger = require('./traceLogger.js');
+const { SingaporeSenderManager } = require('./singaporeSenderManager.js');
 // const UnifiedPrebuilder = require('./unifiedPrebuilder.js');
 const sellInstructionCache = new Map();
 
 class TradingEngine {
-constructor(solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, cacheManager) {
-if (![solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, cacheManager].every(Boolean)) {
-throw new Error("TradingEngine: Missing required manager modules.");
-}
+    constructor(managers, options = {}) {
+        // Option for partial initialization (used by workers for helper methods)
+        if (options.partialInit) {
+            if (!managers.databaseManager) {
+                throw new Error("TradingEngine (Partial Init): DatabaseManager is required.");
+            }
+            this.databaseManager = managers.databaseManager;
+            // Other managers will be null, which is expected
+            return;
+        }
 
-// Initialize TradingEngine
-this.solanaManager = solanaManager;
-    this.databaseManager = databaseManager;
-    this.walletManager = walletManager;
-    this.transactionAnalyzer = transactionAnalyzer;
-    this.notificationManager = notificationManager;
-    this.apiManager = apiManager;
-    this.cacheManager = cacheManager;
+        // Full initialization with safety check
+        const { solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager } = managers;
 
-    this.isProcessing = new Set();
-    this.traderCutoffSignatures = new Map();
-    
-    // Initialize unified prebuilder
-    // this.unifiedPrebuilder = new UnifiedPrebuilder(solanaManager, walletManager);
-    
-    console.log("TradingEngine initialized with HYBRID (Polling + API) logic and Quantum Cache.");
-}
+        if (![solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager].every(Boolean)) {
+            throw new Error("TradingEngine: Missing required manager modules for full initialization.");
+        }
+
+        // Assign all managers
+        this.solanaManager = solanaManager;
+        this.databaseManager = databaseManager;
+        this.walletManager = walletManager;
+        this.transactionAnalyzer = transactionAnalyzer;
+        this.notificationManager = notificationManager;
+        this.apiManager = apiManager;
+        this.redisManager = redisManager;
+
+        this.isProcessing = new Set();
+        this.traderCutoffSignatures = new Map();
+        
+        // Initialize Singapore Sender Manager for ultra-fast execution
+        this.singaporeSenderManager = new SingaporeSenderManager();
+        
+        console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration.");
+    }
 
 handleLaserStreamData(sourceWallet, signature, txData) {
     // This is now just a clean entry point. All logic is in _executeCopyForUser.
@@ -126,20 +140,26 @@ async _getNewTransactions(walletAddress, cutoffSignature) {
 }
 
 async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, preFetchedTxData = null) {
-     // This is the fallback entry point for manual /copy or future polling systems.
-     // It simply calls the same master execution function.
+    console.log(`[PROCESS_SIG] 🎯 Processing signature for copy trade:`);
+    console.log(`   📍 Source wallet: ${shortenAddress(sourceWalletAddress)}`);
+    console.log(`   🔑 Signature: ${shortenAddress(signature)}`);
+    console.log(`   📊 Has pre-fetched data: ${!!preFetchedTxData}`);
+    console.log(`   📋 Pre-fetched data type: ${preFetchedTxData?.type || 'none'}`);
+    
+    // This is the universal entry point now for both streams and polling.
+    // We delegate immediately to the master execution function.
     this._executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData)
         .catch(error => {
-            console.error(`[PROCESS_SIG] Uncaught error for sig ${signature}:`, error);
+            console.error(`[PROCESS_SIG] ❌ Uncaught error for sig ${shortenAddress(signature)}:`, error);
         });
 }
 
 // async _handleCopyError(error, userChatId, traderName, config) {
-//     const primaryWalletLabel = config?.primaryWalletLabel || 'Unknown';
+
 //     console.error(`[EXEC-USER-${userChatId}] Copy failed for ${traderName}:`, error.message);
 
 //     await this.notificationManager.notifyFailedCopy(
-//         parseInt(userChatId), traderName, primaryWalletLabel, 'copy', `Execution failed: ${error.message}`
+//         parseInt(userChatId), traderName, 'Unknown', 'copy', `Execution failed: ${error.message}`
 //     ).catch(e => console.error(`[EXEC-USER-${userChatId}] Notification failed:`, e.message));
 // }
 
@@ -147,50 +167,50 @@ async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, 
 // ====== [START OF V2.1 CODE] ====== //
 
 
-// async handleWalletStreamEvent(txData) {
-//     // Destructure IMMEDIATELY for error safety
-//     const { signature, traderAddress } = txData;
-//     try {
-//         console.log(`[EXPRESS_LANE] Event from ${shortenAddress(traderAddress)} | Sig: ${shortenAddress(signature)}`);
+async handleWalletStreamEvent(txData) {
+    // Destructure IMMEDIATELY for error safety
+    const { signature, traderAddress } = txData;
+    try {
+        console.log(`[EXPRESS_LANE] Event from ${shortenAddress(traderAddress)} | Sig: ${shortenAddress(signature)}`);
 
-//         // STEP 1: Mint Extraction
-//         const targetMint = this._extractMintFromStreamData(txData);
-//         if (!targetMint) {
-//             return this.processSignature(traderAddress, signature); // Early exit
-//         }
+        // STEP 1: Mint Extraction
+        const targetMint = this._extractMintFromStreamData(txData);
+        if (!targetMint) {
+            return this.processSignature(traderAddress, signature); // Early exit
+        }
 
-//         // STEP 2: Dagger Strike (Pre-Signed TX Only)
-//         const preSignedTxString = this.cacheManager.getPreSignedTx(targetMint);
-//         if (preSignedTxString) {
-//             console.log(`[EXPRESS_LANE] 🚀 Dagger hit for ${shortenAddress(targetMint)}!`);
+        // STEP 2: Dagger Strike (Pre-Signed TX Only)
+        const preSignedTxString = this.redisManager.getPreSignedTx(targetMint);
+        if (preSignedTxString) {
+            console.log(`[EXPRESS_LANE] 🚀 Dagger hit for ${shortenAddress(targetMint)}!`);
 
-//             const userInfo = await this._mapTraderToUser(traderAddress);
-//             if (!userInfo) return; // Abort if no copier
+            const userInfo = await this._mapTraderToUser(traderAddress);
+            if (!userInfo) return; // Abort if no copier
 
-//             // Fire pre-signed TX
-//             const sendResult = await this.solanaManager.sendRawSerializedTransaction(preSignedTxString);
-//             if (sendResult.error) throw new Error(`Dagger execution failed: ${sendResult.error}`);
+            // Fire pre-signed TX
+            const sendResult = await this.solanaManager.sendRawSerializedTransaction(preSignedTxString);
+            if (sendResult.error) throw new Error(`Dagger execution failed: ${sendResult.error}`);
 
-//             // Post-trade workflow
-//             await this._handlePostTradeActions(userInfo, targetMint, sendResult.signature);
-//             return; // Mission complete
-//         }
+            // Post-trade workflow
+            await this._handlePostTradeActions(userInfo, targetMint, sendResult.signature);
+            return; // Mission complete
+        }
 
-//         // STEP 3: Fallback (No Dagger)
-//         console.log(`[EXPRESS_LANE] No Dagger. Falling back to Standard Lane.`);
-//         return this.processSignature(traderAddress, signature);
+        // STEP 3: Fallback (No Dagger)
+        console.log(`[EXPRESS_LANE] No Dagger. Falling back to Standard Lane.`);
+        return this.processSignature(traderAddress, signature);
 
-//     } catch (error) {
-//         console.error(`[EXPRESS_LANE] Failure: ${error.message}`);
-//         return this.processSignature(traderAddress, signature); // Error-safe fallback
-//     }
-// }
+    } catch (error) {
+        console.error(`[EXPRESS_LANE] Failure: ${error.message}`);
+        return this.processSignature(traderAddress, signature); // Error-safe fallback
+    }
+}
 
 async executeManualSell(userChatId, tokenMint) {
     console.log(`[MANUAL_SELL-${userChatId}] Order received for token: ${shortenAddress(tokenMint)}`);
-    const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+    const keypairPacket = await this.walletManager.getFirstTradingKeypair(userChatId);
     if (!keypairPacket) {
-        return this.notificationManager.notifyFailedCopy(userChatId, 'Manual Sell', 'N/A', 'sell', 'No primary wallet found.');
+        return this.notificationManager.notifyFailedCopy(userChatId, 'Manual Sell', 'N/A', 'sell', 'No trading wallet found.');
     }
     const { keypair, wallet } = keypairPacket;
 
@@ -217,7 +237,7 @@ async executeManualSell(userChatId, tokenMint) {
             };
         } else {
             // If no migration, we use the cached platform info from the buy.
-            const cachedBuyInfo = this.cacheManager.getTradeData(tokenMint);
+            const cachedBuyInfo = this.redisManager.getTradeData(tokenMint);
             if (!cachedBuyInfo || !cachedBuyInfo.platform) {
                 // As a last resort, check pump.fun AMM
                 const pumpAmmPool = await platformBuilders.getPumpAmmPoolState(tokenMint).catch(() => null);
@@ -260,10 +280,10 @@ async executeManualSell(userChatId, tokenMint) {
 
 // ====== [CRITICAL HELPER] ====== //
 // async _handlePostTradeActions(userInfo, targetMint, signature) {
-//     const { userChatId, traderName, primaryWalletLabel } = userInfo;
+//     const { userChatId, traderName } = userInfo;
 
 //     // Get trade metadata (SOL spent, token amount, etc.)
-//     const metadata = this.cacheManager.getTradeData(targetMint) || {};
+//     const metadata = this.redisManager.getTradeData(targetMint) || {};
 
 //     // Update position in database
 //     await this.databaseManager.recordBuyPosition(
@@ -282,7 +302,7 @@ async executeManualSell(userChatId, tokenMint) {
 //     await this.notificationManager.notifySuccessfulCopy(
 //         userChatId,
 //         traderName,
-//         primaryWalletLabel,
+//         'Unknown',
 //         notificationResult
 //     );
 
@@ -329,7 +349,7 @@ async executeManualSell(userChatId, tokenMint) {
 //                         userChatId: parseInt(userChatId),
 //                         keypair: keypairPacket.keypair,
 //                         traderName: traderName,
-//                         primaryWalletLabel: keypairPacket.wallet.label
+//                         walletLabel: keypairPacket.wallet.label
 //                     };
 //                 }
 //             }
@@ -342,12 +362,34 @@ async executeManualSell(userChatId, tokenMint) {
 
 
 async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
-    if (this.isProcessing.has(signature)) return;
+    if (this.isProcessing.has(signature)) {
+        console.log(`[EXECUTE_MASTER] ⚠️ Already processing signature ${shortenAddress(signature)}, skipping...`);
+        return;
+    }
     this.isProcessing.add(signature);
 
     try {
+        console.log(`[EXECUTE_MASTER] 🔍 Starting analysis for transaction ${shortenAddress(signature)}...`);
+        console.log(`[EXECUTE_MASTER] 📍 Source wallet: ${shortenAddress(sourceWalletAddress)}`);
+        console.log(`[EXECUTE_MASTER] 📊 Pre-fetched data available: ${!!preFetchedTxData}`);
+        
         const analysisResult = await this.transactionAnalyzer.analyzeTransactionForCopy(signature, preFetchedTxData, sourceWalletAddress);
-        if (!analysisResult.isCopyable) return;
+        
+        // Clean summary instead of massive JSON dump
+        if (analysisResult.isCopyable && analysisResult.summary) {
+            console.log(`[EXECUTE_MASTER] 📊 ${analysisResult.summary}`);
+        } else if (analysisResult.isCopyable) {
+            console.log(`[EXECUTE_MASTER] ✅ Copyable: ${analysisResult.details?.dexPlatform} ${analysisResult.details?.tradeType}`);
+        } else {
+            console.log(`[EXECUTE_MASTER] ❌ Not copyable: ${analysisResult.reason}`);
+        }
+        
+        if (!analysisResult.isCopyable) {
+            console.log(`[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: ${analysisResult.reason || 'Unknown'}`);
+            return;
+        }
+        
+        console.log(`[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: ${analysisResult.details.dexPlatform}, Type: ${analysisResult.details.tradeType}`);
 
         // ✅ ARCHITECTURE WIN: Platform is analyzed ONCE per trader event.
         const platformExecutorMap = {
@@ -365,33 +407,42 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         };
         const executorConfig = platformExecutorMap[analysisResult.details.dexPlatform];
 
+        console.log(`[EXECUTE_MASTER] 🔍 Loading traders from database...`);
         const syndicateData = await this.databaseManager.loadTraders();
+        console.log(`[EXECUTE_MASTER] 📊 Found ${Object.keys(syndicateData.user_traders || {}).length} users with traders`);
+        
         const copyJobs = [];
         for (const [userChatId, userTraders] of Object.entries(syndicateData.user_traders || {})) {
             for (const [traderName, traderConfig] of Object.entries(userTraders)) {
                 if (traderConfig.active && traderConfig.wallet === sourceWalletAddress) {
                     copyJobs.push({ userChatId: parseInt(userChatId), traderName });
+                    console.log(`[EXECUTE_MASTER] ✅ Found active trader: ${traderName} for user ${userChatId}`);
                 }
             }
         }
         
-        if (copyJobs.length === 0) return;
-        console.log(`[EXECUTE_MASTER] Dispatching copy for ${analysisResult.details.dexPlatform} trade to ${copyJobs.length} user(s).`);
+        if (copyJobs.length === 0) {
+            console.log(`[EXECUTE_MASTER] ⚠️ No active traders found for wallet ${shortenAddress(sourceWalletAddress)}`);
+            return;
+        }
+        
+        console.log(`[EXECUTE_MASTER] 🚀 Dispatching copy for ${analysisResult.details.dexPlatform} trade to ${copyJobs.length} user(s).`);
 
         await Promise.allSettled(
             copyJobs.map(job => 
-                this._sendTradeForUser( // Renamed for clarity
+                this._executeCopyTradeWithSingaporeSender( // Use Singapore Sender for ultra-fast execution
                     analysisResult.details, 
                     job.traderName, 
                     job.userChatId, 
                     signature,
-                    executorConfig // ✅ Correctly passing the pre-calculated config
+                    executorConfig
                 )
             )
         );
 
     } catch (error) {
-        console.error(`[MASTER_EXECUTION] Top-level error for sig ${shortenAddress(signature)}:`, error.message);
+        console.error(`[MASTER_EXECUTION] ❌ Top-level error for sig ${shortenAddress(signature)}:`, error.message);
+        console.error(`[MASTER_EXECUTION] Stack trace:`, error.stack);
     } finally {
         this.isProcessing.delete(signature);
     }
@@ -409,10 +460,10 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
 
     try {
         // === 1️⃣ WALLET & BUY VALIDATION ===
-        const primaryWalletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
-        if (!primaryWalletPacket) throw new Error("No primary keypair found to build sell instruction.");
+        const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+        if (!walletPacket) throw new Error("No trading wallet found to build sell instruction.");
 
-        const { keypair, wallet } = primaryWalletPacket;
+        const { keypair, wallet } = walletPacket;
 
         const amountReceivedBN = await this._getAmountReceivedFromBuy(buySignature, keypair.publicKey.toBase58(), tokenMint);
 
@@ -465,7 +516,7 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
             swapDetails: sellTradeDetails,
             amountBN: amountReceivedBN, // Use the precise amount we received
             slippageBps: 9000, // High slippage for "get me out" sells
-            cacheManager: this.cacheManager,
+            cacheManager: this.redisManager,
         };
 
         const sellInstructions = await builder(builderOptions);
@@ -482,7 +533,7 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
             sellReady: true // A flag to indicate we can trigger this sell
         };
 
-        this.cacheManager.addTradeData(tokenMint, sellReadyPacket);
+        this.redisManager.addTradeData(tokenMint, sellReadyPacket);
         console.log(`[PRE-SELL-${userChatId}] ✅ PRE-BUILT (Instruction-only) sell is cached & ready for ${shortenAddress(tokenMint)}.`);
 
     } catch (error) {
@@ -496,11 +547,11 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
     // ✅ USER-FRIENDLY FIX: Graceful handling of missing wallets.
     const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
     if (!keypairPacket) {
-        this.notificationManager.notifyFailedCopy(userChatId, traderName, "N/A", "copy", "No primary trading wallet set.");
-        await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', "User has no primary wallet.");
+        this.notificationManager.notifyFailedCopy(userChatId, traderName, "N/A", "copy", "No trading wallet found.");
+        await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', "User has no trading wallet.");
         return; // Exit gracefully for this user.
     }
-    const { keypair, wallet: primaryWallet } = keypairPacket;
+    const { keypair, wallet } = keypairPacket;
 
     // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
 const isBuy = tradeDetails.tradeType === 'buy';
@@ -514,7 +565,7 @@ if (isBuy) {
         console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
         
         // Notify the user why the copy was skipped.
-        this.notificationManager.notifyNoCopy(userChatId, traderName, primaryWallet.label, reason)
+        this.notificationManager.notifyNoCopy(userChatId, traderName, wallet.label, reason)
             .catch(e => console.error(`[Notification Error] Gatekeeper notification failed: ${e.message}`));
         
         // CRITICAL: Stop the function here to prevent the buy.
@@ -547,7 +598,7 @@ if (isBuy) {
             tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
         }
 
-        const buildOptions = { connection: this.solanaManager.connection, keypair, swapDetails: tradeDetails, amountBN, slippageBps: isBuy ? 2500 : 9000, cacheManager: this.cacheManager };
+        const buildOptions = { connection: this.solanaManager.connection, keypair, swapDetails: tradeDetails, amountBN, slippageBps: isBuy ? 2500 : 9000, cacheManager: this.redisManager }; // <-- CORRECTED
         const preSellBalance = await this.solanaManager.connection.getBalance(keypair.publicKey);
         const instructions = await builder(buildOptions);
         if (!instructions || !instructions.length) throw new Error("Platform builder returned no instructions.");
@@ -586,7 +637,7 @@ const finalInstructions = [
         console.log(`[EXECUTION] ✅ Success for user ${userChatId} on ${tradeDetails.dexPlatform}. Sig: ${signature}`);
 
         const finalizedDetails = { ...tradeDetails, signature, solSpent: solAmountForNotification, solFee: solFee };
-        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, primaryWallet.label, finalizedDetails);
+        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, finalizedDetails);
         if (isBuy) {
             await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, finalizedDetails.outputAmountRaw || "0", solAmountForNotification);
             finalizedDetails.userChatId = userChatId;
@@ -594,15 +645,21 @@ const finalInstructions = [
                } else {
             // Get post-sell balance to calculate solReceived accurately
             const postSellBalance = await this.solanaManager.connection.getBalance(keypair.publicKey);
-            const solReceived = (postSellBalance - preSellBalance) / config.LAMPORTS_PER_SOL_CONST;
+            const solReceived = (postSellBalance - preSellBalance + finalizedDetails.solFee * config.LAMPORTS_PER_SOL_CONST) / config.LAMPORTS_PER_SOL_CONST;
             finalizedDetails.solReceived = solReceived;
 
-            await this.databaseManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, amountBN.toString(), solFee, solReceived);
+            await this.databaseManager.updatePositionAfterSell(
+                userChatId, 
+                tradeDetails.inputMint, 
+                amountBN.toString(), 
+                finalizedDetails.solFee, 
+                solReceived
+            );
         }
     } catch (error) {
         console.error(`[EXECUTION] ❌ FAILED for user ${userChatId} (${shortenAddress(masterTxSignature)}):`, error.message);
         await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', error.message);
-        this.notificationManager.notifyFailedCopy(userChatId, traderName, primaryWallet.label, tradeDetails.tradeType, error.message);
+        this.notificationManager.notifyFailedCopy(userChatId, traderName, wallet.label, tradeDetails.tradeType, error.message);
     }
 }
 
@@ -813,7 +870,7 @@ async processRaydiumV4PoolCreation(signature) {
 
 
 async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacket, masterTxSignature) {
-    const { keypair, wallet: primaryWallet } = keypairPacket;
+    const { keypair, wallet } = keypairPacket;
 
     try {
         console.log(`[UniversalAPI-USER-${userChatId}] Engaging Jupiter API for ${tradeDetails.tradeType} trade...`);
@@ -881,7 +938,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
         } else {
             await this.databaseManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
         }
-        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, primaryWallet.label, { ...tradeDetails, signature: finalSignature });
+        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { ...tradeDetails, signature: finalSignature });
 
 
    } catch (e) {
@@ -937,7 +994,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 //     try {
 //         const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
 //         if (!keypairPacket) {
-//             console.warn(`[PRE-BUILD] Skipping Pump.fun pre-build. No primary wallet set.`);
+//             console.warn(`[PRE-BUILD] Skipping Pump.fun pre-build. No trading wallet available.`);
 //             return;
 //         }
 
@@ -991,7 +1048,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 //                         expiresAt: Date.now() + (5 * 60 * 1000) // 5 minutes expiry
 //                     };
                     
-//                     this.cacheManager.addTradeData(cacheKey, cacheData);
+//                     this.redisManager.addTradeData(cacheKey, cacheData);
 //                     console.log(`[QUANTUM CACHE] ✅ PRE-BUILT ${size.label} trade for PUMP token ${shortenAddress(tokenMint)} stored.`);
 //                 }
 
@@ -1065,7 +1122,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 // async executePrebuiltPumpTrade(tokenMint, tradeSize = 'medium', signature) {
 //     try {
 //         const cacheKey = `pump_${tokenMint.toBase58()}_${tradeSize}`;
-//         const cachedData = this.cacheManager.getTradeData(cacheKey);
+//         const cachedData = this.redisManager.getTradeData(cacheKey);
         
 //         if (!cachedData || !cachedData.presignedTransaction) {
 //             console.warn(`[PUMP.FUN] No prebuilt transaction found for ${shortenAddress(tokenMint)} (${tradeSize})`);
@@ -1075,7 +1132,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 //         // Check if transaction is still valid (not expired)
 //         if (cachedData.expiresAt && Date.now() > cachedData.expiresAt) {
 //             console.warn(`[PUMP.FUN] Prebuilt transaction expired for ${shortenAddress(tokenMint)}`);
-//             this.cacheManager.removeTradeData(cacheKey);
+//             this.redisManager.removeTradeData(cacheKey);
 //             return { success: false, reason: 'Transaction expired' };
 //         }
 
@@ -1093,7 +1150,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 
 //         if (result.success) {
 //             // Remove from cache after successful execution
-//             this.cacheManager.removeTradeData(cacheKey);
+//             this.redisManager.removeTradeData(cacheKey);
             
 //             await traceLogger.appendTrace(signature, 'pump_execute_prebuilt_success', {
 //                 txSignature: result.signature,
@@ -1120,7 +1177,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 // async simulatePrebuiltPumpTrade(tokenMint, tradeSize = 'medium', signature) {
 //     try {
 //         const cacheKey = `pump_${tokenMint.toBase58()}_${tradeSize}`;
-//         const cachedData = this.cacheManager.getTradeData(cacheKey);
+//         const cachedData = this.redisManager.getTradeData(cacheKey);
         
 //         if (!cachedData || !cachedData.presignedTransaction) {
 //             return { success: false, reason: 'No prebuilt transaction found' };
@@ -1177,7 +1234,7 @@ async processPumpFunPoolCreation(instructionData) {
             platformSpecificData: { poolId }
         };
 
-        this.cacheManager.addTradeData(tokenMint, tradeDataPacket);
+        this.redisManager.addTradeData(tokenMint, tradeDataPacket);
 
     } catch (error) {
         console.error('[PUMP.FUN HANDLER] Error processing new pool:', error);
@@ -1277,7 +1334,7 @@ async executePumpFunTrade(tradeDetails, signature) {
 //             platformSpecificData: { poolId }
 //         };
 
-//         this.cacheManager.addTradeData(tokenMint, tradeDataPacket);
+//         this.redisManager.addTradeData(tokenMint, tradeDataPacket);
 
 //     } catch (error) {
 //         console.error('[DLMM HANDLER] Error processing new DLMM pool:', error);
@@ -1312,7 +1369,7 @@ async executePumpFunTrade(tradeDetails, signature) {
 //             platformSpecificData: { poolId }
 //         };
 
-//         this.cacheManager.addTradeData(baseMint, tradeDataPacket);
+//         this.redisManager.addTradeData(baseMint, tradeDataPacket);
 
 //     } catch (error) {
 //         console.error('[DBC HANDLER] Error processing new DBC pool:', error);
@@ -1347,7 +1404,7 @@ async executePumpFunTrade(tradeDetails, signature) {
 //         };
 
 //         // Cache it for fast matching when trader buys
-//         this.cacheManager.setTradeData(mint, tradeDetails);
+//         this.redisManager.setTradeData(mint, tradeDetails);
 
 //         // Optionally notify dev team or simulate
 //         // await this.notificationManager.sendDevAlert("New Pump.fun token cached: " + mint);
@@ -1481,8 +1538,141 @@ async checkPumpFunMigration(tokenMint) {
             this.isProcessing.delete(signature);
         }
     }
+
     // ==========================================================
-    // ============ [END] HELIUS WEBHOOK PROCESSOR ============
+    // ============ SINGAPORE SENDER INTEGRATION ============
+    // ==========================================================
+
+    /**
+     * Execute copy trade using Singapore Sender endpoint for ultra-fast execution
+     */
+    async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, executorConfig) {
+        try {
+            console.log(`[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
+            console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
+            console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
+
+            // Get user's trading wallet
+            const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+            if (!walletPacket) {
+                throw new Error(`No trading wallet found for user ${userChatId}`);
+            }
+
+            const { keypair, wallet } = walletPacket;
+            console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet.label}`);
+
+            // Build trade instructions using platform builders
+            const builderMap = {
+                'Pump.fun': platformBuilders.buildPumpFunInstruction,
+                'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
+                'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
+                'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
+                'Raydium CLMM': platformBuilders.buildRaydiumClmmInstruction,
+                'Raydium CPMM': platformBuilders.buildRaydiumCpmmInstruction,
+                'Meteora DLMM': platformBuilders.buildMeteoraDLMMInstruction,
+                'Meteora DBC': platformBuilders.buildMeteoraDBCInstruction,
+                'Meteora CP-AMM': platformBuilders.buildMeteoraCpAmmInstruction,
+                'Jupiter Aggregator': platformBuilders.buildJupiterSwapInstruction,
+            };
+
+            const builder = builderMap[tradeDetails.dexPlatform];
+            if (!builder) {
+                throw new Error(`No builder available for platform: ${tradeDetails.dexPlatform}`);
+            }
+
+            // Build instructions with enhanced options
+            const builderOptions = {
+                connection: this.solanaManager.connection,
+                keypair,
+                userPublicKey: keypair.publicKey,
+                swapDetails: tradeDetails,
+                amountBN: new BN(tradeDetails.inputAmountRaw || '1000000000'), // Default 1 SOL
+                slippageBps: 500, // 5% slippage for copy trades
+                cacheManager: this.redisManager,
+            };
+
+            console.log(`[SINGAPORE-SENDER] 🔧 Building instructions for ${tradeDetails.dexPlatform}...`);
+            const instructions = await builder(builderOptions);
+
+            if (!instructions || instructions.length === 0) {
+                throw new Error(`Failed to build instructions for ${tradeDetails.dexPlatform}`);
+            }
+
+            console.log(`[SINGAPORE-SENDER] ✅ Built ${instructions.length} instructions`);
+
+            // Prepare trade details for Singapore Sender
+            const enhancedTradeDetails = {
+                ...tradeDetails,
+                tokenMint: tradeDetails.outputMint,
+                tradeSize: 'Standard',
+                userChatId,
+                traderName,
+                masterSignature
+            };
+
+            // Execute via Singapore Sender
+            const result = await this.singaporeSenderManager.executeCopyTrade(
+                instructions,
+                keypair,
+                enhancedTradeDetails
+            );
+
+            console.log(`[SINGAPORE-SENDER] 🎉 Copy trade executed successfully!`);
+            console.log(`[SINGAPORE-SENDER] 📊 Result:`, {
+                signature: shortenAddress(result.signature),
+                tipAmount: result.tipAmount,
+                computeUnits: result.computeUnits,
+                endpoint: result.endpoint
+            });
+
+            // Send notification
+            if (this.notificationManager) {
+                await this.notificationManager.notifySuccessfulCopy(
+                    userChatId,
+                    traderName,
+                    tradeDetails,
+                    result.signature,
+                    'singapore-sender'
+                );
+            }
+
+            // Log success
+            await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
+                userChatId,
+                success: true,
+                signature: result.signature,
+                tipAmount: result.tipAmount
+            });
+
+            return result;
+
+        } catch (error) {
+            console.error(`[SINGAPORE-SENDER] ❌ Copy trade execution failed for user ${userChatId}:`, error);
+            
+            // Log failure
+            if (masterSignature) {
+                await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
+                    userChatId,
+                    success: false,
+                    error: error.message
+                });
+            }
+
+            // Send error notification
+            if (this.notificationManager) {
+                await this.notificationManager.sendErrorNotification(
+                    userChatId,
+                    `Copy trade failed: ${error.message}`,
+                    'singapore-sender'
+                );
+            }
+
+            throw error;
+        }
+    }
+
+    // ==========================================================
+    // ============ [END] SINGAPORE SENDER INTEGRATION ============
     // ==========================================================
 
 }

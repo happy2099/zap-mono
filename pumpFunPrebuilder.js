@@ -14,7 +14,7 @@
 //     constructor(solanaManager, walletManager) {
 //         this.solanaManager = solanaManager;
 //         this.walletManager = walletManager;
-//         // Initialize pumpSdk later when needed, since getPrimaryWallet is async
+//         // Initialize pumpSdk later when needed
 //         this.pumpSdk = null;
         
 //         // Pump.fun program IDs
@@ -26,13 +26,13 @@
 //     }
 
 //     /**
-//      * Initialize pumpSdk with the primary wallet
+//      * Initialize pumpSdk with the first available wallet
 //      */
 //     async initializePumpSdk() {
 //         if (!this.pumpSdk) {
 //             const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
 //             if (!keypairPacket) {
-//                 throw new Error('No primary wallet available for Pump SDK');
+//                 throw new Error('No trading wallet available for Pump SDK');
 //             }
 //             this.pumpSdk = new PumpSdk({
 //                 connection: this.solanaManager.connection,
@@ -243,7 +243,7 @@
 //                 return associatedTokenAddress;
 //             }
 
-//             // Get primary wallet for fee payer
+//             // Get first available wallet for fee payer
 //             const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
             
 //             // Create associated token account instruction

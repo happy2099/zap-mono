@@ -1,0 +1,11 @@
+{
+  "traceVersion": "1.1",
+  "signature": "31uuxipYuDa7c7wUw7CmuijU8oKXFLVtscP3ZiVC98gVnsZFDBU4MtvqTKN72EmjZQP6fKRVrH9ofXbFLvhVv4u7",
+  "traderWallet": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-09-02T13:14:16.974Z",
+  "steps": [],
+  "finalOutcome": "FAILURE",
+  "finalReason": "No recorded position for this token.",
+  "timestamp_end": "2025-09-02T13:14:17.181Z"
+}

@@ -36,7 +36,7 @@
 //         if (!this.pumpSdk) {
 //             const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
 //             if (!keypairPacket) {
-//                 throw new Error('No primary wallet available for Pump SDK');
+//                 throw new Error('No trading wallet available for Pump SDK');
 //             }
 //             this.pumpSdk = new PumpSdk({
 //                 connection: this.connection,

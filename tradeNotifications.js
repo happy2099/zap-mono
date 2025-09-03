@@ -32,14 +32,18 @@ class TradeNotificationManager {
     async _sendMessage(chatId, text, options = {}) {
         const finalOptions = { parse_mode: 'MarkdownV2', disable_web_page_preview: true, ...options };
         if (this.workerManager) {
-            // Dispatch to the Telegram worker thread
+            // Dispatch to the Telegram worker thread if in a threaded environment
             this.workerManager.dispatch('telegram', {
-                type: 'send_message',
+                type: 'SEND_MESSAGE',
                 payload: { chatId, text, options: finalOptions }
             });
         } else if (this.bot) {
-            // Send directly using the bot instance
-            await this.bot.sendMessage(chatId, text, finalOptions);
+            // Send directly using the bot instance if running single-threaded
+            // This is a direct command, so we 'await' it.
+            return this.bot.sendMessage(chatId, text, finalOptions);
+        } else {
+             // If neither is available, we log the failure to send.
+            console.error(`[NotificationManager] Cannot send message: No bot instance or worker manager available. ChatID: ${chatId}`);
         }
     }
     
@@ -47,7 +51,7 @@ class TradeNotificationManager {
     async _pinMessage(chatId, messageId) {
         if (this.workerManager) {
             this.workerManager.dispatch('telegram', {
-                type: 'pin_message',
+                type: 'PIN_MESSAGE',
                 payload: { chatId, messageId, disable_notification: true }
             });
         } else if (this.bot) {
@@ -137,6 +141,20 @@ class TradeNotificationManager {
             console.error(`[SOLANA_RPC] Network/Fetch error for metadata of ${shortenAddress(mintAddress)}:`, error);
             return null;
         }
+    }
+
+    // Alias function for compatibility
+    async sendCopyTradeNotification(chatId, traderName, tradeDetails, signature, additionalInfo = {}) {
+        return this.notifySuccessfulCopy(chatId, traderName, additionalInfo.walletLabel || 'Trading Wallet', {
+            ...tradeDetails,
+            signature,
+            ...additionalInfo
+        });
+    }
+
+    // Alias function for error notifications
+    async sendErrorNotification(chatId, message, context = '') {
+        return this.notifyFailedCopy(chatId, 'System', 'Bot', 'error', `${context}: ${message}`);
     }
 
     async notifySuccessfulCopy(chatId, traderName, copyWalletLabel, tradeResult) {

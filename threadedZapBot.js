@@ -60,12 +60,6 @@ class ThreadedZapBot {
                 required: false
             },
             { 
-                name: 'cache', 
-                file: './workers/cacheManagerWorker.js', 
-                options: { maxMemory: '256MB' },
-                required: true
-            },
-            { 
                 name: 'analyzer', 
                 file: './workers/transactionAnalyzerWorker.js', 
                 options: { maxMemory: '512MB' },
@@ -268,6 +262,45 @@ class ThreadedZapBot {
         this.messageHandlers.set('TELEGRAM_MESSAGE_SENT', (workerName, message) => {
             console.log(`📱 Telegram message sent by ${workerName}:`, message.chatId);
         });
+
+        this.messageHandlers.set('EXECUTE_COPY_TRADE', (workerName, message) => {
+            console.log(`🚀 FORWARDING COPY TRADE from ${workerName} to executor:`);
+            console.log(`   📍 Trader: ${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)}`);
+            console.log(`   🔑 Signature: ${message.signature.substring(0,8)}...`);
+            console.log(`   📊 Has pre-fetched data: ${!!message.preFetchedTxData}`);
+            
+            const executorWorker = this.workers.get('executor');
+            if (executorWorker && this.workerStates.get('executor') === 'ready') {
+                console.log(`✅ Executor worker ready, forwarding message...`);
+                // Pass the ENTIRE message payload, including pre-fetched data,
+                // to the executor for the fastest possible analysis.
+                executorWorker.postMessage(message); 
+            } else {
+                console.error(`❌ Executor worker not ready for copy trade execution. Status: ${this.workerStates.get('executor')}`);
+            }
+        });
+
+        // =========================================================================================
+        // ================================ START: ADD THIS CODE BLOCK ===============================
+        // =========================================================================================
+
+        this.messageHandlers.set('SEND_NOTIFICATION', (workerName, message) => {
+            console.log(`[ROUTER] Forwarding notification from ${workerName} to telegram worker.`);
+            const telegramWorker = this.workers.get('telegram');
+            if (telegramWorker && this.workerStates.get('telegram') === 'ready') {
+                // We directly forward the core payload to the telegram worker
+                telegramWorker.postMessage({
+                    type: 'SEND_MESSAGE',
+                    payload: message.payload 
+                });
+            } else {
+                console.error(`❌ Telegram worker not ready for notification from ${workerName}`);
+            }
+        });
+
+        // =========================================================================================
+        // ================================= END: ADD THIS CODE BLOCK ================================
+        // =========================================================================================
     }
 
     setupWorkerMonitoring() {
@@ -370,12 +403,8 @@ class ThreadedZapBot {
                 return;
             }
 
-            // Send start monitoring command to the monitor worker
-            monitorWorker.postMessage({
-                type: 'START_MONITORING'
-            });
 
-            console.log('✅ Trader monitoring started');
+            console.log('✅ Trader monitoring started (auto-run via LaserStream in worker).');
         } catch (error) {
             console.error('❌ Failed to start trader monitoring:', error);
         }

@@ -12,6 +12,7 @@ const bs58 = require('bs58');
 const { shortenAddress, sleep } = require('./utils');
 const config = require('./config.js');
 const sellInstructionCache = new Map();
+const axios = require('axios'); // Add this line at the top
 
 
 class RPCLoadBalancer {
@@ -200,117 +201,94 @@ class SolanaManager {
 
 
 
-   async sendVersionedTransaction({
-   instructions = [],
-   prebuiltTx = null, // ✅ KEEP THIS CRITICAL PARAMETER
-   signer,
-   lookupTableAddresses = []
-}) {
-   let lastError;
-   const maxRetries = 3;
+   async sendVersionedTransaction({ instructions = [], prebuiltTx = null, signer, lookupTableAddresses = [] }) {
+    let lastError;
+    const maxRetries = 3;
 
-   for (let attempt = 1; attempt <= maxRetries; attempt++) {
-       try {
-           const { blockhash, lastValidBlockHeight } = await this.getBlockhashWithRetry();
-           
-           let transaction;
-           let finalInstructions = [];
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const { blockhash, lastValidBlockHeight } = await this.getBlockhashWithRetry();
+            let transaction;
 
-           // --- Transaction Assembly ---
-           if (prebuiltTx) {
-               // ✅ KEEP PREBUILT TX SUPPORT (FROM V1)
-               transaction = prebuiltTx;
-               transaction.message.recentBlockhash = blockhash;
-           } else {
-               // ✅ USE V2's BUG FIX: Don't mutate original array
-               finalInstructions = [...instructions]; // Create copy
-               
-               if (finalInstructions.length === 0) {
-                   throw new Error("Transaction failed: No instructions provided.");
-               }
+            if (prebuiltTx) {
+                transaction = prebuiltTx;
+                transaction.message.recentBlockhash = blockhash;
+            } else {
+                if (instructions.length === 0) {
+                    throw new Error("Transaction failed: No instructions provided.");
+                }
 
-               // --- HELIUS SENDER REQUIREMENTS ---
-               // 1. Add Priority Fee Instruction (must be first)
-               finalInstructions.unshift(ComputeBudgetProgram.setComputeUnitPrice({ 
-                   microLamports: this.getDynamicPriorityFee('ultra') 
-               }));
-               
-               // 2. Add Jito Tip Instruction (must be included)
-               const tipAccount = new PublicKey(
-                   config.TIP_ACCOUNTS[Math.floor(Math.random() * config.TIP_ACCOUNTS.length)]
-               );
-               finalInstructions.push(
-                   SystemProgram.transfer({
-                       fromPubkey: signer.publicKey,
-                       toPubkey: tipAccount,
-                       lamports: config.DEFAULT_JITO_TIP_LAMPORTS,
-                   })
-               );
+                // The Helius Sender API requires a Jito tip instruction.
+                const tipAccount = new PublicKey(
+                    config.TIP_ACCOUNTS[Math.floor(Math.random() * config.TIP_ACCOUNTS.length)]
+                );
+                const finalInstructions = [
+                    ...instructions, // Place user instructions first
+                    SystemProgram.transfer({ // Add Jito tip at the end
+                        fromPubkey: signer.publicKey,
+                        toPubkey: tipAccount,
+                        lamports: config.DEFAULT_JITO_TIP_LAMPORTS,
+                    })
+                ];
 
-               const lookupTables = (await Promise.all(
-                   lookupTableAddresses.map(addr => this.fetchALTTable(addr))
-               )).filter(Boolean);
+                const lookupTables = (await Promise.all(
+                    lookupTableAddresses.map(addr => this.fetchALTTable(addr))
+                )).filter(Boolean);
 
-               const messageV0 = new TransactionMessage({
-                   payerKey: signer.publicKey,
-                   recentBlockhash: blockhash,
-                   instructions: finalInstructions,
-               }).compileToV0Message(lookupTables);
+                const messageV0 = new TransactionMessage({
+                    payerKey: signer.publicKey,
+                    recentBlockhash: blockhash,
+                    instructions: finalInstructions,
+                }).compileToV0Message(lookupTables);
 
-               transaction = new VersionedTransaction(messageV0);
-           }
+                transaction = new VersionedTransaction(messageV0);
+            }
 
-           // Sign the transaction
-           transaction.sign([signer]);
-           const serializedTx = Buffer.from(transaction.serialize()).toString('base64');
+            transaction.sign([signer]);
+            const serializedTx = transaction.serialize();
+            
+            console.log(`[Sender API] Sending transaction... Attempt ${attempt}`);
 
-           // --- Helius Sender API Call ---
-           const response = await fetch(config.SENDER_ENDPOINT, {
-               method: 'POST',
-               headers: { 'Content-Type': 'application/json' },
-               body: JSON.stringify({
-                   jsonrpc: '2.0',
-                   id: 'zapbot-sender',
-                   method: 'sendTransaction',
-                   params: [
-                       serializedTx,
-                       {
-                           encoding: 'base64',
-                           skipPreflight: true,
-                           maxRetries: 0
-                       }
-                   ]
-               })
-           });
+            // Use the new Helius Sender API endpoint
+            const { data } = await axios.post(config.SENDER_ENDPOINT, {
+                jsonrpc: '2.0',
+                id: 'zapbot-sender-1',
+                method: 'sendTransaction',
+                params: [
+                    Buffer.from(serializedTx).toString('base64'),
+                    {
+                        skipPreflight: true,
+                        maxRetries: 0
+                    }
+                ]
+            });
 
-           const json = await response.json();
-           if (json.error) {
-               throw new Error(`Sender API Error: ${json.error.message}`);
-           }
-           const signature = json.result;
+            if (data.error) {
+                throw new Error(`Sender API Error: ${data.error.message}`);
+            }
+            const signature = data.result;
 
-           // Confirmation check
-           const confirmation = await this.connection.confirmTransaction({
-               signature,
-               blockhash,
-               lastValidBlockHeight
-           }, 'confirmed');
-           
-           if (confirmation.value?.err) {
-               throw new Error(`On-chain tx failed confirmation: ${JSON.stringify(confirmation.value.err)}`);
-           }
+            const confirmation = await this.connection.confirmTransaction({
+                signature,
+                blockhash,
+                lastValidBlockHeight
+            }, 'confirmed');
+            
+            if (confirmation.value?.err) {
+                throw new Error(`On-chain transaction confirmation failed: ${JSON.stringify(confirmation.value.err)}`);
+            }
 
-           console.log(`[SENDER API] ✅ Tx Confirmed: ${signature}`);
-           return { signature, error: null };
+            console.log(`[Sender API] ✅ Tx Confirmed: ${signature}`);
+            return { signature, error: null };
 
-       } catch (error) {
-           console.error(`[SENDER] Attempt ${attempt} failed:`, error.message);
-           lastError = error;
-           await sleep(500 * attempt);
-       }
-   }
-   
-   return { signature: null, error: `Tx failed after all retries: ${lastError?.message || 'Unknown Error'}` };
+        } catch (error) {
+            console.error(`[Sender API] Attempt ${attempt} failed:`, error.message);
+            lastError = error;
+            if(attempt < maxRetries) await require('./utils.js').sleep(700 * attempt);
+        }
+    }
+    
+    return { signature: null, error: `Tx failed after all retries: ${lastError?.message || 'Unknown Sender Error'}` };
 }
 
 // ADD this new function inside the SolanaManager class in solanaManager.js

@@ -14,6 +14,9 @@ class RedisManager {
         
         // TTL configurations (in seconds)
         this.TTL = {
+            TRADE_DATA: 15 * 60,       // 15 minutes for pre-built trade info
+            LAUNCHPAD_POOL: 20,        // 20 seconds for rapidly changing launchpad data
+            PRESIGNED_TX: 5 * 60,      // 5 minutes for a ready-to-fire transaction
             POSITIONS: 30 * 60,        // 30 minutes
             POOL_STATES: 5 * 60,       // 5 minutes
             TRANSACTION_CACHE: 60 * 60, // 1 hour
@@ -105,6 +108,56 @@ class RedisManager {
         
         return positions;
     }
+
+    // --- Trade Data Cache (Replaces old CacheManager) ---
+ async setTradeData(tokenMint, tradeData) {
+    const key = `trade_data:${tokenMint}`;
+    const dataString = JSON.stringify(tradeData, (key, value) =>
+        typeof value === 'bigint' ? value.toString() : value
+    );
+    await this.set(key, dataString, { EX: this.TTL.TRADE_DATA });
+}
+
+async getTradeData(tokenMint) {
+    const key = `trade_data:${tokenMint}`;
+    const data = await this.get(key);
+    if (!data) return null;
+    return JSON.parse(data, (key, value) => {
+        // Assuming amountRaw should be a BigInt, you can revive it here
+        if (key === 'amountRaw' && value !== null) {
+            try {
+                return BigInt(value);
+            } catch (e) {
+                return value; // Keep as string if conversion fails
+            }
+        }
+        return value;
+    });
+}
+
+ // --- Launchpad Pool Data (Replaces old CacheManager) ---
+ async addLaunchpadPoolData(poolId, poolData) {
+    const key = `launchpad_pool:${poolId}`;
+    const dataString = JSON.stringify(poolData);
+    await this.set(key, dataString, { EX: this.TTL.LAUNCHPAD_POOL });
+}
+
+async getLaunchpadPoolData(poolId) {
+    const key = `launchpad_pool:${poolId}`;
+    const data = await this.get(key);
+    return data ? JSON.parse(data) : null;
+}
+
+// --- Pre-Signed TX Cache (Replaces old CacheManager) ---
+async addPreSignedTx(tokenMint, signedTxString) {
+    const key = `presigned_tx:${tokenMint}`;
+    await this.set(key, signedTxString, { EX: this.TTL.PRESIGNED_TX });
+}
+
+async getPreSignedTx(tokenMint) {
+    const key = `presigned_tx:${tokenMint}`;
+    return await this.get(key);
+}
 
     // Pool state caching (for Pump.fun, Raydium, etc.)
     async setPoolState(tokenMint, poolData) {

@@ -85,14 +85,13 @@ async function migrateData() {
                 
                 for (const wallet of userWallets) {
                     await db.run(`
-                        INSERT OR REPLACE INTO user_wallets (user_id, label, public_key, private_key_encrypted, is_primary, balance)
-                        VALUES (?, ?, ?, ?, ?, ?)
+                        INSERT OR REPLACE INTO user_wallets (user_id, label, public_key, private_key_encrypted, balance)
+                        VALUES (?, ?, ?, ?, ?)
                     `, [
                         user.id,
                         wallet.label,
                         wallet.publicKey,
                         wallet.privateKeyEncrypted,
-                        wallet.isPrimary ? 1 : 0,
                         wallet.balance || 0.0
                     ]);
                 }
@@ -118,12 +117,11 @@ async function migrateData() {
                 }
                 
                 await db.run(`
-                    INSERT OR REPLACE INTO user_trading_settings (user_id, sol_amount_per_trade, primary_wallet_label)
-                    VALUES (?, ?, ?)
+                                    INSERT OR REPLACE INTO user_trading_settings (user_id, sol_amount_per_trade)
+                VALUES (?, ?)
                 `, [
                     user.id,
-                    userSettings.solAmount || 0.25,
-                    userSettings.primaryCopyWalletLabel || 'zap'
+                    userSettings.solAmount || 0.25
                 ]);
             }
             console.log('✅ Settings migrated successfully');

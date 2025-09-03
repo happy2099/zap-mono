@@ -210,49 +210,177 @@ async function buildPumpFunAmmInstruction(builderOptions) {
 }
 
 async function getPumpAmmPoolState(tokenMint) {
-    console.log(`[PUMP_AMM_INTEL_V2] Fetching pool state for token: ${shortenAddress(tokenMint)}`);
-    // Loop through the API endpoints for resilience
-    for (const endpoint of config.PUMP_FUN_API_ENDPOINTS) {
-        try {
-            const url = `${endpoint}${tokenMint}`;
-            const response = await axios.get(url, { 
-                timeout: 15000,
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-                    'Accept': 'application/json'
-                }
-            });
-            const data = response.data;
-
-            // This is the official data structure from api.pump.fun
-            if (!data || !data.associated_bonding_curve || !data.market_id) {
-                 console.warn(`[PUMP_AMM_INTEL_V2] ⚠️ Malformed data from ${endpoint}. Trying next...`);
-                 continue;
-            }
-
-            console.log(`[PUMP_AMM_INTEL_V2] ✅ Found pool on ${endpoint}`);
+    console.log(`[HELIUS_PUMP_INTEL] Fetching pool state for token: ${shortenAddress(tokenMint)} via Helius RPC`);
+    
+    try {
+        // Use Helius RPC connection for direct on-chain data
+        const { Connection } = require('@solana/web3.js');
+        const heliusConnection = new Connection(config.RPC_URL, 'confirmed');
+        
+        const tokenMintPk = new PublicKey(tokenMint);
+        
+        // Method 1: Try to get Pump.fun bonding curve data directly from chain
+        const [bondingCurvePda] = PublicKey.findProgramAddressSync(
+            [Buffer.from('bonding-curve'), tokenMintPk.toBuffer()],
+            config.PUMP_FUN_PROGRAM_ID
+        );
+        
+        console.log(`[HELIUS_PUMP_INTEL] Checking bonding curve: ${shortenAddress(bondingCurvePda.toBase58())}`);
+        
+        // Fetch account data via Helius RPC
+        const bondingCurveAccount = await heliusConnection.getAccountInfo(bondingCurvePda, 'confirmed');
+        
+        if (bondingCurveAccount && bondingCurveAccount.data.length > 50) {
+            // Token is still on bonding curve - extract data directly
+            const data = bondingCurveAccount.data;
             
-            // Reconstruct the needed info from the official API response
+            // Decode bonding curve state (simplified layout based on Pump.fun structure)
+            let solReserves, tokenReserves;
+            try {
+                // Try common offsets for Pump.fun bonding curve data
+                solReserves = data.readBigUInt64LE(32);
+                tokenReserves = data.readBigUInt64LE(40);
+            } catch (e) {
+                // Fallback to different offsets if needed
+                solReserves = data.readBigUInt64LE(24);
+                tokenReserves = data.readBigUInt64LE(32);
+            }
+            
+            // Derive associated accounts
+            const [poolAuthority] = PublicKey.findProgramAddressSync(
+                [Buffer.from('authority')],
+                config.PUMP_FUN_PROGRAM_ID
+            );
+            
+            const solVault = getAssociatedTokenAddressSync(
+                new PublicKey(config.NATIVE_SOL_MINT),
+                poolAuthority,
+                true
+            );
+            
+            const tokenVault = getAssociatedTokenAddressSync(
+                tokenMintPk,
+                poolAuthority,
+                true
+            );
+            
+            console.log(`[HELIUS_PUMP_INTEL] ✅ Bonding curve data via Helius RPC - SOL: ${solReserves.toString()}, Token: ${tokenReserves.toString()}`);
+            
             return {
-                poolAddress: new PublicKey(data.market_id),
+                poolAddress: bondingCurvePda,
                 poolState: {
-                    solReserves: BigInt(data.sol_reserves),
-                    tokenReserves: BigInt(data.token_reserves),
-                    poolAuthority: new PublicKey(data.raydium_authority), // authority
-                    tokenVault: new PublicKey(data.token_account),
-                    solVault: new PublicKey(data.sol_account),
+                    solReserves,
+                    tokenReserves,
+                    poolAuthority,
+                    tokenVault,
+                    solVault,
                 }
             };
-        } catch (error) {
-            let errorMsg = error.message;
-            if (error.response) {
-                errorMsg = `Status ${error.response.status}`;
-            }
-            console.warn(`[PUMP_AMM_INTEL_V2] ⚠️ Failed to fetch from ${endpoint}: ${errorMsg}. Trying next...`);
         }
+        
+        console.log(`[HELIUS_PUMP_INTEL] No bonding curve found, checking for migrated AMM pool...`);
+        
+        // Method 2: Token might have migrated to AMM - try to find AMM pool
+        // Use Helius to get recent transactions for this token
+        try {
+            const recentSigs = await heliusConnection.getSignaturesForAddress(tokenMintPk, { limit: 20 });
+            
+            for (const sigInfo of recentSigs) {
+                try {
+                    const tx = await heliusConnection.getParsedTransaction(sigInfo.signature, {
+                        maxSupportedTransactionVersion: 0
+                    });
+                    
+                    if (tx && tx.transaction && tx.transaction.message && tx.transaction.message.instructions) {
+                        // Look for AMM program interactions
+                        for (const ix of tx.transaction.message.instructions) {
+                            const programId = ix.programId || (ix.programIdIndex !== undefined ? tx.transaction.message.accountKeys[ix.programIdIndex] : null);
+                            
+                            if (programId && programId.equals && programId.equals(config.PUMP_FUN_AMM_PROGRAM_ID)) {
+                                // Found AMM interaction - try to get pool address from accounts
+                                const accounts = ix.accounts || [];
+                                if (accounts.length > 0) {
+                                    const poolAddress = accounts[0];
+                                    
+                                    // Fetch AMM pool account data
+                                    const poolAccount = await heliusConnection.getAccountInfo(poolAddress, 'confirmed');
+                                    if (poolAccount && poolAccount.data.length > 50) {
+                                        const poolData = poolAccount.data;
+                                        
+                                        // Extract AMM pool reserves (simplified)
+                                        const solReserves = poolData.readBigUInt64LE(32);
+                                        const tokenReserves = poolData.readBigUInt64LE(40);
+                                        
+                                        console.log(`[HELIUS_PUMP_INTEL] ✅ Found migrated AMM pool via Helius: ${shortenAddress(poolAddress.toBase58())}`);
+                                        
+                                        return {
+                                            poolAddress,
+                                            poolState: {
+                                                solReserves,
+                                                tokenReserves,
+                                                poolAuthority: accounts[1] || poolAddress,
+                                                tokenVault: accounts[2] || poolAddress,
+                                                solVault: accounts[3] || poolAddress,
+                                            }
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } catch (txError) {
+                    // Skip failed transactions
+                    continue;
+                }
+            }
+        } catch (historyError) {
+            console.log(`[HELIUS_PUMP_INTEL] ⚠️ Could not fetch transaction history: ${historyError.message}`);
+        }
+        
+        // Method 3: Fallback to official Pump.fun APIs only as last resort
+        console.log(`[HELIUS_PUMP_INTEL] Falling back to official pump.fun APIs...`);
+        
+        const fallbackEndpoints = [
+            `https://frontend-api.pump.fun/coins/${tokenMint}`,
+            `https://api.pump.fun/coins/${tokenMint}`
+        ];
+        
+        for (const endpoint of fallbackEndpoints) {
+            try {
+                const response = await axios.get(endpoint, {
+                    timeout: 8000,
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (compatible; HeliusBot/1.0)',
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                const data = response.data;
+                if (data && data.market_id && data.sol_reserves !== undefined && data.token_reserves !== undefined) {
+                    console.log(`[HELIUS_PUMP_INTEL] ✅ Fallback successful from ${endpoint.split('/')[2]}`);
+                    
+                    return {
+                        poolAddress: new PublicKey(data.market_id),
+                        poolState: {
+                            solReserves: BigInt(data.sol_reserves),
+                            tokenReserves: BigInt(data.token_reserves),
+                            poolAuthority: new PublicKey(data.raydium_authority || data.authority),
+                            tokenVault: new PublicKey(data.token_account),
+                            solVault: new PublicKey(data.sol_account),
+                        }
+                    };
+                }
+            } catch (error) {
+                console.warn(`[HELIUS_PUMP_INTEL] Fallback ${endpoint.split('/')[2]} failed: ${error.response?.status || error.message}`);
+            }
+        }
+        
+        throw new Error('All methods failed to get pool state');
+        
+    } catch (error) {
+        console.error(`[HELIUS_PUMP_INTEL] ❌ Failed to fetch pool state: ${error.message}`);
+        throw error;
     }
-    // If the loop completes, all endpoints failed.
-    throw new Error(`Failed to fetch Pump.fun AMM pool state for ${tokenMint} from all available endpoints.`);
 }
 
 async function buildRaydiumInstruction(builderOptions) {
@@ -1067,8 +1195,9 @@ module.exports = {
     buildMeteoraDBCInstruction,
     buildMeteoraDLMMInstruction,
     buildMeteoraCpAmmInstruction,
-     buildJupiterSwapInstruction,
+    buildJupiterSwapInstruction,
     createBuyExactInInstructionData,
     createSellExactInInstructionData,
-    _getLaunchpadPoolData
+    _getLaunchpadPoolData,
+    getPumpAmmPoolState
 };

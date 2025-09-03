@@ -4,15 +4,31 @@
 // File: workers/tradeExecutorWorker.js
 // Description: Executes trades in a separate thread
 
-const { workerData } = require('worker_threads');
+const { workerData, parentPort } = require('worker_threads');
 const BaseWorker = require('./templates/baseWorker');
 const { DatabaseManager } = require('../database/databaseManager');
 const { SolanaManager } = require('../solanaManager');
 const WalletManager = require('../walletManager');
 const { TransactionAnalyzer } = require('../transactionAnalyzer');
 const { ApiManager } = require('../apiManager');
-const { CacheManager } = require('../cacheManager');
 const TradeNotificationManager = require('../tradeNotifications');
+
+// Worker Manager Interface for communicating with main thread
+class WorkerManagerInterface {
+    constructor() {
+        this.parentPort = parentPort;
+    }
+
+    dispatch(workerType, message) {
+        if (this.parentPort) {
+            this.parentPort.postMessage({
+                type: 'SEND_NOTIFICATION',
+                workerName: 'executor',
+                payload: message.payload
+            });
+        }
+    }
+}
 
 class TradeExecutorWorker extends BaseWorker {
     constructor() {
@@ -22,12 +38,13 @@ class TradeExecutorWorker extends BaseWorker {
         this.walletManager = null;
         this.transactionAnalyzer = null;
         this.apiManager = null;
-        this.cacheManager = null;
+        this.redisManager = null;
         this.notificationManager = null;
         this.tradingEngine = null;
         this.pendingTrades = new Map();
         this.completedTrades = new Map();
         this.failedTrades = new Map();
+        this.workerManager = new WorkerManagerInterface();
     }
 
     async customInitialize() {
@@ -41,32 +58,32 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.walletManager = new WalletManager(this.databaseManager);
             this.walletManager.setSolanaManager(this.solanaManager);
+            this.walletManager.setConnection(this.solanaManager.connection);
             await this.walletManager.initialize();
             
             this.apiManager = new ApiManager(this.solanaManager);
             this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
-            this.cacheManager = new CacheManager();
+   
+            // Replace CacheManager with RedisManager
+            const { RedisManager } = require('../redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
             
-            // Initialize notification manager with a mock bot for now
-            // In a real implementation, this would be coordinated with the telegram worker
-            const mockBot = {
-                sendMessage: async () => { /* Mock implementation */ },
-                isPolling: () => false
-            };
-            this.notificationManager = new TradeNotificationManager(mockBot, this.apiManager);
+            // Initialize notification manager with worker manager for threaded communication
+            this.notificationManager = new TradeNotificationManager(null, this.apiManager, this.workerManager);
             this.notificationManager.setConnection(this.solanaManager.connection);
 
             // Initialize trading engine
             const { TradingEngine } = require('../tradingEngine');
-            this.tradingEngine = new TradingEngine(
-                this.solanaManager,
-                this.databaseManager,
-                this.walletManager,
-                this.transactionAnalyzer,
-                this.notificationManager,
-                this.apiManager,
-                this.cacheManager
-            );
+            this.tradingEngine = new TradingEngine({
+                solanaManager: this.solanaManager,
+                databaseManager: this.databaseManager,
+                walletManager: this.walletManager,
+                transactionAnalyzer: this.transactionAnalyzer,
+                notificationManager: this.notificationManager,
+                apiManager: this.apiManager,
+                redisManager: this.redisManager
+            });
 
             this.logInfo('Trade executor worker initialized successfully');
         } catch (error) {
@@ -78,6 +95,9 @@ class TradeExecutorWorker extends BaseWorker {
     async handleMessage(message) {
         if (message.type === 'EXECUTE_TRADE') {
             await this.executeTrade(message.tradeData);
+        } else if (message.type === 'EXECUTE_COPY_TRADE') {
+            // CRITICAL CHANGE: Pass the entire message object now
+            await this.executeCopyTrade(message); 
         } else if (message.type === 'CANCEL_TRADE') {
             await this.cancelTrade(message.tradeId);
         } else if (message.type === 'GET_TRADE_STATUS') {
@@ -145,6 +165,30 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
+    async executeCopyTrade(copyTradeData) {
+        // Unpack the full data payload from LaserStream
+        const { traderWallet, signature, preFetchedTxData } = copyTradeData;
+
+        try {
+            this.logInfo('🚀 EXECUTING HIGH-SPEED COPY TRADE', { 
+                traderWallet: traderWallet.substring(0,4) + '...' + traderWallet.slice(-4), 
+                signature: signature.substring(0, 8) + '...',
+                hasPreFetchedData: !!preFetchedTxData
+            });
+            
+            // Pass ALL data to the trading engine for fastest possible execution
+            // We pass null for `polledTraderInfo` because this did not come from polling.
+            await this.tradingEngine.processSignature(traderWallet, signature, null, preFetchedTxData);
+            
+        } catch (error) {
+            this.logError('❌ HIGH-SPEED COPY TRADE EXECUTION FAILED', { 
+                traderWallet: traderWallet.substring(0,4) + '...' + traderWallet.slice(-4), 
+                signature: signature.substring(0, 8) + '...',
+                error: error.message 
+            });
+        }
+    }
+    
     async performTrade(tradeId, tradeData) {
         try {
             const trade = this.pendingTrades.get(tradeId);
@@ -155,10 +199,10 @@ class TradeExecutorWorker extends BaseWorker {
             trade.attempts++;
             trade.status = 'executing';
 
-            // Get user's primary trading wallet
+            // Get user's trading wallet
             const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(tradeData.userChatId);
             if (!keypairPacket) {
-                throw new Error('No primary trading wallet found for user');
+                throw new Error('No trading wallet found for user');
             }
 
             // Execute the trade using the trading engine

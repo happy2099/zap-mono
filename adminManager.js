@@ -293,7 +293,7 @@ class AdminManager {
             // Check wallet manager
             try {
                 const keypairPacket = await this.walletManager.getPrimaryTradingKeypair();
-                health.walletManager = keypairPacket ? 'Ready' : 'No Primary Wallet';
+                health.walletManager = keypairPacket ? 'Ready' : 'No Trading Wallet';
             } catch (error) {
                 health.walletManager = 'Error';
                 health.walletError = error.message;

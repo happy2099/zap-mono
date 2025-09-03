@@ -16,10 +16,18 @@ const config = {
     // --- Solana Network ---
     RPC_URL: process.env.RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
     WS_URL: process.env.WS_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
-    LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-mainnet-sgp.helius-rpc.com',
+    LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
     RPC_FALLBACK_URLS: process.env.RPC_FALLBACK_URLS ? process.env.RPC_FALLBACK_URLS.split(',') : [],
 
-    SENDER_ENDPOINT: process.env.SENDER_ENDPOINT || 'http://sg-sender.helius-rpc.com/fast', // Singapore endpoint for lowest latency
+    // --- Singapore Regional Endpoints (Optimized for Asia-Pacific) ---
+    SINGAPORE_ENDPOINTS: {
+        rpc: process.env.SGP_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+        sender: process.env.SGP_SENDER_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+        laserstream: process.env.SGP_LASERSTREAM_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+        websocket: process.env.SGP_WS_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
+    },
+    
+    SENDER_ENDPOINT: process.env.SENDER_ENDPOINT || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769', // Helius mainnet endpoint for lowest latency
     TIP_ACCOUNTS: [
         "4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE",
         "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ",
@@ -59,6 +67,12 @@ const config = {
     DEFAULT_SOL_TRADE_AMOUNT: parseFloat(process.env.DEFAULT_SOL_TRADE_AMOUNT) || 0.01,
     MIN_SOL_AMOUNT_PER_TRADE: parseFloat(process.env.MIN_SOL_AMOUNT_PER_TRADE) || 0.0001,
     FORCE_POLLING_MODE: process.env.FORCE_POLLING_MODE === 'true',
+    
+    // --- Logging & Filtering ---
+    ENABLE_NOISE_FILTERING: process.env.ENABLE_NOISE_FILTERING !== 'false', // Default enabled
+    LOG_LEVEL: process.env.LOG_LEVEL || 'info', // debug, info, warn, error
+    FILTER_DUST_TRANSACTIONS: process.env.FILTER_DUST_TRANSACTIONS !== 'false', // Default enabled
+    SHOW_RAW_TRANSACTIONS: process.env.SHOW_RAW_TRANSACTIONS === 'true', // Default disabled
     
     // --- Constants ---
     NATIVE_SOL_MINT: 'So11111111111111111111111111111111111111112',
@@ -110,21 +124,34 @@ const config = {
         METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4cd4YfXbG6TfvB2eRCcsgAsPY'),
         METEORA_DBC: [
             new PublicKey('DBCPdKzM5LgZm1u3SAn8Dkdkrwtn2A2argzdisE61m2F'),
+            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // Additional Meteora DBC program
         ],
         METEORA_CP_AMM: new PublicKey('MTCPmFupf4vm3b1D2bS2e9tqAbM6tCHM42Eny9g9f6Z'),
         'Jupiter Aggregator': new PublicKey('JUP6LkbZbjS1jKKwapdHNy7A9erNsYcRcRdcJsu7WBV'),
         PHOTON: new PublicKey('GMN8N6sNfA3iTjHupG2GfF2yAShP2d4JAXW6S1mMAJv3'),
         AXIOM: new PublicKey('AXSwtggda59qbW2wKhonS1f44t42bLhNoHYb1bggC1fM'),
+        // Add missing platform IDs that the analyzer expects
+        RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'), // Same as V4
+        METEORA_DBC_PROGRAM_IDS: [
+            new PublicKey('DBCPdKzM5LgZm1u3SAn8Dkdkrwtn2A2argzdisE61m2F'),
+            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // Additional Meteora DBC program
+        ],
+        METEORA_CP_AMM_PROGRAM_ID: new PublicKey('MTCPmFupf4vm3b1D2bS2e9tqAbM6tCHM42Eny9g9f6Z'),
     },
 
-    // --- PUMP.FUN Specifics ---
+    // --- PUMP.FUN Specifics (Now Helius-powered) ---
     PUMP_FUN_API_ENDPOINTS: process.env.PUMP_FUN_API_ENDPOINTS?.split(',') || [
-        'https://client-api-2-74b1891ee9f9.herokuapp.com/coins/',
-        'https://api.pump.fun/coins/',
+        'https://frontend-api.pump.fun/coins/',  // Official frontend API
+        'https://api.pump.fun/coins/',           // Official API  
     ],
+    // Note: Primary data fetching now uses Helius RPC for reliability
     PUMP_FUN_BUY_DISCRIMINATOR: Buffer.from([0x66, 0x06, 0x3d, 0x11, 0x01, 0x05, 0x24, 0x72]),
     PUMP_FUN_SELL_DISCRIMINATOR: Buffer.from([0x2a, 0x7a, 0x81, 0x76, 0x27, 0x66, 0x93, 0x9f]),
+    PUMP_AMM_BUY_DISCRIMINATOR: Buffer.from([27, 57, 130, 10, 211, 244, 242, 167]),
+    PUMP_AMM_SELL_DISCRIMINATOR: Buffer.from([124, 74, 67, 128, 26, 10, 120, 93]),
     PUMP_FUN_PROGRAM_ID: new PublicKey('6EF8rrecthR5DkVaGFKLkma4YkdrkvPPHoqUPLQkwQjR'),
+    PUMP_FUN_PROGRAM_ID_VARIANT: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
+    PUMP_FUN_AMM_PROGRAM_ID: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
     PUMP_FUN_GLOBAL: new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk'),
     PUMP_FUN_FEE_RECIPIENT: new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1S77jyZ52gXSJGTk5M'),
 

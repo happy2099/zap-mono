@@ -1,0 +1,11 @@
+{
+  "traceVersion": "1.1",
+  "signature": "5ur6NBoLbmFhJAVNqqF8erNsLgCWktj1544zyttFnCPAZLQubhMygJRiDM23WE1szAxnbVCX85rhiNJWVSuiHxLp",
+  "traderWallet": "F2SuErm4MviWJ2HzKXk2nuzBC6xe883CFWUDCPz6cyWm",
+  "userChatId": 6032767351,
+  "timestamp_start": "2025-09-02T11:30:30.120Z",
+  "steps": [],
+  "finalOutcome": "FAILURE",
+  "finalReason": "User has no trading wallet.",
+  "timestamp_end": "2025-09-02T11:30:30.125Z"
+}

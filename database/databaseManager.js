@@ -302,10 +302,16 @@ async initialize() {
     }
 
     // Wallet management methods
-    async createWallet(userId, label, publicKey, privateKeyEncrypted, isPrimary = false) {
+    async createWallet(userId, label, publicKey, privateKeyEncrypted) {
+        // Check if wallet with this label already exists for this user
+        const existingWallet = await this.get('SELECT id FROM user_wallets WHERE user_id = ? AND label = ?', [userId, label]);
+        if (existingWallet) {
+            throw new Error(`Wallet label "${label}" already exists for you.`);
+        }
+        
         return await this.run(
-            'INSERT INTO user_wallets (user_id, label, public_key, private_key_encrypted, is_primary) VALUES (?, ?, ?, ?, ?)',
-            [userId, label, publicKey, privateKeyEncrypted, isPrimary ? 1 : 0]
+            'INSERT INTO user_wallets (user_id, label, public_key, private_key_encrypted) VALUES (?, ?, ?, ?)',
+            [userId, label, publicKey, privateKeyEncrypted]
         );
     }
 
@@ -321,15 +327,22 @@ async initialize() {
     }
 
     async deleteWallet(userId, walletId) {
-        await this.run('DELETE FROM user_wallets WHERE id = ? AND user_id = ?', [walletId, userId]);
+        const result = await this.run('DELETE FROM user_wallets WHERE id = ? AND user_id = ?', [walletId, userId]);
+        if (result.changes === 0) {
+            throw new Error('Wallet not found or could not be deleted');
+        }
+        return result;
+    }
+    
+    async deleteWalletByLabel(userId, label) {
+        const result = await this.run('DELETE FROM user_wallets WHERE user_id = ? AND label = ?', [userId, label]);
+        if (result.changes === 0) {
+            throw new Error(`Wallet with label "${label}" not found or could not be deleted`);
+        }
+        return result;
     }
 
-    async setPrimaryWallet(userId, walletId) {
-        // First, unset all primary wallets for this user
-        await this.run('UPDATE user_wallets SET is_primary = 0 WHERE user_id = ?', [userId]);
-        // Then set the specified wallet as primary
-        await this.run('UPDATE user_wallets SET is_primary = 1 WHERE id = ? AND user_id = ?', [walletId, userId]);
-    }
+
 
     // Trade management
     async recordTrade(userId, traderId, signature, platform, tokenMint, amountRaw, solSpent, status = 'pending') {
