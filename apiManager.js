@@ -15,6 +15,10 @@ const { getMint } = require('@solana/spl-token');
 class ApiManager {
   constructor(solanaManager) {
     this.solanaManager = solanaManager;
+    this.solanaTrackerApi = null;
+    this.solanaTrackerStream = null;
+    this.subscribedTraders = new Set();
+    this.isInitialized = false;
 
     // Raydium API Client (unchanged, used for rare fallbacks)
     this.raydiumClient = axios.create({
@@ -24,7 +28,6 @@ class ApiManager {
     
     console.log("[ApiManager] Initialized with Helius-native logic.");
   }
-
 
 
 //  startUniversalDataStream(tradingEngine) {
@@ -143,16 +146,20 @@ async startTraderMonitoringStream(tradingEngine) {
             }
 
             try {
-                this.solanaTrackerStream.subscribe.tx.wallet(addressStr).transactions().on((txData) => {
+                this.solanaTrackerStream.subscribe.tx.wallet(addressStr).transactions().on(async (txData) => {
                     if (txData && txData.signature) {
-                        console.log(`[TRADER_MONITOR] 🔥 Activity from Master Trader: ${shortenAddress(addressStr)}, Sig: ${shortenAddress(txData.signature, 6)}`);
+                        // Get trader name from the trading engine
+                        const traderName = await tradingEngine.getTraderName(addressStr);
+                        console.log(`[TRADER_MONITOR] 🔥 Activity from Master Trader: ${traderName} (${shortenAddress(addressStr)}), Sig: ${shortenAddress(txData.signature, 6)}`);
                         // Pass the full txData and trader address to the express lane
                         tradingEngine.handleWalletStreamEvent({ ...txData, traderAddress: addressStr });
                     }
                 });
 
                 this.subscribedTraders.add(addressStr);
-                console.log(`[TRADER_MONITOR] -> ✅ SUCCESSFULLY SUBSCRIBED to new trader: ${shortenAddress(addressStr)}`);
+                // Get trader name for subscription logging
+                const traderName = await tradingEngine.getTraderName(addressStr);
+                console.log(`[TRADER_MONITOR] -> ✅ SUCCESSFULLY SUBSCRIBED to new trader: ${traderName} (${shortenAddress(addressStr)})`);
             } catch (subError) {
                 console.error(`[TRADER_MONITOR] ❌ Error subscribing to trader ${shortenAddress(addressStr)}: ${subError.message}`);
             }
@@ -466,6 +473,133 @@ async findAmmPoolForToken(tokenMint) {
         return new Map(); // Fallback to empty map
     }
 }
+
+  // ===============================================
+  // ============ PUMP.FUN HELIUS INTEGRATION ===========
+  // ===============================================
+  async getPumpFunCoinData(mint) {
+      console.log(`[PUMP_API] ⏳ Fetching coin data for ${shortenAddress(mint)} via Helius...`);
+
+      try {
+          // Use Helius to get the creator from the bonding curve account
+          // The creator is stored in the bonding curve account data
+          const bondingCurvePda = PublicKey.findProgramAddressSync(
+              [Buffer.from('bonding-curve'), new PublicKey(mint).toBuffer()],
+              new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') // Pump.fun BC program ID
+          );
+
+          // Get the bonding curve account info
+          const bondingCurveAccount = await this.solanaManager.connection.getAccountInfo(bondingCurvePda[0]);
+          
+          if (!bondingCurveAccount) {
+              throw new Error(`Bonding curve account not found for mint ${mint}`);
+          }
+
+                     // Search for the creator field by looking for the actual data structure
+           // Instead of hardcoded offsets, we'll search for patterns
+           const data = bondingCurveAccount.data;
+           
+           // Look for creator field - search for valid PublicKey patterns
+           let creator = null;
+           for (let i = 0; i <= data.length - 32; i++) {
+               const potentialKey = data.slice(i, i + 32);
+               
+               // Check if this looks like a valid PublicKey (not all zeros, not all ones)
+               const isAllZeros = potentialKey.every(byte => byte === 0);
+               const isAllOnes = potentialKey.every(byte => byte === 255);
+               
+               if (!isAllZeros && !isAllOnes) {
+                   try {
+                       const testKey = new PublicKey(potentialKey);
+                       // Additional validation: check if it's a valid address format
+                       if (testKey.toBase58().length === 44) { // Solana addresses are 44 chars
+                           creator = testKey;
+                           console.log(`[PUMP_API] 🔍 Found potential creator at offset ${i}: ${shortenAddress(testKey.toBase58())}`);
+                           break;
+                       }
+                   } catch (e) {
+                       // Invalid PublicKey, continue searching
+                       continue;
+                   }
+               }
+           }
+           
+           if (!creator) {
+               throw new Error(`Could not find valid creator PublicKey in bonding curve account data`);
+           }
+
+          console.log(`[PUMP_API] ✅ Successfully fetched creator ${shortenAddress(creator.toBase58())} for ${shortenAddress(mint)} via Helius.`);
+          
+          return {
+              creator: creator.toBase58(),
+              mint: mint,
+              source: 'helius_onchain'
+          };
+
+      } catch (error) {
+          console.error(`[PUMP_API] ❌ Failed to fetch coin data via Helius: ${error.message}`);
+          
+          // Fallback: Try to get creator from the mint metadata account
+          try {
+              console.log(`[PUMP_API] 🔄 Attempting fallback via mint metadata...`);
+              
+              const mintMetadataPda = PublicKey.findProgramAddressSync(
+                  [
+                      Buffer.from('metadata'),
+                      new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s').toBuffer(),
+                      new PublicKey(mint).toBuffer()
+                  ],
+                  new PublicKey('metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s')
+              );
+
+              const metadataAccount = await this.solanaManager.connection.getAccountInfo(mintMetadataPda[0]);
+              
+                             if (metadataAccount) {
+                   // Parse metadata to find creator using key-based search
+                   const data = metadataAccount.data;
+                   
+                   // Look for creator field in metadata - search for valid PublicKey patterns
+                   let creator = null;
+                   for (let i = 0; i <= data.length - 32; i++) {
+                       const potentialKey = data.slice(i, i + 32);
+                       
+                       // Check if this looks like a valid PublicKey (not all zeros, not all ones)
+                       const isAllZeros = potentialKey.every(byte => byte === 0);
+                       const isAllOnes = potentialKey.every(byte => byte === 255);
+                       
+                       if (!isAllZeros && !isAllOnes) {
+                           try {
+                               const testKey = new PublicKey(potentialKey);
+                               // Additional validation: check if it's a valid address format
+                               if (testKey.toBase58().length === 44) { // Solana addresses are 44 chars
+                                   creator = testKey;
+                                   console.log(`[PUMP_API] 🔍 Fallback: Found potential creator at offset ${i}: ${shortenAddress(testKey.toBase58())}`);
+                                   break;
+                               }
+                           } catch (e) {
+                               // Invalid PublicKey, continue searching
+                               continue;
+                           }
+                       }
+                   }
+                   
+                   if (creator) {
+                       console.log(`[PUMP_API] ✅ Fallback successful: Found creator ${shortenAddress(creator.toBase58())} via metadata.`);
+                       
+                       return {
+                           creator: creator.toBase58(),
+                           mint: mint,
+                           source: 'helius_metadata_fallback'
+                       };
+                   }
+               }
+          } catch (fallbackError) {
+              console.warn(`[PUMP_API] ⚠️ Fallback also failed: ${fallbackError.message}`);
+          }
+
+          throw new Error(`Failed to fetch creator for mint ${mint} via Helius on-chain data.`);
+      }
+  }
 
   
 }

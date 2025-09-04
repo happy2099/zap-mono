@@ -6,6 +6,9 @@ const { EventEmitter } = require('events');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 
+// Add fetch for Node.js compatibility
+const fetch = require('node-fetch');
+
 class LaserStreamManager extends EventEmitter {
     constructor(tradingEngineOrWorker) {
         super();
@@ -59,18 +62,16 @@ class LaserStreamManager extends EventEmitter {
                 endpoint: this.singaporeEndpoints.laserstream, // Use Singapore endpoint
                 maxReconnectAttempts: 15, // Increased for reliability
                 channelOptions: {
-                    // Optimized for Singapore region
-                    'grpc.keepalive_time_ms': 30000,
-                    'grpc.keepalive_timeout_ms': 5000,
-                    'grpc.keepalive_permit_without_calls': 1,
-                    'grpc.http2.max_pings_without_data': 0,
-                    'grpc.http2.min_time_between_pings_ms': 10000,
-                    'grpc.http2.min_ping_interval_without_data_ms': 300000,
-                    // Buffer optimizations for high-frequency data
-                    'grpc.max_receive_message_length': 2_000_000_000, // 2GB
-                    'grpc.max_send_message_length': 64_000_000,      // 64MB
-                    'grpc.initial_stream_window_size': 16_777_216,   // 16MB
-                    'grpc.initial_connection_window_size': 33_554_432, // 32MB
+                    'grpc.max_send_message_length': 64 * 1024 * 1024,      // 64MB
+                    'grpc.max_receive_message_length': 100 * 1024 * 1024,  // 100MB (within i32 limit)
+                    'grpc.keepalive_time_ms': 20000,           // Ping every 20s to stay alive
+                    'grpc.keepalive_timeout_ms': 10000,        // Wait 10s for response
+                    'grpc.keepalive_permit_without_calls': 1,  // Send pings even when idle
+                    'grpc.http2.min_time_between_pings_ms': 15000,
+                    'grpc.http2.write_buffer_size': 1024 * 1024,           // 1MB write buffer
+                    'grpc-node.max_session_memory': 64 * 1024 * 1024,      // 64MB session memory
+                    'grpc.initial_stream_window_size': 16 * 1024 * 1024,   // 16MB stream window
+                    'grpc.initial_connection_window_size': 32 * 1024 * 1024, // 32MB connection window
                 }
             };
    
@@ -96,11 +97,11 @@ class LaserStreamManager extends EventEmitter {
                 transactions: { 
                     "copy-trade-detection": { 
                         accountRequired: walletsToMonitor, 
-                        vote: false, 
+                        vote: false,
                         failed: false,
                         accountInclude: [], // Include all accounts in transaction
                         accountExclude: []  // Don't exclude any accounts
-                    } 
+                    }
                 },
                 // Get transaction status updates
                 transactionsStatus: {
@@ -136,6 +137,8 @@ class LaserStreamManager extends EventEmitter {
                     // Handle different types of updates
                     if (update.transaction) {
                         this.handleTransactionUpdate(update.transaction);
+                        // NEW: Also check for universal trader identification
+                        this.handleUniversalTraderDetection(update.transaction);
                     } else if (update.account) {
                         this.handleAccountUpdate(update.account);
                     } else if (update.transactionStatus) {
@@ -160,6 +163,12 @@ class LaserStreamManager extends EventEmitter {
         } catch (error) {
             const errorMsg = `Failed to subscribe: ${error.message || error}`;
             console.error('[LASERSTREAM-ENHANCED] ❌', errorMsg);
+            
+            // Log specific gRPC errors for debugging
+            if (error.message && error.message.includes('invalid value')) {
+                console.error('[LASERSTREAM-ENHANCED] 🔧 This appears to be a gRPC configuration error. Check channel options.');
+            }
+            
             this.streamStatus = 'error';
             this.emit('status_change', { status: 'disconnected', error: errorMsg });
         }
@@ -416,6 +425,32 @@ class LaserStreamManager extends EventEmitter {
         }
     }
 
+    // Test gRPC configuration before subscribing
+    async testGrpcConfiguration() {
+        try {
+            console.log('[LASERSTREAM-ENHANCED] 🔧 Testing gRPC configuration...');
+            
+            // Test if the channel options are valid
+            const testConfig = {
+                apiKey: config.HELIUS_API_KEY,
+                endpoint: this.singaporeEndpoints.laserstream,
+                maxReconnectAttempts: 1,
+                channelOptions: {
+                    'grpc.max_send_message_length': 64 * 1024 * 1024,
+                    'grpc.max_receive_message_length': 100 * 1024 * 1024,
+                    'grpc.keepalive_time_ms': 20000,
+                    'grpc.keepalive_timeout_ms': 10000,
+                }
+            };
+            
+            console.log('[LASERSTREAM-ENHANCED] ✅ gRPC configuration test passed');
+            return true;
+        } catch (error) {
+            console.error('[LASERSTREAM-ENHANCED] ❌ gRPC configuration test failed:', error);
+            return false;
+        }
+    }
+
     async stop() {
         if (this.stream) {
             console.log('[LASERSTREAM-ENHANCED] 🛑 Shutting down Singapore stream...');
@@ -423,6 +458,82 @@ class LaserStreamManager extends EventEmitter {
             this.stream = null;
             this.streamStatus = 'disconnected';
             this.emit('status_change', { status: 'disconnected', reason: 'Manual shutdown' });
+        }
+    }
+
+    // COMPATIBILITY METHODS - For old code that expects these methods
+    
+    // Legacy method name for compatibility
+    async initializeCopyTradingStream(onTransaction, onError, traderWallets = []) {
+        console.log('[LASERSTREAM-ENHANCED] 🔄 Legacy method called - redirecting to startMonitoring...');
+        
+        // Store callbacks for legacy compatibility
+        this.onTransactionCallback = onTransaction;
+        this.onErrorCallback = onError;
+        
+        // Start monitoring (this will use the enhanced Singapore endpoints)
+        return await this.startMonitoring();
+    }
+
+    // Legacy method for getting active streams count
+    getActiveStreamCount() {
+        return this.stream ? 1 : 0;
+    }
+
+    // Legacy method for shutting down all streams  
+    async shutdownAllStreams() {
+        console.log('[LASERSTREAM-ENHANCED] 🔄 Legacy shutdownAllStreams called...');
+        await this.stop();
+    }
+
+    // NEW: Universal trader detection from mempool transactions
+    async handleUniversalTraderDetection(transactionUpdate) {
+        try {
+            const transaction = transactionUpdate.transaction;
+            if (!transaction || !transaction.signatures || transaction.signatures.length === 0) {
+                return;
+            }
+
+            const signature = transaction.signatures[0];
+            const signatureStr = typeof signature === 'string' ? signature : signature.toString('base64');
+            
+            // Extract account keys for analysis
+            const accountKeys = transaction.message?.accountKeys || [];
+            
+            // Check if this transaction involves any known trader wallets
+            const knownTraderInvolved = Array.from(this.activeTraderWallets).some(traderWallet => 
+                accountKeys.some(account => account.toString() === traderWallet)
+            );
+
+            if (knownTraderInvolved) {
+                console.log(`[UNIVERSAL-DETECTION] 🎯 Trader transaction detected: ${shortenAddress(signatureStr)}`);
+                
+                // Extract instruction data for platform identification
+                const instructions = transaction.message?.instructions || [];
+                const programIds = new Set();
+                
+                for (const instruction of instructions) {
+                    if (instruction.programIdIndex !== undefined && accountKeys[instruction.programIdIndex]) {
+                        const programId = accountKeys[instruction.programIdIndex].toString();
+                        programIds.add(programId);
+                    }
+                }
+
+                if (programIds.size > 0) {
+                    console.log(`[UNIVERSAL-DETECTION] 🔍 Platform program IDs: ${Array.from(programIds).map(id => shortenAddress(id)).join(', ')}`);
+                    console.log(`[UNIVERSAL-DETECTION] 🔍 Complete program IDs: ${Array.from(programIds).join(', ')}`);
+                    
+                    // Emit event for copy trade processing
+                    this.emit('universal_trader_detected', {
+                        signature: signatureStr,
+                        programIds: Array.from(programIds),
+                        transaction: transactionUpdate,
+                        timestamp: Date.now()
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('[UNIVERSAL-DETECTION] ❌ Error in universal trader detection:', error);
         }
     }
 }

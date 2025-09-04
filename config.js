@@ -4,7 +4,8 @@
 // File: config.js
 // Description: Central configuration file using CommonJS for compatibility.
 
-const { PublicKey } = require('@solana/web3.js');
+const { PublicKey, SystemProgram, ComputeBudgetProgram, SYSVAR_RENT_PUBKEY, SYSVAR_CLOCK_PUBKEY, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+const { TOKEN_PROGRAM_ID: SPL_TOKEN_PROGRAM_ID, ASSOCIATED_TOKEN_PROGRAM_ID: SPL_ASSOCIATED_TOKEN_PROGRAM_ID } = require('@solana/spl-token');
 const dotenv = require('dotenv');
 dotenv.config();
 
@@ -55,6 +56,47 @@ const config = {
         return key;
     })(),
 
+
+    // Laserstream endpoint (choose closest to your location)
+LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-mainnet-sgp.helius-rpc.com',
+
+    // Alternative endpoints for redundancy
+    LASERSTREAM_ENDPOINTS: [
+        'https://laserstream-mainnet-tyo.helius-rpc.com',    // Tokyo
+        'https://laserstream-mainnet-ny.helius-rpc.com',     // New York
+        'https://laserstream-mainnet-lon.helius-rpc.com',    // London
+        'https://laserstream-mainnet-fra.helius-rpc.com'     // Frankfurt
+    ],
+
+    // Streaming configuration
+    LASERSTREAM_CONFIG: {
+        maxReconnectAttempts: 10,
+        replay: true, // Resume from last processed slot
+        commitment: 'CONFIRMED', // PROCESSED, CONFIRMED, or FINALIZED
+        
+        // Channel options for optimal performance
+        channelOptions: {
+            connectTimeoutSecs: 20,
+            maxDecodingMessageSize: 2_000_000_000, // 2GB
+            http2KeepAliveIntervalSecs: 15,
+            keepAliveTimeoutSecs: 10,
+            keepAliveWhileIdle: true,
+            http2AdaptiveWindow: true,
+            tcpNodelay: true,
+            bufferSize: 131_072 // 128KB
+        }
+    },
+
+    // Performance thresholds - PURE COPY BOT: NO RESTRICTIONS!
+    PERFORMANCE_THRESHOLDS: {
+        maxAnalysisTime: 1000,        // Max analysis time in ms (very high)
+        maxCopyTradeDelay: 1000,      // Max delay from detection to execution (very high)
+        minCopyTradeAmount: 0,        // Minimum amount to copy (NO MINIMUM!)
+        maxCopyTradeAmount: 999999999999, // Maximum amount to copy (NO MAXIMUM!)
+        slippageTolerance: 1000,      // Slippage tolerance in basis points (10%)
+        maxRetries: 5                 // Maximum retry attempts for failed trades
+    },
+
     // --- Wallets ---
     USER_WALLET_PUBKEY: process.env.PUBLIC_KEY || '',
     USER_WALLET_PRIVATE_KEY: process.env.PRIVATE_KEY || '',
@@ -69,31 +111,95 @@ const config = {
     FORCE_POLLING_MODE: process.env.FORCE_POLLING_MODE === 'true',
     
     // --- Logging & Filtering ---
-    ENABLE_NOISE_FILTERING: process.env.ENABLE_NOISE_FILTERING !== 'false', // Default enabled
+    ENABLE_NOISE_FILTERING: false, // PURE COPY BOT: NO NOISE FILTERING!
     LOG_LEVEL: process.env.LOG_LEVEL || 'info', // debug, info, warn, error
-    FILTER_DUST_TRANSACTIONS: process.env.FILTER_DUST_TRANSACTIONS !== 'false', // Default enabled
+    FILTER_DUST_TRANSACTIONS: false, // PURE COPY BOT: NO DUST FILTERING!
     SHOW_RAW_TRANSACTIONS: process.env.SHOW_RAW_TRANSACTIONS === 'true', // Default disabled
+    LOGS_DIR: process.env.LOGS_DIR || './logs', // Directory for log files
     
-    // --- Constants ---
+    // --- ULTRA-LOW LATENCY LASERSTREAM OPTIMIZATIONS ---
+    LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-mainnet-sgp.helius-rpc.com',
+    
+    // Regional endpoints for optimal performance (choose closest to your location)
+    LASERSTREAM_REGIONAL_ENDPOINTS: {
+        singapore: 'https://laserstream-mainnet-sgp.helius-rpc.com',    // Asia-Pacific (Recommended)
+        tokyo: 'https://laserstream-mainnet-tyo.helius-rpc.com',       // Japan
+        frankfurt: 'https://laserstream-mainnet-fra.helius-rpc.com',   // Europe
+        amsterdam: 'https://laserstream-mainnet-ams.helius-rpc.com',   // Europe
+        newyork: 'https://laserstream-mainnet-ewr.helius-rpc.com',     // US East
+        pittsburgh: 'https://laserstream-mainnet-pitt.helius-rpc.com', // US Central
+        saltlake: 'https://laserstream-mainnet-slc.helius-rpc.com'     // US West
+    },
+    
+    // ULTRA-LOW LATENCY configuration
+    LASERSTREAM_ULTRA_CONFIG: {
+        maxReconnectAttempts: 10,
+        replay: true, // Resume from last processed slot
+        commitment: 'PROCESSED', // Fastest possible detection
+        
+        // Channel options for sub-100ms latency
+        channelOptions: {
+            // Connection optimizations
+            connectTimeoutSecs: 20,
+            maxDecodingMessageSize: 2_000_000_000, // 2GB
+            maxEncodingMessageSize: 64_000_000,    // 64MB
+            
+            // Keep-alive optimizations
+            http2KeepAliveIntervalSecs: 15,
+            keepAliveTimeoutSecs: 10,
+            keepAliveWhileIdle: true,
+            
+            // Flow control optimizations
+            initialStreamWindowSize: 8_388_608,      // 8MB
+            initialConnectionWindowSize: 16_777_216, // 16MB
+            
+            // Performance optimizations
+            http2AdaptiveWindow: true,
+            tcpNodelay: true,
+            bufferSize: 131_072, // 128KB
+            
+            // Compression optimizations
+            'grpc.default_compression_algorithm': 'zstd', // Most efficient
+            'grpc.max_receive_message_length': 1_000_000_000, // 1GB
+            'grpc.max_send_message_length': 32_000_000,      // 32MB
+            'grpc.keepalive_time_ms': 20000,                 // 20s
+            'grpc.keepalive_timeout_ms': 10000,              // 10s
+            'grpc.http2.min_time_between_pings_ms': 15000,   // 15s
+            'grpc.http2.write_buffer_size': 1_048_576,       // 1MB
+            'grpc-node.max_session_memory': 67_108_864,      // 64MB
+            
+            // Connection optimizations
+            'grpc.client_idle_timeout_ms': 300000,            // 5 min
+            'grpc.max_connection_idle_ms': 300000,            // 5 min
+            'grpc.max_concurrent_streams': 1000,              // 1000 streams
+            'grpc.initial_reconnect_backoff_ms': 1000,        // 1s
+            'grpc.max_reconnect_backoff_ms': 30000            // 30s
+        }
+    },
+    
+    // --- ULTRA-FAST EXECUTION (SENDER) ---
+    SENDER_ENDPOINT: process.env.SENDER_ENDPOINT || 'https://sender.helius-rpc.com/fast',
+    
+    // Regional Sender endpoints for optimal execution
+    SENDER_REGIONAL_ENDPOINTS: {
+        global: 'https://sender.helius-rpc.com/fast',         // Global (Recommended)
+        singapore: 'http://sgp-sender.helius-rpc.com/fast',  // Singapore
+        tokyo: 'http://tyo-sender.helius-rpc.com/fast',      // Tokyo
+        frankfurt: 'http://fra-sender.helius-rpc.com/fast',  // Frankfurt
+        newyork: 'http://ewr-sender.helius-rpc.com/fast',    // New York
+        saltlake: 'http://slc-sender.helius-rpc.com/fast'    // Salt Lake City
+    },
+
+    // --- Solana Native & System Constants ---
     NATIVE_SOL_MINT: 'So11111111111111111111111111111111111111112',
-    LAMPORTS_PER_SOL_CONST: 1_000_000_000,
-    TOKEN_PROGRAM_ID: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'),
+    SYSTEM_PROGRAM_ID: SystemProgram.programId,
+    TOKEN_PROGRAM_ID: SPL_TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID: SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+    RENT_PUBKEY: SYSVAR_RENT_PUBKEY,
+    CLOCK_PUBKEY: SYSVAR_CLOCK_PUBKEY,
+    COMPUTE_BUDGET_PROGRAM_ID: ComputeBudgetProgram.programId,
+    LAMPORTS_PER_SOL_CONST: LAMPORTS_PER_SOL,
     TOKEN_2022_PROGRAM_ID: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpG4MZN'),
-    COMPUTE_BUDGET_PROGRAM_ID: new PublicKey('ComputeBudget111111111111111111111111111111'),
-    
-    // --- File Paths ---
-    DATA_DIR: 'data',
-    LOGS_DIR: 'logs',
-    SETTINGS_FILE: 'data/settings.json',
-    TRADERS_FILE: 'data/traders.json',
-    SOL_AMOUNTS_FILE: 'data/sol_amounts.json',
-    SAVED_ADDRESSES_FILE: 'data/saved_addresses.json',
-    TRADE_STATS_FILE: 'data/trade_stats.json',
-    WITHDRAWAL_HISTORY_FILE: 'data/withdrawal_history.json',
-    POSITIONS_FILE: 'data/positions.json',
-    USERS_FILE: 'data/users.json',
-    WALLET_FILE: 'data/wallets.json',
-    PROCESSED_POOLS_FILE: 'data/processed_pools.json',
 
     // --- MEV & Priority Fees ---
     MEV_PROTECTION: {
@@ -114,29 +220,37 @@ const config = {
     
     // --- Platform & Program IDs ---
     PLATFORM_IDS: {
-        RAYDIUM_V4: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
+        RAYDIUM_V4: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'),
         RAYDIUM_LAUNCHPAD: new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj'),
         RAYDIUM_CPMM: new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'),
         RAYDIUM_CLMM: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
         PUMP_FUN: new PublicKey('6EF8rrecthR5DkVaGFKLkma4YkdrkvPPHoqUPLQkwQjR'),
         PUMP_FUN_VARIANT: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
         PUMP_FUN_AMM: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
-        METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4cd4YfXbG6TfvB2eRCcsgAsPY'),
+        METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4TbnHErfpSA1Nk1ixL2SAH2xM'),
         METEORA_DBC: [
-            new PublicKey('DBCPdKzM5LgZm1u3SAn8Dkdkrwtn2A2argzdisE61m2F'),
-            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // Additional Meteora DBC program
+            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'),
+            new PublicKey('DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d'),
         ],
-        METEORA_CP_AMM: new PublicKey('MTCPmFupf4vm3b1D2bS2e9tqAbM6tCHM42Eny9g9f6Z'),
-        'Jupiter Aggregator': new PublicKey('JUP6LkbZbjS1jKKwapdHNy7A9erNsYcRcRdcJsu7WBV'),
-        PHOTON: new PublicKey('GMN8N6sNfA3iTjHupG2GfF2yAShP2d4JAXW6S1mMAJv3'),
-        AXIOM: new PublicKey('AXSwtggda59qbW2wKhonS1f44t42bLhNoHYb1bggC1fM'),
+        METEORA_CP_AMM: new PublicKey('CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'),
+        'Jupiter Aggregator': new PublicKey('JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5'),
+        PHOTON: new PublicKey('BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW'),
+        AXIOM: [
+            new PublicKey('AxiomfHaWDemCFBLBayqnEnNwE6b7B2Qz3UmzMpgbMG6'),
+            new PublicKey('AxiomxSitiyXyPjKgJ9XSrdhsydtZsskZTEDam3PxKcC')
+        ],
         // Add missing platform IDs that the analyzer expects
-        RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'), // Same as V4
+        RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'), // Same as V4
         METEORA_DBC_PROGRAM_IDS: [
-            new PublicKey('DBCPdKzM5LgZm1u3SAn8Dkdkrwtn2A2argzdisE61m2F'),
-            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // Additional Meteora DBC program
+            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'),
+            new PublicKey('DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d'),
         ],
-        METEORA_CP_AMM_PROGRAM_ID: new PublicKey('MTCPmFupf4vm3b1D2bS2e9tqAbM6tCHM42Eny9g9f6Z'),
+        METEORA_CP_AMM_PROGRAM_ID: new PublicKey('CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'),
+        OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'),
+        OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'),
+        // REMOVED: F5tf...zvBq is not a program ID - it's an account address
+       
+        
     },
 
     // --- PUMP.FUN Specifics (Now Helius-powered) ---

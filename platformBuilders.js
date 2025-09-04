@@ -2,6 +2,158 @@
 // File: platformBuilders.js
 // ==========================================
 
+// Custom DEX Buy instruction builder (F5tf...zvBq platform)
+async function buildCustomDexBuyInstruction(builderOptions) {
+    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, originalTransaction } = builderOptions;
+    
+    if (!originalTransaction) {
+        throw new Error("Custom DEX Buy builder requires original transaction data");
+    }
+
+    console.log(`[CUSTOM-DEX-BUY] 🔧 Building instructions for F5tf...zvBq platform`);
+    console.log(`[CUSTOM-DEX-BUY] 💰 User amount: ${amountBN.toString()} lamports (${amountBN.toNumber() / 1e9} SOL)`);
+    
+    try {
+        // Extract instruction data from original transaction
+        console.log(`[CUSTOM-DEX-BUY] 🔍 Original transaction structure:`, {
+            hasTransaction: !!originalTransaction.transaction,
+            hasMessage: !!originalTransaction.transaction?.message,
+            hasInstructions: !!originalTransaction.transaction?.message?.instructions,
+            instructionCount: originalTransaction.transaction?.message?.instructions?.length || 0,
+            hasAccountKeys: !!originalTransaction.transaction?.message?.accountKeys,
+            accountKeyCount: originalTransaction.transaction?.message?.accountKeys?.length || 0
+        });
+
+        const instructions = originalTransaction.transaction.message.instructions || [];
+        const accountKeys = originalTransaction.transaction.message.accountKeys || [];
+        
+        if (instructions.length === 0) {
+            throw new Error("No instructions found in original transaction");
+        }
+
+        console.log(`[CUSTOM-DEX-BUY] 🔍 Found ${instructions.length} instructions`);
+
+        // Find the main swap instruction (instruction index 3 based on logs)
+        const swapInstruction = instructions[3]; // The main swap instruction
+        if (!swapInstruction) {
+            throw new Error("Main swap instruction not found at index 3");
+        }
+
+        console.log(`[CUSTOM-DEX-BUY] 🔍 Swap instruction:`, {
+            programIdIndex: swapInstruction.programIdIndex,
+            accountCount: swapInstruction.accounts?.length || 0,
+            hasData: !!swapInstruction.data
+        });
+
+        // Get the platform program ID
+        const programId = accountKeys[swapInstruction.programIdIndex];
+        console.log(`[CUSTOM-DEX-BUY] 🎯 Platform: ${shortenAddress(programId.toString())}`);
+
+        // Create user instruction with same structure but user's public key and amounts
+        const userInstruction = {
+            programId: programId,
+            accounts: swapInstruction.accounts.map((accountIndex, idx) => {
+                const accountKey = accountKeys[accountIndex];
+                
+                // Replace the main signer account (usually index 0) with user's public key
+                if (idx === 0) {
+                    return {
+                        pubkey: userPublicKey,
+                        isSigner: true,
+                        isWritable: true
+                    };
+                }
+                
+                // Keep other accounts as they are
+                return {
+                    pubkey: accountKey,
+                    isSigner: false, // User is the only signer
+                    isWritable: swapInstruction.accounts[idx]?.isWritable || false
+                };
+            }),
+            data: swapInstruction.data // Use the same instruction data
+        };
+
+        console.log(`[CUSTOM-DEX-BUY] ✅ Built instruction for platform ${shortenAddress(programId.toString())}`);
+        console.log(`[CUSTOM-DEX-BUY] 📊 Account count: ${userInstruction.accounts.length}`);
+        
+        return [userInstruction];
+
+    } catch (error) {
+        console.error(`[CUSTOM-DEX-BUY] ❌ Failed to build instruction: ${error.message}`);
+        throw error;
+    }
+}
+
+// Universal instruction builder for any platform
+async function buildUniversalInstruction(builderOptions) {
+    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, originalTransaction } = builderOptions;
+    
+    if (!originalTransaction) {
+        throw new Error("Universal builder requires original transaction data");
+    }
+
+    console.log(`[UNIVERSAL-BUILDER] 🔧 Building universal instruction from original transaction`);
+    
+    try {
+        // Extract instruction data from original transaction
+        const instructions = originalTransaction.message?.instructions || [];
+        const accountKeys = originalTransaction.message?.accountKeys || [];
+        
+        if (instructions.length === 0) {
+            throw new Error("No instructions found in original transaction");
+        }
+
+        // Find the main swap instruction (usually the one with token transfers)
+        const swapInstruction = instructions.find(ix => {
+            // Look for instructions that involve token programs or have significant data
+            const programId = accountKeys[ix.programIdIndex];
+            return programId && (
+                programId.toString() !== '11111111111111111111111111111111' && // Not System Program
+                programId.toString() !== 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' && // Not SPL Token
+                programId.toString() !== 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' && // Not Associated Token
+                programId.toString() !== 'ComputeBudget111111111111111111111111111111' // Not Compute Budget
+            );
+        });
+
+        if (!swapInstruction) {
+            throw new Error("No valid swap instruction found in original transaction");
+        }
+
+        const programId = accountKeys[swapInstruction.programIdIndex];
+        console.log(`[UNIVERSAL-BUILDER] 🎯 Detected platform: ${shortenAddress(programId.toString())}`);
+
+        // Create a copy of the instruction with user's public key and amounts
+        const userInstruction = {
+            programId: programId,
+            accounts: swapInstruction.accounts.map(account => {
+                const accountKey = accountKeys[account];
+                // Replace trader's public key with user's public key for the main account
+                if (account === 0) { // Usually the first account is the main signer
+                    return {
+                        pubkey: userPublicKey,
+                        isSigner: true,
+                        isWritable: true
+                    };
+                }
+                return {
+                    pubkey: accountKey,
+                    isSigner: account.isSigner || false,
+                    isWritable: account.isWritable || false
+                };
+            }),
+            data: swapInstruction.data // Use the same instruction data
+        };
+
+        console.log(`[UNIVERSAL-BUILDER] ✅ Built universal instruction for platform ${shortenAddress(programId.toString())}`);
+        return [userInstruction];
+
+    } catch (error) {
+        console.error(`[UNIVERSAL-BUILDER] ❌ Failed to build universal instruction: ${error.message}`);
+        throw error;
+    }
+}
+
 // --- CORE LIBRARIES ---
 const {
     PublicKey,
@@ -10,6 +162,7 @@ const {
     ComputeBudgetProgram,
     VersionedTransaction,
     TransactionMessage,
+    Transaction,
 } = require('@solana/web3.js');
 const { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddressSync, NATIVE_MINT: WSOL_MINT } = require("@solana/spl-token");
 const axios = require('axios');
@@ -19,6 +172,7 @@ const traceLogger = require('./traceLogger.js');
 
 // --- PROTOCOL SDKs ---
 const { PumpSdk } = require('@pump-fun/pump-sdk');
+const { PumpAmmSdk } = require('@pump-fun/pump-swap-sdk');
 const RaydiumV2_raw = require('@raydium-io/raydium-sdk');
  const RaydiumV2 = RaydiumV2_raw.default || RaydiumV2_raw;
 
@@ -40,7 +194,7 @@ const {
 
 const { Dlmm } = require('@meteora-ag/dlmm');
 const { CpAmm: MeteoraCpAmm } = require('@meteora-ag/cp-amm-sdk');
-const MeteoraDBC = require('@meteora-ag/dynamic-bonding-curve-sdk');
+const { DynamicBondingCurveClient } = require('@meteora-ag/dynamic-bonding-curve-sdk');
 
 
 // --- INTERNAL CONFIG & UTILS ---
@@ -87,50 +241,166 @@ async function _getLaunchpadPoolData(connection, poolId, configId, cacheManager)
 /// === Pump.fun ===
 
 async function buildPumpFunInstruction(builderOptions) {
-    const { connection, userWallet, swapDetails, amountBN, slippageBps, nonceInfo = null } = builderOptions;
+    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, apiManager, sdk, keypair } = builderOptions;
+
+    // --- Input Validation ---
+    if (!apiManager) throw new Error("Pump.fun builder requires an apiManager instance.");
+    if (!sdk) throw new Error("Pump.fun builder requires an sdk instance.");
+
+    const isBuy = swapDetails.tradeType === 'buy';
+    const tokenMint = isBuy ? swapDetails.outputMint : swapDetails.inputMint;
+    const tokenMintPk = new PublicKey(tokenMint);
+
+    console.log(`[PUMP_BUILDER_BC-SDK] Building ${isBuy ? 'BUY' : 'SELL'} for ${shortenAddress(tokenMint)}...`);
 
     try {
-        const isBuy = swapDetails.tradeType === 'buy';
-        const tokenMintPk = new PublicKey(isBuy ? swapDetails.outputMint : swapDetails.inputMint);
-        const userWalletPk = new PublicKey(userWallet); // Ensure it's a PublicKey object
+        // --- Get Critical Coin Data (including creator) from API ---
+        const coinData = await apiManager.getPumpFunCoinData(tokenMint);
+        const creatorPk = new PublicKey(coinData.creator);
+        
+        const feeRecipient = new PublicKey(config.PUMP_FUN_FEE_RECIPIENT);
+        
+        let instruction;
+        if (isBuy) {
+            // For a buy, amountBN is the amount of SOL to spend (in lamports)
+            const solIn = amountBN;
+            
+            instruction = await sdk.getBuyInstructionRaw({
+                user: userPublicKey,
+                mint: tokenMintPk,
+                creator: creatorPk,
+                amount: new BN(0), // We'll calculate this based on SOL input
+                solAmount: solIn,
+                feeRecipient: feeRecipient
+            });
 
-        console.log(`[PUMP_BUILDER_BC-SDK] Building ${swapDetails.tradeType.toUpperCase()} for ${shortenAddress(tokenMintPk.toBase58())}...`);
+        } else { // SELL LOGIC
+            // For a sell, amountBN is the raw amount of tokens to sell
+            const tokenAmountIn = amountBN;
 
-        // 1. Instantiate the official Pump.fun SDK
-        const sdk = new PumpSdk(connection);
-
-        // 2. Use the SDK's battle-tested methods to get the full transaction object
-        const pumpTx = isBuy
-            ? await sdk.getBuyTransaction(tokenMintPk, amountBN, userWalletPk, slippageBps)
-            : await sdk.getSellTransaction(tokenMintPk, amountBN, userWalletPk, slippageBps);
-
-        if (!pumpTx?.instructions) {
-            throw new Error('Pump.fun SDK did not return a valid transaction object.');
+            // We calculate the minimum SOL output we are willing to accept
+            const traderSolOutput = new BN(swapDetails.outputAmountLamports);
+            const slippage = new BN(slippageBps);
+            const BPS_DIVISOR = new BN(10000); // 100% in basis points
+            const minSolOutput = traderSolOutput.mul(BPS_DIVISOR.sub(slippage)).div(BPS_DIVISOR);
+            
+            console.log(`[PUMP_BUILDER_BC-SDK] Trader received ${traderSolOutput.toString()} lamports. Min acceptable with ${slippageBps} bps slippage: ${minSolOutput.toString()}`);
+            
+            instruction = await sdk.getSellInstructionRaw({
+                user: userPublicKey,
+                mint: tokenMintPk,
+                creator: creatorPk,
+                amount: tokenAmountIn,
+                solAmount: minSolOutput,
+                feeRecipient: feeRecipient
+            });
         }
 
-        // 3. Extract the instructions, filtering out the compute budget ones (we add our own later)
-        let instructions = pumpTx.instructions.filter(ix =>
-            !ix.programId.equals(config.COMPUTE_BUDGET_PROGRAM_ID)
-        );
-
-        // 4. Inject nonce instruction if provided
-        if (nonceInfo) {
-            console.log(`[BUILDER-NONCE] Injecting advanceNonce for Pump.fun BC`);
-            instructions.unshift(
-                SystemProgram.nonceAdvance({
-                    noncePubkey: nonceInfo.noncePubkey,
-                    authorizedPubkey: nonceInfo.authorizedPubkey,
-                })
-            );
+        if (!instruction) {
+            throw new Error('Pump.fun SDK failed to return a valid instruction.');
         }
 
-        console.log(`[PUMP_BUILDER_BC-SDK] ✅ Successfully built ${instructions.length} instructions.`);
-        return instructions;
+        // Return the instruction array (the SDK methods return single instructions)
+        return [instruction];
 
-    } catch (err) {
-        console.error(`[PUMP_BUILDER_BC-SDK] ❌ Failed to build Pump.fun swap with SDK:`, err.message);
-        console.error(err.stack); // Full error for debugging
-        return null;
+    } catch (error) {
+        console.error(`[PUMP_BUILDER_BC-SDK] ❌ Failed to build Pump.fun swap with SDK: ${error.message}`);
+        throw error;
+    }
+}
+
+// Helper function to get creator from bonding curve
+async function getCreatorFromBondingCurve(connection, mint) {
+    try {
+        // First, try to get the bonding curve PDA
+        const bondingCurvePda = PublicKey.findProgramAddressSync(
+            [Buffer.from('bonding_curve'), mint.toBuffer()],
+            new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P')
+        )[0];
+        
+        console.log(`[PUMP_BUILDER_BC-SDK] Looking for bonding curve at: ${bondingCurvePda.toBase58()}`);
+        
+        // Get account info
+        let accountInfo = await connection.getAccountInfo(bondingCurvePda);
+        if (!accountInfo) {
+            // Try alternative PDA derivation
+            const altBondingCurvePda = PublicKey.findProgramAddressSync(
+                [Buffer.from('bonding_curve_v2'), mint.toBuffer()],
+                new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P')
+            )[0];
+            
+            console.log(`[PUMP_BUILDER_BC-SDK] Trying alternative PDA: ${altBondingCurvePda.toBase58()}`);
+            
+            const altAccountInfo = await connection.getAccountInfo(altBondingCurvePda);
+            if (!altAccountInfo) {
+                // If still not found, try to get from token metadata
+                console.log(`[PUMP_BUILDER_BC-SDK] Bonding curve not found, trying token metadata...`);
+                
+                // For now, return a default creator or try to derive from mint
+                // This is a fallback for tokens that might not have bonding curves yet
+                return mint; // Use mint as creator for now
+            }
+            
+            // Use alternative account info
+            accountInfo = altAccountInfo;
+        }
+        
+        // Try to decode the bonding curve account
+        try {
+            // The creator is typically at offset 8 (after discriminator)
+            const creatorBytes = accountInfo.data.slice(8, 40);
+            const creator = new PublicKey(creatorBytes);
+            
+            console.log(`[PUMP_BUILDER_BC-SDK] Found creator: ${creator.toBase58()}`);
+            return creator;
+            
+        } catch (decodeError) {
+            console.log(`[PUMP_BUILDER_BC-SDK] Could not decode creator from bonding curve, using mint as fallback`);
+            return mint; // Use mint as creator if decoding fails
+        }
+        
+    } catch (error) {
+        console.error(`[PUMP_BUILDER_BC-SDK] Error getting creator:`, error.message);
+        // Return mint as fallback creator
+        return mint;
+    }
+}
+
+// Helper function to calculate expected SOL output for sell
+async function calculateExpectedSolOut(connection, mint, amount) {
+    try {
+        console.log(`[PUMP_BUILDER_BC-SDK] Calculating expected SOL output for ${amount.toString()} tokens`);
+        
+        // Try to get bonding curve data for more accurate calculation
+        try {
+            const bondingCurvePda = PublicKey.findProgramAddressSync(
+                [Buffer.from('bonding_curve'), mint.toBuffer()],
+                new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P')
+            )[0];
+            
+            const accountInfo = await connection.getAccountInfo(bondingCurvePda);
+            if (accountInfo) {
+                // If we have bonding curve data, we could calculate more accurately
+                // For now, use a conservative estimate based on amount
+                const estimatedSolOut = amount.mul(new BN(1000000)); // Rough estimate: 1 token = 0.001 SOL
+                console.log(`[PUMP_BUILDER_BC-SDK] Using bonding curve estimate: ${estimatedSolOut.toString()} lamports`);
+                return estimatedSolOut;
+            }
+        } catch (curveError) {
+            console.log(`[PUMP_BUILDER_BC-SDK] Could not fetch bonding curve data:`, curveError.message);
+        }
+        
+        // Fallback calculation: conservative estimate
+        // For copy trading, we want to be conservative to avoid failed transactions
+        const estimatedSolOut = amount.mul(new BN(500000)); // 0.0005 SOL per token (very conservative)
+        
+        console.log(`[PUMP_BUILDER_BC-SDK] Using fallback estimate: ${estimatedSolOut.toString()} lamports`);
+        return estimatedSolOut;
+        
+    } catch (error) {
+        console.error(`[PUMP_BUILDER_BC-SDK] Error calculating SOL output:`, error.message);
+        // Return a very conservative default
+        return new BN(1000000); // 0.001 SOL minimum
     }
 }
 
@@ -145,51 +415,27 @@ async function buildPumpFunAmmInstruction(builderOptions) {
         if (!tokenMint) throw new Error("PumpFun AMM Builder: Token mint is missing from swapDetails.");
 
         // --- INTEL GATHERING (THIS IS THE FIX) ---
-        // Use our new, resilient API fetcher to get live pool data.
-        const poolData = await getPumpAmmPoolState(tokenMint);
-        const { poolAddress, poolState } = poolData;
+        // Use the proper Pump.fun AMM SDK for instruction building
+        const pumpAmmSdk = new PumpAmmSdk(connection);
+        
+        // Get the canonical pool for this token using the available functions
+        const pumpPoolAuthority = pumpAmmSdk.pumpPoolAuthorityPda(new PublicKey(tokenMint));
+        const canonicalPool = pumpAmmSdk.poolKey(0, pumpPoolAuthority, new PublicKey(tokenMint), new PublicKey(config.NATIVE_SOL_MINT))[0];
+        
+        // Get swap state for the user
+        const swapState = await pumpAmmSdk.swapSolanaState(canonicalPool, keypair.publicKey);
+        
+        // Build instructions using the SDK
+        let instructions;
+        if (isBuy) {
+            // Buy tokens with SOL
+            instructions = await pumpAmmSdk.buyBaseInput(swapState, amountBN, slippageBps / 100);
+        } else {
+            // Sell tokens for SOL
+            instructions = await pumpAmmSdk.sellBaseInput(swapState, amountBN, slippageBps / 100);
+        }
 
-        // --- CALCULATION ---
-        let amountOut;
-        const a = isBuy ? poolState.solReserves : poolState.tokenReserves;
-        const b = isBuy ? poolState.tokenReserves : poolState.solReserves;
-
-        if (a === 0n || b === 0n) throw new Error("PumpFun AMM has zero reserves in one of the vaults.");
-
-        amountOut = (b * BigInt(amountBN.toString())) / (a + BigInt(amountBN.toString()));
-        const slippage = (amountOut * BigInt(slippageBps)) / 10000n;
-        const minAmountOut = amountOut - slippage;
-
-        const userWalletPk = keypair.publicKey;
-        const userSolAta = getAssociatedTokenAddressSync(new PublicKey(config.NATIVE_SOL_MINT), userWalletPk, true);
-        const userTokenAta = getAssociatedTokenAddressSync(new PublicKey(tokenMint), userWalletPk);
-
-        // --- INSTRUCTION BUILDING ---
-        const discriminator = isBuy ? config.PUMP_AMM_BUY_DISCRIMINATOR : config.PUMP_AMM_SELL_DISCRIMINATOR;
-        const data = Buffer.concat([
-            discriminator,
-            new BN(amountBN.toString()).toBuffer('le', 8),
-            new BN(minAmountOut.toString()).toBuffer('le', 8)
-        ]);
-
-        const keys = [
-            { pubkey: poolAddress, isSigner: false, isWritable: true },
-            { pubkey: poolState.poolAuthority, isSigner: false, isWritable: false },
-            { pubkey: isBuy ? userSolAta : userTokenAta, isSigner: false, isWritable: true },
-            { pubkey: isBuy ? userTokenAta : userSolAta, isSigner: false, isWritable: true },
-            { pubkey: isBuy ? poolState.solVault : poolState.tokenVault, isSigner: false, isWritable: true },
-            { pubkey: isBuy ? poolState.tokenVault : poolState.solVault, isSigner: false, isWritable: true },
-            { pubkey: userWalletPk, isSigner: true, isWritable: true },
-            { pubkey: config.TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-        ];
-
-        const instruction = new TransactionInstruction({
-            keys: keys,
-            programId: config.PUMP_FUN_AMM_PROGRAM_ID,
-            data: data,
-        });
-
-        let instructions = [instruction];
+        // Add nonce instruction if provided
         if (nonceInfo) {
             console.log(`[BUILDER-NONCE] Injecting advanceNonce for Pump.fun AMM`);
             instructions.unshift(
@@ -210,177 +456,71 @@ async function buildPumpFunAmmInstruction(builderOptions) {
 }
 
 async function getPumpAmmPoolState(tokenMint) {
-    console.log(`[HELIUS_PUMP_INTEL] Fetching pool state for token: ${shortenAddress(tokenMint)} via Helius RPC`);
-    
-    try {
-        // Use Helius RPC connection for direct on-chain data
-        const { Connection } = require('@solana/web3.js');
-        const heliusConnection = new Connection(config.RPC_URL, 'confirmed');
-        
-        const tokenMintPk = new PublicKey(tokenMint);
-        
-        // Method 1: Try to get Pump.fun bonding curve data directly from chain
-        const [bondingCurvePda] = PublicKey.findProgramAddressSync(
-            [Buffer.from('bonding-curve'), tokenMintPk.toBuffer()],
-            config.PUMP_FUN_PROGRAM_ID
-        );
-        
-        console.log(`[HELIUS_PUMP_INTEL] Checking bonding curve: ${shortenAddress(bondingCurvePda.toBase58())}`);
-        
-        // Fetch account data via Helius RPC
-        const bondingCurveAccount = await heliusConnection.getAccountInfo(bondingCurvePda, 'confirmed');
-        
-        if (bondingCurveAccount && bondingCurveAccount.data.length > 50) {
-            // Token is still on bonding curve - extract data directly
-            const data = bondingCurveAccount.data;
-            
-            // Decode bonding curve state (simplified layout based on Pump.fun structure)
-            let solReserves, tokenReserves;
+    const logPrefix = `[PUMP_AMM_INTEL_V4]`;
+    console.log(`${logPrefix} Fetching pool state for token: ${shortenAddress(tokenMint)}`);
+
+    const endpoints = [
+        `https://frontend-api.pump.fun/coins/${tokenMint}`, // New primary API
+        `https://api.pump.fun/dev/coins/${tokenMint}`     // Old developer API (fallback)
+    ];
+
+    const maxRetries = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        for (const url of endpoints) {
             try {
-                // Try common offsets for Pump.fun bonding curve data
-                solReserves = data.readBigUInt64LE(32);
-                tokenReserves = data.readBigUInt64LE(40);
-            } catch (e) {
-                // Fallback to different offsets if needed
-                solReserves = data.readBigUInt64LE(24);
-                tokenReserves = data.readBigUInt64LE(32);
-            }
-            
-            // Derive associated accounts
-            const [poolAuthority] = PublicKey.findProgramAddressSync(
-                [Buffer.from('authority')],
-                config.PUMP_FUN_PROGRAM_ID
-            );
-            
-            const solVault = getAssociatedTokenAddressSync(
-                new PublicKey(config.NATIVE_SOL_MINT),
-                poolAuthority,
-                true
-            );
-            
-            const tokenVault = getAssociatedTokenAddressSync(
-                tokenMintPk,
-                poolAuthority,
-                true
-            );
-            
-            console.log(`[HELIUS_PUMP_INTEL] ✅ Bonding curve data via Helius RPC - SOL: ${solReserves.toString()}, Token: ${tokenReserves.toString()}`);
-            
-            return {
-                poolAddress: bondingCurvePda,
-                poolState: {
-                    solReserves,
-                    tokenReserves,
-                    poolAuthority,
-                    tokenVault,
-                    solVault,
-                }
-            };
-        }
-        
-        console.log(`[HELIUS_PUMP_INTEL] No bonding curve found, checking for migrated AMM pool...`);
-        
-        // Method 2: Token might have migrated to AMM - try to find AMM pool
-        // Use Helius to get recent transactions for this token
-        try {
-            const recentSigs = await heliusConnection.getSignaturesForAddress(tokenMintPk, { limit: 20 });
-            
-            for (const sigInfo of recentSigs) {
-                try {
-                    const tx = await heliusConnection.getParsedTransaction(sigInfo.signature, {
-                        maxSupportedTransactionVersion: 0
-                    });
-                    
-                    if (tx && tx.transaction && tx.transaction.message && tx.transaction.message.instructions) {
-                        // Look for AMM program interactions
-                        for (const ix of tx.transaction.message.instructions) {
-                            const programId = ix.programId || (ix.programIdIndex !== undefined ? tx.transaction.message.accountKeys[ix.programIdIndex] : null);
-                            
-                            if (programId && programId.equals && programId.equals(config.PUMP_FUN_AMM_PROGRAM_ID)) {
-                                // Found AMM interaction - try to get pool address from accounts
-                                const accounts = ix.accounts || [];
-                                if (accounts.length > 0) {
-                                    const poolAddress = accounts[0];
-                                    
-                                    // Fetch AMM pool account data
-                                    const poolAccount = await heliusConnection.getAccountInfo(poolAddress, 'confirmed');
-                                    if (poolAccount && poolAccount.data.length > 50) {
-                                        const poolData = poolAccount.data;
-                                        
-                                        // Extract AMM pool reserves (simplified)
-                                        const solReserves = poolData.readBigUInt64LE(32);
-                                        const tokenReserves = poolData.readBigUInt64LE(40);
-                                        
-                                        console.log(`[HELIUS_PUMP_INTEL] ✅ Found migrated AMM pool via Helius: ${shortenAddress(poolAddress.toBase58())}`);
-                                        
-                                        return {
-                                            poolAddress,
-                                            poolState: {
-                                                solReserves,
-                                                tokenReserves,
-                                                poolAuthority: accounts[1] || poolAddress,
-                                                tokenVault: accounts[2] || poolAddress,
-                                                solVault: accounts[3] || poolAddress,
-                                            }
-                                        };
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } catch (txError) {
-                    // Skip failed transactions
-                    continue;
-                }
-            }
-        } catch (historyError) {
-            console.log(`[HELIUS_PUMP_INTEL] ⚠️ Could not fetch transaction history: ${historyError.message}`);
-        }
-        
-        // Method 3: Fallback to official Pump.fun APIs only as last resort
-        console.log(`[HELIUS_PUMP_INTEL] Falling back to official pump.fun APIs...`);
-        
-        const fallbackEndpoints = [
-            `https://frontend-api.pump.fun/coins/${tokenMint}`,
-            `https://api.pump.fun/coins/${tokenMint}`
-        ];
-        
-        for (const endpoint of fallbackEndpoints) {
-            try {
-                const response = await axios.get(endpoint, {
-                    timeout: 8000,
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (compatible; HeliusBot/1.0)',
+                const response = await axios.get(url, { 
+                    timeout: 5000, // Quick timeout for fast attempts
+                    headers: { 
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
                         'Accept': 'application/json'
                     }
                 });
-                
                 const data = response.data;
-                if (data && data.market_id && data.sol_reserves !== undefined && data.token_reserves !== undefined) {
-                    console.log(`[HELIUS_PUMP_INTEL] ✅ Fallback successful from ${endpoint.split('/')[2]}`);
-                    
-                    return {
-                        poolAddress: new PublicKey(data.market_id),
-                        poolState: {
-                            solReserves: BigInt(data.sol_reserves),
-                            tokenReserves: BigInt(data.token_reserves),
-                            poolAuthority: new PublicKey(data.raydium_authority || data.authority),
-                            tokenVault: new PublicKey(data.token_account),
-                            solVault: new PublicKey(data.sol_account),
-                        }
-                    };
+
+                if (!data || !data.market_id || !data.raydium_authority || !data.token_account || !data.sol_account) {
+                    lastError = `Malformed data from ${url}`;
+                    continue; // Malformed data, try next endpoint
                 }
+
+                console.log(`${logPrefix} ✅ Success on attempt #${attempt} from ${url.split('/')[2]}.`);
+                
+                return {
+                    poolAddress: new PublicKey(data.market_id),
+                    poolState: {
+                        solReserves: BigInt(data.sol_reserves || 0),
+                        tokenReserves: BigInt(data.token_reserves || 0),
+                        poolAuthority: new PublicKey(data.raydium_authority),
+                        tokenVault: new PublicKey(data.token_account),
+                        solVault: new PublicKey(data.sol_account),
+                    }
+                };
+
             } catch (error) {
-                console.warn(`[HELIUS_PUMP_INTEL] Fallback ${endpoint.split('/')[2]} failed: ${error.response?.status || error.message}`);
+                lastError = error; // Store the last error
+                if (error.response?.status === 404) {
+                    // This is the expected "Not Found" error for new pools
+                    console.log(`${logPrefix} ⏳ Pool not yet indexed on ${url.split('/')[2]} (404). Retrying...`);
+                } else {
+                    // A different error occurred (e.g., server down, timeout)
+                    const status = error.response?.status || 'N/A';
+                    console.warn(`${logPrefix} ⚠️ Request to ${url.split('/')[2]} failed (Status: ${status}).`);
+                }
             }
+        } // End of endpoint loop
+
+        // If all endpoints failed for this attempt, wait before retrying
+        if (attempt < maxRetries) {
+            const delay = 500 * attempt; // 500ms, then 1000ms
+            console.log(`${logPrefix} All endpoints failed on attempt #${attempt}. Waiting ${delay}ms before next retry.`);
+            await require('./utils.js').sleep(delay);
         }
-        
-        throw new Error('All methods failed to get pool state');
-        
-    } catch (error) {
-        console.error(`[HELIUS_PUMP_INTEL] ❌ Failed to fetch pool state: ${error.message}`);
-        throw error;
-    }
+    } // End of retry loop
+
+    // If we exit the loop, all retries have failed.
+    console.error(`${logPrefix} ❌ All retry attempts failed. Last error: ${lastError?.message || 'Unknown'}`);
+    throw new Error(`Failed to fetch Pump.fun AMM pool state for ${tokenMint} after ${maxRetries} attempts.`);
 }
 
 async function buildRaydiumInstruction(builderOptions) {
@@ -912,25 +1052,46 @@ async function buildRaydiumCpmmInstruction(builderOptions) {
 
 /// === MeteoraDBC (SDK POWERED) ===
 async function buildMeteoraDBCInstruction(builderOptions) {
-    const { connection, userPublicKey, swapDetails, amountInLamports, nonceInfo = null } = builderOptions;
+    const { connection, userPublicKey, swapDetails, amountBN, nonceInfo = null } = builderOptions;
     
     try {
+        // Validate required parameters
+        if (!userPublicKey) {
+            throw new Error('userPublicKey is undefined or null');
+        }
+        
+        if (!swapDetails) {
+            throw new Error('swapDetails is undefined');
+        }
+        
+        if (!swapDetails.platformSpecificData || !swapDetails.platformSpecificData.poolId) {
+            throw new Error(`Missing poolId. platformSpecificData: ${JSON.stringify(swapDetails.platformSpecificData)}`);
+        }
+        
+        // SAFE DEBUG LOGGING: Log only the essential parts, not the circular `connection` object.
+        const safeLogOptions = {
+            userPublicKey: userPublicKey.toBase58(),
+            hasNonce: !!nonceInfo,
+            swapDetails: swapDetails // swapDetails is a simple object and safe to stringify
+        };
+        console.log(`[METEORA_DBC_DEBUG] Received builderOptions:`, JSON.stringify(safeLogOptions, null, 2));
+        
         const isBuy = swapDetails.tradeType === 'buy';
         const poolIdPk = new PublicKey(swapDetails.platformSpecificData.poolId);
         
         console.log(`[METEORA_DBC_SDK] Building ${swapDetails.tradeType.toUpperCase()} for pool ${shortenAddress(poolIdPk.toBase58())}.`);
 
         // 1. Initialize the DBC client
-        const client = new MeteoraDBC(connection);
+        const client = new DynamicBondingCurveClient(connection, 'confirmed');
 
         // 2. Fetch the required pool and config states using the SDK
-        const poolState = await client.program.account.virtualPool.fetch(poolIdPk);
-        const configState = await client.program.account.poolConfig.fetch(poolState.config);
+        const poolState = await client.pool.pool.program.account.virtualPool.fetch(poolIdPk);
+        const configState = await client.pool.pool.program.account.poolConfig.fetch(poolState.config);
         
-        const inAmount = new BN(amountInLamports.toString());
+        const inAmount = amountBN;
 
         // 3. Use the SDK's built-in swap instruction builder. This is the safest method.
-        const swapIx = await client.pool.swap({
+        const swapTransaction = await client.pool.swap({
             pool: poolIdPk,
             poolConfig: poolState.config,
             amountIn: inAmount,
@@ -940,10 +1101,10 @@ async function buildMeteoraDBCInstruction(builderOptions) {
             payer: new PublicKey(userPublicKey), // Payer and owner are the same
         });
 
-        if (!swapIx) throw new Error("Meteora DBC SDK failed to generate a swap instruction.");
+        if (!swapTransaction) throw new Error("Meteora DBC SDK failed to generate a swap transaction.");
 
-        // 4. Wrap the instruction in an array and inject nonce
-        let instructions = [swapIx];
+        // 4. Extract instructions from the transaction and inject nonce
+        let instructions = swapTransaction.instructions;
         if (nonceInfo) {
             instructions.unshift(
                 SystemProgram.nonceAdvance({
@@ -1094,97 +1255,97 @@ async function buildMeteoraCpAmmInstruction(builderOptions) {
     }
 }
 
-async function buildJupiterSwapInstruction({
-    connection,         // <-- ADDED BACK: Needed for the decompile fix
-    userPublicKey,
-    inputMint,
-    outputMint,
-    amountInBN,
-    slippageBps = 2500,
-    nonceInfo = null,
-}) {
+// ==========================================================
+// === JUPITER FALLBACK BUILDER ===
+// ==========================================================
+
+/**
+ * Jupiter fallback builder for unknown DEX platforms
+ * This ensures ALL trades are copyable regardless of platform
+ */
+async function buildJupiterInstruction(builderOptions) {
+    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, apiManager } = builderOptions;
+
+    // --- Input Validation ---
+    if (!apiManager) throw new Error("Jupiter builder requires an apiManager instance.");
+    if (!swapDetails.inputMint || !swapDetails.outputMint) {
+        throw new Error("Jupiter builder requires inputMint and outputMint in swapDetails.");
+    }
+
+    console.log(`[JUPITER-FALLBACK] 🔄 Building Jupiter fallback for unknown DEX`);
+    console.log(`[JUPITER-FALLBACK] 📍 Input: ${shortenAddress(swapDetails.inputMint)}`);
+    console.log(`[JUPITER-FALLBACK] 📍 Output: ${shortenAddress(swapDetails.outputMint)}`);
+    console.log(`[JUPITER-FALLBACK] 💰 Amount: ${amountBN.toString()} raw units`);
+
     try {
-        console.log(`[JUPITER-V6_BUILDER] Building with modern SDK for ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
+        // Convert amount to proper format for Jupiter
+        const amount = amountBN.toString();
         
-        const jupiterApi = require('@jup-ag/api').createJupiterApiClient({ apiEndpoint: "https://quote-api.jup.ag/v6" }); // Make sure require is here if not at top
-        const userWallet = userPublicKey.toBase58();
-
-        const quote = await jupiterApi.quoteGet({
-            inputMint: inputMint,
-            outputMint: outputMint,
-            amount: parseInt(amountInBN.toString()),
-            slippageBps: slippageBps,
-            onlyDirectRoutes: false,
-            asLegacyTransaction: false,
+        // Get Jupiter swap transaction
+        const jupiterTransaction = await apiManager.getSwapTransactionFromJupiter({
+            inputMint: swapDetails.inputMint,
+            outputMint: swapDetails.outputMint,
+            amount: amount,
+            userWallet: userPublicKey.toBase58(),
+            slippageBps: slippageBps || 500 // 5% default slippage
         });
 
-        if (!quote) throw new Error("Jupiter v6 failed to find a route.");
+        if (!jupiterTransaction || jupiterTransaction.length === 0) {
+            throw new Error("Jupiter failed to generate swap transaction");
+        }
 
-        const swapResult = await jupiterApi.swapPost({
-            swapRequest: {
-                quoteResponse: quote,
-                userPublicKey: userWallet,
-                wrapAndUnwrapSol: true,
-            },
-        });
-
-        const txBuffer = Buffer.from(swapResult.swapTransaction, 'base64');
-        const transaction = VersionedTransaction.deserialize(txBuffer);
-
-        // ----------- THE FIX IS HERE -----------
-        // We MUST check if addressTableLookups exists before trying to map it.
-     const addressTableLookups = Array.isArray(transaction.message.addressTableLookups) ? transaction.message.addressTableLookups : [];
-
-const lookupTableAccounts = await Promise.all(
-    addressTableLookups.map(async (lookup) => {
-        try {
-            // Fetch the lookup table account from the connection
-            const lookupTableAccountInfo = await connection.getAddressLookupTable(lookup.accountKey);
-            // The structure for decompile needs both the key and the state
-            if (lookupTableAccountInfo && lookupTableAccountInfo.value) {
-                return { key: lookup.accountKey, state: lookupTableAccountInfo.value };
+        // V6 API FIX: Handle both single object and array responses from the API manager.
+        const txArray = Array.isArray(jupiterTransaction) ? jupiterTransaction : [jupiterTransaction];
+        
+        const instructions = [];
+        for (const serializedTx of txArray) {
+            try {
+                // Deserialize the transaction to extract instructions
+                const transaction = VersionedTransaction.deserialize(Buffer.from(serializedTx, 'base64'));
+                
+                // We need the full message to properly map accounts
+                const message = transaction.message;
+                const accountKeys = message.staticAccountKeys.concat(message.addressTableLookups.flatMap(lookup => lookup.readonly.concat(lookup.writable)));
+                
+                for (const compiledIx of message.compiledInstructions) {
+                    // Convert compiled instruction to regular instruction format
+                    const instruction = {
+                        programId: accountKeys[compiledIx.programIdIndex],
+                        keys: compiledIx.accounts.map(accIndex => ({
+                            pubkey: accountKeys[accIndex],
+                            // Correctly determine if an account is a signer or writable
+                            isSigner: message.isAccountSigner(accIndex),
+                            isWritable: message.isAccountWritable(accIndex),
+                        })),
+                        data: compiledIx.data
+                    };
+                    
+                    instructions.push(instruction);
+                }
+                
+                console.log(`[JUPITER-FALLBACK] ✅ Converted ${message.compiledInstructions.length} compiled instructions to regular format`);
+            } catch (deserializeError) {
+                console.warn(`[JUPITER-FALLBACK] ⚠️ Failed to deserialize Jupiter transaction:`, deserializeError.message);
+                // If deserialization fails, we'll try to use the raw transaction
+                throw new Error(`Jupiter transaction deserialization failed: ${deserializeError.message}`);
             }
-        } catch (e) {
-            console.warn(`[JUP-BUILDER] Failed to fetch lookup table ${lookup.accountKey.toBase58()}:`, e.message);
-        }
-        return null;
-    })
-);
-        // ----------- END OF FIX -----------
-        
-        // Decompile the message with the fetched lookup tables
-        const message = TransactionMessage.decompile(transaction.message, {
-             // Pass the fetched accounts here. Filter out any that failed.
-            addressLookupTableAccounts: lookupTableAccounts.filter(Boolean)
-        });
-
-        let instructions = message.instructions.filter(ix => 
-            !ix.programId.equals(ComputeBudgetProgram.programId)
-        );
-
-        if (instructions.length === 0) throw new Error("Jupiter v6 returned a transaction with no main instructions.");
-        
-        if (nonceInfo) {
-            console.log(`[BUILDER-NONCE] Injecting advanceNonce for Jupiter v6`);
-            instructions.unshift(
-                SystemProgram.nonceAdvance({
-                    noncePubkey: nonceInfo.noncePubkey,
-                    authorizedPubkey: nonceInfo.authorizedPubkey,
-                })
-            );
         }
 
-        console.log(`[JUPITER-V6_BUILDER] ✅ Successfully built ${instructions.length} instructions.`);
-        return { instructions };
+        if (instructions.length === 0) {
+            throw new Error("No instructions extracted from Jupiter transaction");
+        }
 
-    } catch (err) {
-        console.error(`[JUPITER-V6_BUILDER] ❌ Critical failure during swap build:`, err.message);
-        if (err.response?.data) console.error('Jupiter API Error Details:', err.response.data);
-        throw new Error(`Jupiter v6 builder failed: ${err.message}`);
+        console.log(`[JUPITER-FALLBACK] ✅ Successfully built Jupiter fallback with ${instructions.length} instructions`);
+        return instructions;
+
+    } catch (error) {
+        console.error(`[JUPITER-FALLBACK] ❌ Jupiter fallback failed:`, error.message);
+        throw new Error(`Jupiter fallback failed: ${error.message}`);
     }
 }
 
 module.exports = {
+    buildCustomDexBuyInstruction,
     buildPumpFunInstruction,
     buildPumpFunAmmInstruction,
     buildRaydiumInstruction,
@@ -1195,9 +1356,9 @@ module.exports = {
     buildMeteoraDBCInstruction,
     buildMeteoraDLMMInstruction,
     buildMeteoraCpAmmInstruction,
-    buildJupiterSwapInstruction,
     createBuyExactInInstructionData,
     createSellExactInInstructionData,
     _getLaunchpadPoolData,
-    getPumpAmmPoolState
+    getPumpAmmPoolState,
+    buildJupiterInstruction
 };

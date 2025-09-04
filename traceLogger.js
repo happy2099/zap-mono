@@ -5,9 +5,23 @@
 
 const fs = require('fs/promises');
 const path = require('path');
-const config = require('./config.js'); // For accessing LOGS_DIR
 
-const TRACE_DIR = path.join(config.LOGS_DIR, 'traces');
+// Safely get config with fallback
+let config;
+try {
+    config = require('./config.js');
+} catch (error) {
+    console.warn('[TraceLogger] Could not load config, using default LOGS_DIR');
+    config = { LOGS_DIR: './logs' };
+}
+
+let TRACE_DIR = path.join(config.LOGS_DIR || './logs', 'traces');
+
+// Ensure TRACE_DIR is always a valid string
+if (!TRACE_DIR || typeof TRACE_DIR !== 'string') {
+    console.error('[TraceLogger] CRITICAL: TRACE_DIR is not properly defined, using default');
+    TRACE_DIR = './logs/traces';
+}
 
 // ===== [START] TIMESTAMP HELPER ===== //
 function getFormattedTimestamp() {
@@ -25,9 +39,16 @@ function getFormattedTimestamp() {
 class TraceLogger {
     constructor() {
         // Ensure the directory exists on startup
-        fs.mkdir(TRACE_DIR, { recursive: true }).catch(err => {
-            console.error('[TraceLogger] CRITICAL: Could not create trace log directory.', err);
-        });
+        this._ensureDirectoryExists();
+    }
+
+    async _ensureDirectoryExists() {
+        try {
+            await fs.mkdir(TRACE_DIR, { recursive: true });
+        } catch (err) {
+            console.error('[TraceLogger] CRITICAL: Could not create trace log directory:', err);
+            // Don't throw - just log the error and continue
+        }
     }
 
     /**

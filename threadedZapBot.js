@@ -265,7 +265,14 @@ class ThreadedZapBot {
 
         this.messageHandlers.set('EXECUTE_COPY_TRADE', (workerName, message) => {
             console.log(`🚀 FORWARDING COPY TRADE from ${workerName} to executor:`);
-            console.log(`   📍 Trader: ${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)}`);
+            
+            // Show trader name if available, otherwise show shortened wallet
+            if (message.traderName && message.traderName !== 'Unknown (LaserStream)' && message.traderName !== 'Unknown') {
+                console.log(`   📍 Trader: ${message.traderName} (${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)})`);
+            } else {
+                console.log(`   📍 Trader: ${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)}`);
+            }
+            
             console.log(`   🔑 Signature: ${message.signature.substring(0,8)}...`);
             console.log(`   📊 Has pre-fetched data: ${!!message.preFetchedTxData}`);
             

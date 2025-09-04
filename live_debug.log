@@ -1,0 +1,730 @@
+
+> zapbot@1.5.2 start:threaded
+> node start.js --threading
+
+🚀 Starting ZapBot with Helius integration...
+📊 Initializing SQLite database...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+✅ Database initialized successfully
+🔴 Initializing Redis for flight data...
+✅ RedisManager initialized successfully
+🔥 Warming up Redis cache...
+✅ Cache warming completed
+✅ Redis initialized successfully
+🧵 Threaded mode: Skipping legacy DataManager initialization
+🔄 Checking for data migration...
+✅ Database already contains data, skipping migration.
+🤖 Starting main ZapBot application...
+🧵 Starting in THREADED mode...
+🧵 ThreadedZapBot initialized with worker configuration
+🚀 Starting ThreadedZapBot initialization...
+🔧 Initializing worker threads...
+🔧 Created worker: telegram
+🔧 Created worker: monitor
+🔧 Created worker: executor
+🔧 Created worker: data
+🔧 Created worker: websocket
+🔧 Created worker: analyzer
+✅ 6 workers initialized
+💓 Worker monitoring started (interval: 30000ms)
+⏳ Waiting for workers to be ready...
+[data] Initializing worker...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+✅ Worker data is ready
+[DB] DatabaseManager initialized successfully 
+[2025-09-04T07:45:31.098Z] [data] [INFO] Database manager worker initialized successfully {}
+[data] Worker initialized successfully
+[analyzer] Initializing worker...
+[executor] Initializing worker...
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[websocket] Initializing worker...
+[DB] Database tables created successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[WM Init] SolanaManager instance set.
+[ApiManager] Initialized with Helius-native logic.
+[telegram] Initializing worker...
+[2025-09-04T07:45:32.335Z] [analyzer] [INFO] Queue processing started { interval: 1000 }
+[2025-09-04T07:45:32.336Z] [analyzer] [INFO] Transaction analyzer worker initialized successfully {}
+[analyzer] Worker initialized successfully
+✅ Worker analyzer is ready
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker websocket is ready
+[2025-09-04T07:45:32.428Z] [websocket] [INFO] WebSocket worker initialized successfully {}
+[websocket] Worker initialized successfully
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[ApiManager] Initialized with Helius-native logic.
+✅ RedisManager initialized successfully
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[WM Init] SolanaManager instance set.
+[monitor] Initializing worker...
+[2025-09-04T07:45:32.916Z] [monitor] [INFO] Initializing High-Speed Trader Monitor with LaserStream... {}
+✅ Worker telegram is ready
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[TELEGRAM_UI] TelegramUI initialized. 
+[TELEGRAM_UI] BOT_TOKEN: "Set"
+[TELEGRAM_UI] TelegramBot instance created: "Success"
+[2025-09-04T07:45:32.919Z] [telegram] [INFO] Telegram UI initialized successfully {}
+[telegram] Worker initialized successfully
+[DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+[2025-09-04T07:45:32.950Z] [monitor] [INFO] Starting real-time LaserStream monitoring... {}
+[LASERSTREAM] 🚀 Initializing real-time copy trading stream...
+[LASERSTREAM] ✅ Real-time streaming initialized successfully!
+[LASERSTREAM] 📡 Monitoring 9 DEX programs
+[LASERSTREAM] 🎯 Commitment level: undefined
+[2025-09-04T07:45:33.007Z] [monitor] [INFO] Starting direct RPC polling as backup... {}
+[2025-09-04T07:45:33.008Z] [monitor] [INFO] 🚀 Starting dynamic direct RPC polling... {}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[2025-09-04T07:45:33.013Z] [monitor] [INFO] 📊 Monitoring 4 wallets via RPC polling {}
+[2025-09-04T07:45:33.013Z] [monitor] [INFO] ✅ Dynamic direct RPC polling started successfully {}
+[2025-09-04T07:45:33.013Z] [monitor] [INFO] Starting periodic subscription refresh... {}
+[2025-09-04T07:45:33.013Z] [monitor] [INFO] ✅ Periodic refresh started (every 5 minutes) {}
+[monitor] Worker initialized successfully
+✅ Worker monitor is ready
+[TELEGRAM_UI] Telegram Bot authorized for: @zaptradebot 
+✅ Worker executor is ready
+[TradeNotificationManager] Initialized in Threaded Dispatch mode.
+TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration (DISABLED).
+[2025-09-04T07:45:34.093Z] [executor] [INFO] Trade executor worker initialized successfully {}
+[executor] Worker initialized successfully
+✅ All required workers are ready
+✅ ThreadedZapBot initialization completed successfully
+🎯 Starting trader monitoring...
+✅ Trader monitoring started (auto-run via LaserStream in worker).
+🎉 ThreadedZapBot started successfully with 6 workers
+✅ Threaded application started successfully
+🎉 ZapBot startup completed successfully!
+🏥 Health check server running on port 3001
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[2025-09-04T07:45:35.358Z] [monitor] [INFO] 🚀 New transaction detected for wallet DfMxre4c... | Sig: 42Ppoexg... {}
+[2025-09-04T07:45:35.427Z] [monitor] [INFO] 🎯 Transaction detected for DfMxre4c... | Sig: 42Ppoexg... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: DfMx...Xhzj
+   🔑 Signature: 42Ppoexg...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-04T07:45:35.429Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'DfMx...Xhzj',
+  signature: '42Ppoexg...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source wallet: DfMx...Xhzj
+   🔑 Signature: 42Pp...KxZy
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 42Pp...KxZy...
+[EXECUTE_MASTER] 📍 Source wallet: DfMx...Xhzj
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[ANALYZER-V5-HELIUS] Processing sig: 42Pp...KxZy
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[ANALYZER] 🔍 Starting core analysis...
+[BalanceAnalysis] Trader DfMx...Xhzj SOL change: 4.44e-7 SOL (Raw: 444)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ ANY MOVEMENT Detected - Copying as trade! SOL change: 444, Token changes: 0
+[ANALYZER] Balance analysis result: {
+  isSwap: true,
+  details: {
+    tradeType: 'any',
+    inputMint: 'So11111111111111111111111111111111111111112',
+    outputMint: 'So11111111111111111111111111111111111111112',
+    inputAmountRaw: '0',
+    outputAmountRaw: '0',
+    tokenDecimals: 9
+  }
+}
+[ANALYZER] ✅ Found DEX: Meteora DBC
+[ANALYZER] 🤝 Consensus found between Balance and Instruction analysis.
+[ANALYZER] 🔄 Finalized swap details: {
+  found: true,
+  dexPlatform: 'Meteora DBC',
+  platformProgramId: 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN',
+  platformSpecificData: { poolId: 'FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM' },
+  tradeType: 'any',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'So11111111111111111111111111111111111111112',
+  inputAmountRaw: '0',
+  outputAmountRaw: '0',
+  tokenDecimals: 9
+}
+[ANALYZER] 🎉 SUCCESS! ANY on Meteora DBC |  | Fee: 0.000071 SOL | Slot: 364550683
+[ANALYZER] 🎯 PURE COPY BOT: Copying trade from Meteora DBC - NO RESTRICTIONS!
+[EXECUTE_MASTER] ✅ Copyable: Meteora DBC any
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: Meteora DBC, Type: any
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: eu for user 6032767351
+[EXECUTE_MASTER] 🚀 Dispatching copy for Meteora DBC trade to 1 user(s).
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 6032767351
+[SINGAPORE-SENDER] 📍 Platform: Meteora DBC
+[SINGAPORE-SENDER] 🎯 Token: 
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 4
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[2025-09-04T07:45:35.617Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 4SqHbDne... {}
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 4
+[KeypairProvider] ✅ Resolved wallet "zap" for user 2.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🔧 Building instructions for Meteora DBC...
+[SINGAPORE-SENDER] 🔍 Debug - tradeDetails: {
+  "dexPlatform": "Meteora DBC",
+  "tradeType": "any",
+  "platform": "Meteora DBC"
+}
+[SINGAPORE-SENDER] 🔍 Debug - builderOptions.swapDetails: {
+  "dexPlatform": "Meteora DBC",
+  "tradeType": "any",
+  "platform": "Meteora DBC"
+}
+[ROUTER] Forwarding notification from executor to telegram worker.
+[2025-09-04T07:45:35.679Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 4SqHbDne... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: suqh...HQfK
+   🔑 Signature: 4SqHbDne...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-04T07:45:35.681Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '4SqHbDne...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source wallet: suqh...HQfK
+   🔑 Signature: 4SqH...WpS4
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 4SqH...WpS4...
+[EXECUTE_MASTER] 📍 Source wallet: suqh...HQfK
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[ANALYZER-V5-HELIUS] Processing sig: 4SqH...WpS4
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[ANALYZER] 🔍 Starting core analysis...
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 9.2e-8 SOL (Raw: 92)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ ANY MOVEMENT Detected - Copying as trade! SOL change: 92, Token changes: 0
+[ANALYZER] Balance analysis result: {
+  isSwap: true,
+  details: {
+    tradeType: 'any',
+    inputMint: 'So11111111111111111111111111111111111111112',
+    outputMint: 'So11111111111111111111111111111111111111112',
+    inputAmountRaw: '0',
+    outputAmountRaw: '0',
+    tokenDecimals: 9
+  }
+}
+[ANALYZER] ✅ Found DEX: Meteora DBC
+[ANALYZER] 🤝 Consensus found between Balance and Instruction analysis.
+[ANALYZER] 🔄 Finalized swap details: {
+  found: true,
+  dexPlatform: 'Meteora DBC',
+  platformProgramId: 'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN',
+  platformSpecificData: { poolId: 'FhVo3mqL8PW5pH5U2CN4XE33DokiyZnUwuGpH2hmHLuM' },
+  tradeType: 'any',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'So11111111111111111111111111111111111111112',
+  inputAmountRaw: '0',
+  outputAmountRaw: '0',
+  tokenDecimals: 9
+}
+[ANALYZER] 🎉 SUCCESS! ANY on Meteora DBC |  | Fee: 0.000071 SOL | Slot: 364558267
+[ANALYZER] 🎯 PURE COPY BOT: Copying trade from Meteora DBC - NO RESTRICTIONS!
+[EXECUTE_MASTER] ✅ Copyable: Meteora DBC any
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: Meteora DBC, Type: any
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 6032767351
+[EXECUTE_MASTER] 🚀 Dispatching copy for Meteora DBC trade to 1 user(s).
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 6032767351
+[SINGAPORE-SENDER] 📍 Platform: Meteora DBC
+[SINGAPORE-SENDER] 🎯 Token: 
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 4
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 4
+[KeypairProvider] ✅ Resolved wallet "zap" for user 2.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🔧 Building instructions for Meteora DBC...
+[SINGAPORE-SENDER] 🔍 Debug - tradeDetails: {
+  "dexPlatform": "Meteora DBC",
+  "tradeType": "any",
+  "platform": "Meteora DBC"
+}
+[SINGAPORE-SENDER] 🔍 Debug - builderOptions.swapDetails: {
+  "dexPlatform": "Meteora DBC",
+  "tradeType": "any",
+  "platform": "Meteora DBC"
+}
+[ROUTER] Forwarding notification from executor to telegram worker.
+[2025-09-04T07:45:35.948Z] [monitor] [INFO] 🚀 New transaction detected for wallet As7HjL7d... | Sig: 2ugjv7dc... {}
+[2025-09-04T07:45:35.986Z] [telegram] [INFO] Sent message via worker { chatId: 6032767351 }
+[2025-09-04T07:45:36.007Z] [monitor] [INFO] 🎯 Transaction detected for As7HjL7d... | Sig: 2ugjv7dc... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: As7H...SMB5
+   🔑 Signature: 2ugjv7dc...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-04T07:45:36.008Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'As7H...SMB5',
+  signature: '2ugjv7dc...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source wallet: As7H...SMB5
+   🔑 Signature: 2ugj...3kAW
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 2ugj...3kAW...
+[EXECUTE_MASTER] 📍 Source wallet: As7H...SMB5
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[ANALYZER-V5-HELIUS] Processing sig: 2ugj...3kAW
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[ANALYZER] 🔍 Starting core analysis...
+[BalanceAnalysis] Trader As7H...SMB5 SOL change: 0.00001 SOL (Raw: 10000)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ ANY MOVEMENT Detected - Copying as trade! SOL change: 10000, Token changes: 0
+[ANALYZER] Balance analysis result: {
+  isSwap: true,
+  details: {
+    tradeType: 'any',
+    inputMint: 'So11111111111111111111111111111111111111112',
+    outputMint: 'So11111111111111111111111111111111111111112',
+    inputAmountRaw: '0',
+    outputAmountRaw: '0',
+    tokenDecimals: 9
+  }
+}
+[ANALYZER] ⚠️ Balance-only match. Heuristic required for platform identification.
+[EXECUTE_MASTER] ❌ Not copyable: Clear swap detected, but the DEX program is unknown.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: Clear swap detected, but the DEX program is unknown.
+[2025-09-04T07:45:36.174Z] [monitor] [INFO] 🚀 New transaction detected for wallet 96sErVjE... | Sig: 49is6Mqc... {}
+[2025-09-04T07:45:36.228Z] [monitor] [INFO] 🎯 Transaction detected for 96sErVjE... | Sig: 49is6Mqc... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: 96sE...LKBf
+   🔑 Signature: 49is6Mqc...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-04T07:45:36.229Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: '96sE...LKBf',
+  signature: '49is6Mqc...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source wallet: 96sE...LKBf
+   🔑 Signature: 49is...uDaq
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 49is...uDaq...
+[EXECUTE_MASTER] 📍 Source wallet: 96sE...LKBf
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[ANALYZER-V5-HELIUS] Processing sig: 49is...uDaq
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[ANALYZER] 🔍 Starting core analysis...
+[BalanceAnalysis] Trader 96sE...LKBf SOL change: 1e-9 SOL (Raw: 1)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ ANY MOVEMENT Detected - Copying as trade! SOL change: 1, Token changes: 0
+[ANALYZER] Balance analysis result: {
+  isSwap: true,
+  details: {
+    tradeType: 'any',
+    inputMint: 'So11111111111111111111111111111111111111112',
+    outputMint: 'So11111111111111111111111111111111111111112',
+    inputAmountRaw: '0',
+    outputAmountRaw: '0',
+    tokenDecimals: 9
+  }
+}
+[ANALYZER] ⚠️ Balance-only match. Heuristic required for platform identification.
+[EXECUTE_MASTER] ❌ Not copyable: Clear swap detected, but the DEX program is unknown.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: Clear swap detected, but the DEX program is unknown.
+[2025-09-04T07:45:36.518Z] [telegram] [INFO] Sent message via worker { chatId: 6032767351 }
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[2025-09-04T07:45:53.338Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 2L1cWGWN... {}
+[2025-09-04T07:45:53.433Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 2L1cWGWN... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: suqh...HQfK
+   🔑 Signature: 2L1cWGWN...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-04T07:45:53.434Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '2L1cWGWN...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source wallet: suqh...HQfK
+   🔑 Signature: 2L1c...Tu3N
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 2L1c...Tu3N...
+[EXECUTE_MASTER] 📍 Source wallet: suqh...HQfK
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[ANALYZER-V5-HELIUS] Processing sig: 2L1c...Tu3N
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[ANALYZER] 🔍 Starting core analysis...
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ ANY MOVEMENT Detected - Copying as trade! SOL change: 0, Token changes: 1
+[ANALYZER] Balance analysis result: {
+  isSwap: true,
+  details: {
+    tradeType: 'any',
+    inputMint: 'So11111111111111111111111111111111111111112',
+    outputMint: 'So11111111111111111111111111111111111111112',
+    inputAmountRaw: '0',
+    outputAmountRaw: '0',
+    tokenDecimals: 9
+  }
+}
+[ANALYZER] ⚠️ Balance-only match. Heuristic required for platform identification.
+[EXECUTE_MASTER] ❌ Not copyable: Clear swap detected, but the DEX program is unknown.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: Clear swap detected, but the DEX program is unknown.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+💓 Health check: healthy { workers: 6, ready: 6 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756971960804,
+  uptime: 28468,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756971960804,
+  uptime: 27890,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756971960804,
+  uptime: 29028,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756971960805,
+  uptime: 29773,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756971960805,
+  uptime: 29001,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756971960805,
+  uptime: 29079,
+  messageCount: 1,
+  errorCount: 0
+}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+💓 Health check: healthy { workers: 6, ready: 6 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756971990805,
+  uptime: 58469,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756971990805,
+  uptime: 57891,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756971990806,
+  uptime: 59030,
+  messageCount: 7,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756971990806,
+  uptime: 59774,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756971990806,
+  uptime: 59002,
+  messageCount: 2,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756971990806,
+  uptime: 59080,
+  messageCount: 2,
+  errorCount: 0
+}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+💓 Health check: healthy { workers: 6, ready: 6 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756972020805,
+  uptime: 88469,
+  messageCount: 5,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756972020806,
+  uptime: 87891,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756972020806,
+  uptime: 89030,
+  messageCount: 8,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756972020806,
+  uptime: 89774,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756972020806,
+  uptime: 89002,
+  messageCount: 3,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756972020806,
+  uptime: 89080,
+  messageCount: 3,
+  errorCount: 0
+}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+💓 Health check: healthy { workers: 6, ready: 6 }
+📨 Message from telegram: PONG {
+  type: 'PONG',
+  workerName: 'telegram',
+  timestamp: 1756972050807,
+  uptime: 118471,
+  messageCount: 6,
+  errorCount: 0
+}
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1756972050807,
+  uptime: 117893,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from executor: PONG {
+  type: 'PONG',
+  workerName: 'executor',
+  timestamp: 1756972050807,
+  uptime: 119031,
+  messageCount: 9,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1756972050807,
+  uptime: 119775,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from websocket: PONG {
+  type: 'PONG',
+  workerName: 'websocket',
+  timestamp: 1756972050808,
+  uptime: 119004,
+  messageCount: 4,
+  errorCount: 0
+}
+📨 Message from analyzer: PONG {
+  type: 'PONG',
+  workerName: 'analyzer',
+  timestamp: 1756972050808,
+  uptime: 119082,
+  messageCount: 4,
+  errorCount: 0
+}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 4 unique active trader wallets to monitor.

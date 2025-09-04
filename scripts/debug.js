@@ -150,7 +150,7 @@ class ZapBotDebugger {
             'zapbot.js',
             'start.js',
             'dataManager.js',
-            'patches/config.js',
+            'config.js',
             'database/databaseManager.js',
             'database/schema.sql',
             'redis/redisManager.js'
@@ -250,7 +250,7 @@ class ZapBotDebugger {
         this.log('Checking configuration...', 'info');
         
         try {
-            const config = require('../patches/config');
+            const config = require('../config.js');
             
             // Check critical config values
             if (config.RPC_URL) {
@@ -289,7 +289,7 @@ class ZapBotDebugger {
             { name: 'DatabaseManager', path: '../database/databaseManager' },
             { name: 'RedisManager', path: '../redis/redisManager' },
             { name: 'DataManager', path: '../dataManager' },
-            { name: 'Config', path: '../patches/config' }
+            { name: 'Config', path: '../config.js' }
         ];
 
         for (const module of modulesToTest) {

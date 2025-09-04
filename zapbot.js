@@ -13,12 +13,12 @@ const fs = require('fs/promises');
 const config = require('./config.js');
 const { DatabaseManager } = require('./database/databaseManager.js');
 const { SolanaManager } = require('./solanaManager.js');
-const TelegramUI = require('./telegramUi.js');
+// TelegramUI handled by telegramWorker in threaded mode
 const WalletManager = require('./walletManager.js');
 const { TransactionAnalyzer } = require('./transactionAnalyzer.js');
 const { ApiManager } = require('./apiManager.js');
-const TradeNotificationManager = require('./tradeNotifications.js');
-const { escapeMarkdownV2, shortenAddress } = require('./utils.js');
+// TradeNotificationManager handled by telegramWorker in threaded mode
+const { shortenAddress } = require('./utils.js');
 const { PublicKey } = require('@solana/web3.js');
 const { RedisManager } = require('./redis/redisManager.js');
 const { LaserStreamManager } = require('./laserstreamManager.js');
@@ -43,16 +43,9 @@ class ZapBot {
         this.walletManager.setSolanaManager(this.solanaManager);
         this.redisManager = new RedisManager();
 
-        // Pass null for now, it will be injected.
-        this.telegramUi = new TelegramUI(
-            this.databaseManager,
-            this.solanaManager,
-            this.walletManager
-        );
-        this.notificationManager = new TradeNotificationManager(
-            this.telegramUi.bot, // This is fine for now
-            this.apiManager
-        );
+        // TelegramUI is now handled by the telegramWorker in threaded mode
+        this.telegramUi = null;
+        this.notificationManager = null;
 
         this.transactionAnalyzer = null;
         this.tradingEngine = null;
@@ -65,8 +58,7 @@ class ZapBot {
 
         // Now, pass the REAL database manager to all child components.
         this.walletManager.databaseManager = dbManager;
-        this.telegramUi.databaseManager = dbManager;
-        this.telegramUi.isDatabaseManager = true; // IMPORTANT: Tell the UI to use DB mode.
+        // TelegramUI is handled by telegramWorker in threaded mode
     }
 
     async initialize() {
@@ -106,46 +98,11 @@ class ZapBot {
             throw new Error(`Failed to initialize WalletManager: ${e.message}`);
         }
 
-        // 4. Initialize Telegram UI
-        try {
-            const initResult = this.telegramUi.initialize();
-            if (initResult && initResult.mode === 'headless') {
-                console.log('4/6: ⚠️ TelegramUI running in headless mode (no bot token).');
-            } else if (!this.telegramUi.bot) {
-                throw new Error("TelegramUI failed to initialize TelegramBot instance.");
-            } else {
-                this.telegramUi.bindActionHandlers({
-                    onStartCopy: this.handleStartCopy.bind(this),
-                    onStopCopy: this.handleStopCopy.bind(this),
-                    onRemoveTrader: this.handleRemoveTrader.bind(this),
-                    onAddTrader: this.handleAddTrader.bind(this),
-                    onSetSolAmount: this.handleSetSolAmount.bind(this),
-                    onGenerateWallet: this.handleGenerateWallet.bind(this),
-                    onImportWallet: this.handleImportWallet.bind(this),
-                    onResetData: this.handleResetData.bind(this),
-            
-                    onDeleteWallet: this.handleDeleteWallet.bind(this),
-                    onWithdraw: this.handleWithdraw.bind(this),
-                    onConfirmWithdraw: this.handleConfirmWithdraw.bind(this),
-                    onManualCopy: this.handleManualCopy.bind(this),
-                });
-                console.log('4/6: ✅ TelegramUI initialized and wired.');
-            }
-        } catch (e) {
-            throw new Error(`Failed to initialize TelegramUI: ${e.message}`);
-        }
+        // 4. TelegramUI and TradeNotificationManager are handled by telegramWorker in threaded mode
+        console.log('4/6: ⚠️ TelegramUI and TradeNotificationManager handled by telegramWorker in threaded mode.');
 
-        // 5. Initialize TradeNotificationManager
-        try {
-            this.notificationManager = new TradeNotificationManager(
-                this.telegramUi.bot || null,
-                this.apiManager
-            );
-            this.notificationManager.setConnection(this.solanaManager.connection);
-            console.log('5/6: ✅ TradeNotificationManager initialized.');
-        } catch (e) {
-            throw new Error(`Failed to initialize TradeNotificationManager: ${e.message}`);
-        }
+        // 5. Skip TradeNotificationManager initialization in threaded mode
+        console.log('5/6: ⚠️ TradeNotificationManager handled by telegramWorker in threaded mode.');
 
         // 6. Initialize TransactionAnalyzer and TradingEngine
         try {
@@ -158,7 +115,7 @@ class ZapBot {
                 databaseManager: this.databaseManager,
                 walletManager: this.walletManager,
                 transactionAnalyzer: this.transactionAnalyzer,
-                notificationManager: this.notificationManager,
+                notificationManager: null, // Handled by telegramWorker in threaded mode
                 apiManager: this.apiManager,
                 redisManager: this.redisManager
             });
@@ -202,23 +159,8 @@ class ZapBot {
         }
 
 
-        // 8. Send startup message to Admin
-        if (this.telegramUi.bot && process.env.ADMIN_CHAT_ID) {
-            try {
-                const chatId = parseInt(process.env.ADMIN_CHAT_ID);
-                if (!isNaN(chatId)) {
-                    await this.telegramUi.bot.sendMessage(
-                        chatId,
-                        `🎉 *ZapBot is fully operational\\!*`,
-                        { parse_mode: 'MarkdownV2' }
-                    );
-                } else {
-                    console.warn('Invalid ADMIN_CHAT_ID; skipping startup message.');
-                }
-            } catch (e) {
-                console.warn('Could not send startup message to Telegram:', e.message);
-            }
-        }
+        // 8. Startup message handled by telegramWorker in threaded mode
+        console.log('8/8: ⚠️ Startup message handled by telegramWorker in threaded mode.');
     }
 
     // setupUniversalScanner() {
@@ -502,7 +444,7 @@ class ZapBot {
 
     async handleManualCopy(chatId, signature) {
         console.log(`[MANUAL FIRE CONTROL] Received /copy command. Target signature: ${signature}`);
-        await this.telegramUi.sendOrEditMessage(chatId, `🎯 *TARGET ACQUIRED*\\nAuthorizing copy for sig: \`${escapeMarkdownV2(signature)}\``, {});
+        console.log(`[MANUAL FIRE CONTROL] ⚠️ Manual copy commands handled by telegramWorker in threaded mode`);
 
         // --- IMPORTANT: Find which trader this signature belongs to ---
         // This is the hardest part of manual mode. You need to know which trader to simulate.
@@ -523,7 +465,7 @@ class ZapBot {
         }
 
         if (!targetTraderWallet) {
-            await this.telegramUi.sendErrorMessage(chatId, "Live Fire Failed: No active trader is configured for this test.");
+            console.log(`[MANUAL FIRE CONTROL] ❌ Live Fire Failed: No active trader is configured for this test.`);
             return;
         }
         console.log(`[MANUAL FIRE CONTROL] Simulating activity from trader: ${targetTraderName} (${targetTraderWallet})`);
@@ -542,9 +484,9 @@ class ZapBot {
             // Re-sync and restart the global snipers to pick up the new active trader
             // this.startGlobalPlatformSnipers(); 
             this.syncAndStartMonitoring();
-            await this.telegramUi.showMainMenu(chatId);
+            console.log(`[Action] ✅ Copy started for ${traderName} - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to start copying: ${e.message}`);
+            console.error(`[Action] ❌ Failed to start copying: ${e.message}`);
         }
     }
 
@@ -556,9 +498,9 @@ class ZapBot {
             // Re-sync and restart the global snipers to remove the inactive trader
             // this.startGlobalPlatformSnipers(); 
             this.syncAndStartMonitoring();
-            await this.telegramUi.showMainMenu(chatId);
+            console.log(`[Action] ✅ Copy stopped for ${traderName} - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to stop copying: ${e.message}`);
+            console.error(`[Action] ❌ Failed to stop copying: ${e.message}`);
         }
     }
 
@@ -575,12 +517,9 @@ class ZapBot {
             // Remove trader from database
             await this.databaseManager.deleteTrader(user.id, traderName);
             
-            const message = `✅ Trader *${traderName}* has been removed successfully!`;
-            await this.telegramUi.sendOrEditMessage(chatId, message, {
-                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Traders List", callback_data: "traders_list" }]] }
-            });
+            console.log(`[Action] ✅ Trader ${traderName} removed successfully - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to remove trader: ${e.message}`);
+            console.error(`[Action] ❌ Failed to remove trader: ${e.message}`);
         }
     }
 
@@ -600,17 +539,9 @@ class ZapBot {
             // Re-sync monitoring to start following the new trader if they were made active.
             this.syncAndStartMonitoring();
 
-            await this.telegramUi.sendOrEditMessage(
-                chatId,
-                `✅ Trader *${escapeMarkdownV2(traderName)}* added successfully!`, 
-                {
-                    reply_markup: {
-                        inline_keyboard: [[{ text: "🔙 Main Menu", callback_data: "main_menu" }]]
-                    }
-                }
-            );
+            console.log(`[Action] ✅ Trader ${traderName} added successfully - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to add trader: ${e.message}`);
+            console.error(`[Action] ❌ Failed to add trader: ${e.message}`);
         }
     }
 
@@ -621,9 +552,9 @@ class ZapBot {
             if (deleted) {
                 console.log(`[Action] Wallet ${walletLabel} deleted for user ${chatId}.`);
             }
-            await this.telegramUi.displayWalletList(chatId);
+            console.log(`[Action] ✅ Wallet deletion handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to delete wallet: ${e.message}`);
+            console.error(`[Action] ❌ Failed to delete wallet: ${e.message}`);
         }
     }
 
@@ -634,9 +565,9 @@ class ZapBot {
         console.log(`[Action] SET SOL amount request for ${amount} from chat ${chatId}`);
         try {
             await this.databaseManager.updateUserTradingSettings(chatId, { sol_amount_per_trade: amount });
-            await this.telegramUi.showMainMenu(chatId);
+            console.log(`[Action] ✅ SOL amount set to ${amount} - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to set SOL amount: ${e.message}`);
+            console.error(`[Action] ❌ Failed to set SOL amount: ${e.message}`);
         }
     }
 
@@ -656,16 +587,10 @@ class ZapBot {
                 );
             }
             
-            const message = `✅ Wallet *${escapeMarkdownV2(label)}* Generated\\!\n` +
-                `Address: \`${escapeMarkdownV2(walletInfo.publicKey.toBase58())}\`\n\n` +
-                `🚨 *SAVE THIS PRIVATE KEY SECURELY* 🚨\n\n` +
-                `\`${escapeMarkdownV2(privateKey)}\``;
-
-            await this.telegramUi.sendOrEditMessage(chatId, message, {
-                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Wallet Menu", callback_data: "wallets_menu" }]] }
-            });
+            console.log(`[Action] ✅ Wallet ${label} generated successfully - handled by telegramWorker`);
+            console.log(`[Action] 📍 Address: ${walletInfo.publicKey.toBase58()}`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to generate wallet: ${e.message}`);
+            console.error(`[Action] ❌ Failed to generate wallet: ${e.message}`);
         }
     }
 
@@ -685,22 +610,11 @@ class ZapBot {
                 );
             }
 
-            // Delete the message containing the user's private key IMMEDIATELY for security.
-            const lastMsgId = this.telegramUi.latestMessageIds.get(chatId);
-            if (lastMsgId) {
-                await this.telegramUi.bot.deleteMessage(chatId, lastMsgId).catch(() => { });
-            }
-
-            const message = `✅ Wallet *${escapeMarkdownV2(label)}* Imported Successfully\\!\n` +
-                `Address: \`${escapeMarkdownV2(walletInfo.publicKey.toBase58())}\`\n\n` +
-                `Your wallet is ready for copy trading\\!`;
-
-            await this.telegramUi.sendOrEditMessage(chatId, message, {
-                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Wallet Menu", callback_data: "wallets_menu" }]] }
-            });
+            console.log(`[Action] ✅ Wallet ${label} imported successfully - handled by telegramWorker`);
+            console.log(`[Action] 📍 Address: ${walletInfo.publicKey.toBase58()}`);
 
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Failed to import wallet: ${e.message}`);
+            console.error(`[Action] ❌ Failed to import wallet: ${e.message}`);
         }
     }
 
@@ -731,32 +645,12 @@ class ZapBot {
                 throw new Error(`Insufficient balance. Need ${requiredBalance.toFixed(4)} SOL but only have ${balance.toFixed(4)} SOL.`);
             }
 
-            const escapedToAddress = escapeMarkdownV2(toAddress);
-            const escapedSolAmount = escapeMarkdownV2(solAmount.toFixed(4));
-            const escapedCurrentBalance = escapeMarkdownV2(balance.toFixed(4));
-            const escapedAfterBalance = escapeMarkdownV2((balance - requiredBalance).toFixed(4));
-
-            await this.telegramUi.sendOrEditMessage(
-                chatId,
-                `⚠️ *Withdrawal Confirmation* ⚠️\n\n` +
-                `You are about to send *${escapedSolAmount} SOL* to:\n\`${escapedToAddress}\`\n\n` +
-                `Current balance: *${escapedCurrentBalance} SOL*\n` +
-                `After withdrawal: *${escapedAfterBalance} SOL*\n\n` +
-                `Please confirm this transaction:`,
-                {
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                { text: "✅ Confirm Withdrawal", callback_data: `confirm_withdraw_${solAmount}_${toAddress}` },
-                                { text: "❌ Cancel", callback_data: "main_menu" }
-                            ]
-                        ]
-                    }
-                }
-            );
+            console.log(`[Action] ⚠️ Withdrawal confirmation required - handled by telegramWorker`);
+            console.log(`[Action] 📍 Amount: ${solAmount} SOL to ${toAddress}`);
+            console.log(`[Action] 📊 Balance: ${balance.toFixed(4)} SOL (required: ${requiredBalance.toFixed(4)} SOL)`);
         } catch (e) {
             console.error("Withdrawal flow error:", e);
-            await this.telegramUi.sendErrorMessage(chatId, `❌ Withdrawal failed: ${e.message}`);
+            console.error(`[Action] ❌ Withdrawal failed: ${e.message}`);
         }
     }
 
@@ -772,11 +666,7 @@ class ZapBot {
                 throw new Error("No trading wallet available.");
             }
 
-            await this.telegramUi.sendOrEditMessage(
-                chatId,
-                `⏳ Processing withdrawal...\\n\\nSending ${escapeMarkdownV2(solAmount.toFixed(4))} SOL to:\\n\`${escapeMarkdownV2(toAddress)}\``,
-                { parse_mode: 'MarkdownV2' }
-            );
+            console.log(`[Action] ⏳ Processing withdrawal of ${solAmount} SOL to ${toAddress}...`);
 
             const txSignature = await this.solanaManager.sendSol(
                 keypairPacket.wallet.label,
@@ -784,47 +674,31 @@ class ZapBot {
                 solAmount
             );
 
-            const explorerLink = `[View on Solana Explorer](https://explorer.solana.com/tx/${txSignature}?cluster=${escapeMarkdownV2(this.solanaManager.cluster)})`;
-
-            await this.telegramUi.sendOrEditMessage(
-                chatId,
-                `✅ *Withdrawal Successful\\!*\\n\\n` +
-                `Sent *${escapeMarkdownV2(solAmount.toFixed(4))} SOL* to:\\n\`${escapeMarkdownV2(toAddress)}\`\\n\\n` +
-                `Transaction ID:\\n\`${escapeMarkdownV2(txSignature)}\`\\n\\n` +
-                `${explorerLink}`,
-                { parse_mode: "MarkdownV2" }
-            );
+            console.log(`[Action] ✅ Withdrawal successful! Signature: ${txSignature}`);
+            console.log(`[Action] 🔍 Explorer: https://explorer.solana.com/tx/${txSignature}?cluster=${this.solanaManager.cluster}`);
 
             const newBalance = await this.solanaManager.getBalance(keypairPacket.wallet.publicKey.toBase58());
-            await this.telegramUi.sendOrEditMessage(
-                chatId,
-                `New balance: *${escapeMarkdownV2(newBalance.toFixed(4))} SOL*`,
-                { parse_mode: "MarkdownV2" }
-            );
+            console.log(`[Action] 📊 New balance: ${newBalance.toFixed(4)} SOL`);
         } catch (e) {
             console.error("Withdrawal error:", e);
-            await this.telegramUi.sendErrorMessage(
-                chatId,
-                `❌ Withdrawal failed: ${escapeMarkdownV2(e.message)}\\n\\nPlease try again or check your balance.`
-            );
+            console.error(`[Action] ❌ Withdrawal failed: ${e.message}`);
         } finally {
-            await this.telegramUi.showMainMenu(chatId);
+            console.log(`[Action] ✅ Withdrawal flow completed - handled by telegramWorker`);
         }
     }
 
     async handleResetData(chatId) {
         console.log(`[Action] RESET data request from chat ${chatId}`);
         try {
-            await this.telegramUi.sendOrEditMessage(chatId, "♻️ *PERFORMING RESET\\.\\.\\.*", {});
+            console.log(`[Action] ♻️ Performing reset...`);
             // Reset data in database instead of files
             await this.databaseManager.run('DELETE FROM traders WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
             await this.databaseManager.run('DELETE FROM user_positions WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
             await this.databaseManager.run('DELETE FROM trade_stats WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
             await this.walletManager.initialize();
-            await this.telegramUi.sendOrEditMessage(chatId, "✅ *RESET COMPLETE\\!*", {});
-            await this.telegramUi.showMainMenu(chatId);
+            console.log(`[Action] ✅ Reset complete! - handled by telegramWorker`);
         } catch (e) {
-            await this.telegramUi.sendErrorMessage(chatId, `Reset failed: ${e.message}`);
+            console.error(`[Action] ❌ Reset failed: ${e.message}`);
         }
     }
 
@@ -948,12 +822,7 @@ syncAndStartMonitoring() {
             await this.tradingEngine.executeTrade(tradeDetails, walletInfo, traderName);
         } catch (error) {
             console.error(`[DIAG] Trade processing failed: ${error.message}`);
-            utils.logPerformance('trade_error', { traderName, error: error.message });
-            await this.tradeNotifications.sendErrorNotification(
-                config.ADMIN_CHAT_ID,
-                'Trade Processing Failed',
-                `Trader: ${traderName}, Error: ${error.message}`
-            );
+            console.error(`[DIAG] Trade error notification handled by telegramWorker`);
             throw error;
         }
     }
@@ -1007,14 +876,8 @@ syncAndStartMonitoring() {
         await Promise.all(unsubPromises);
         this.activeSubscriptions.clear();
 
-        // Stop Telegram bot polling
-        if (this.telegramUi.bot && this.telegramUi.bot.isPolling()) {
-            try {
-                await this.telegramUi.bot.stopPolling({ cancel: true });
-            } catch (error) {
-                console.error(`[SHUTDOWN] Error stopping Telegram bot polling: ${error.message}`);
-            }
-        }
+        // Telegram bot polling handled by telegramWorker in threaded mode
+        console.log(`[SHUTDOWN] Telegram bot shutdown handled by telegramWorker`);
 
         // Close Solana WebSocket connections
         if (this.solanaManager) {

@@ -6,7 +6,20 @@
 
 const { DatabaseManager } = require('./database/databaseManager');
 const { RedisManager } = require('./redis/redisManager');
-const config = require('./patches/config');
+const config = require('./config.js');
+
+// Initialize performance monitoring for ULTRA-LOW LATENCY optimizations
+const performanceMonitor = require('./performanceMonitor.js');
+
+// Start periodic metrics saving
+performanceMonitor.startPeriodicSaving(60000); // Save every minute
+
+console.log('🚀 Starting ZapBot with Helius integration...');
+console.log('⚡ ULTRA-LOW LATENCY optimizations enabled:');
+console.log('   - LaserStream: <100ms detection target');
+console.log('   - Sender: <200ms execution target');
+console.log('   - Overall: <300ms copy trade cycle target');
+console.log('📊 Performance monitoring active');
 
 class ZapBotStartup {
     constructor() {
@@ -22,7 +35,6 @@ class ZapBotStartup {
     }
 
     async initialize() {
-        console.log('🚀 Starting ZapBot with Helius integration...');
         
         try {
             // Step 1: Initialize Database

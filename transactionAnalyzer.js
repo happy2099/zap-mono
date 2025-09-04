@@ -12,6 +12,7 @@ const bs58 = require('bs58');
 const BN = require('bn.js');
 const bufferLayout = require('@solana/buffer-layout');
 const { u64 } = bufferLayout;
+const TransactionLogger = require('./transactionLogger');
 
 
 
@@ -65,6 +66,9 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         this.PUMP_FUN_AMM_PROGRAM_ID = config.PUMP_FUN_AMM_PROGRAM_ID;
         this.bondingCurveCache = new Map();
 
+        // Initialize transaction logger for JSON file logging
+        this.transactionLogger = new TransactionLogger();
+
         // General bot config related settings (if you have global trading settings here)
         this.botConfig = {
             tradeType: 'both', // Example setting
@@ -100,7 +104,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         const postSol = meta.postBalances[traderIndex];
         const solChange = postSol - preSol;
 
-        console.log(`[BalanceAnalysis] Trader ${shortenAddress(traderPkString)} SOL change: ${solChange / LAMPORTS_PER_SOL} SOL (Raw: ${solChange})`);
+        console.log(`[BalanceAnalysis] Trader ${shortenAddress(traderPkString)} SOL change: ${solChange / config.LAMPORTS_PER_SOL_CONST} SOL (Raw: ${solChange})`);
 
         const tokenChanges = new Map();
 
@@ -146,21 +150,32 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             }
         }
 
-        const SOL_CHANGE_THRESHOLD_LAMPORTS = 100; // Very low threshold to catch all trades including those with minimal SOL changes
-        console.log(`[BalanceAnalysis] SOL Change Threshold for swap detection: ${SOL_CHANGE_THRESHOLD_LAMPORTS} lamports.`);
+        const SOL_CHANGE_THRESHOLD_LAMPORTS = 0; // NO THRESHOLD - Copy EVERY trade!
+        console.log(`[BalanceAnalysis] SOL Change Threshold for swap detection: ${SOL_CHANGE_THRESHOLD_LAMPORTS} lamports (NO RESTRICTIONS)`);
 
         // Cases: SOL out, Token in (Buy); SOL in, Token out (Sell); Token-to-Token
-        if (solChange < -SOL_CHANGE_THRESHOLD_LAMPORTS && tokenReceivedMint && tokenReceivedMint !== this.NATIVE_SOL_MINT) {
+        if (solChange < 0 && tokenReceivedMint && tokenReceivedMint !== this.NATIVE_SOL_MINT) {
             console.log(`[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: ${solChange}, Token received: ${shortenAddress(tokenReceivedMint)}`);
             return { isSwap: true, details: { tradeType: 'buy', inputMint: this.NATIVE_SOL_MINT, outputMint: tokenReceivedMint, inputAmountLamports: Math.abs(solChange), outputAmountRaw: tokenReceivedAmount.toString(), tokenDecimals: tokenDecimalsForChange } };
         }
-        if (solChange > SOL_CHANGE_THRESHOLD_LAMPORTS && tokenSentMint && tokenSentMint !== this.NATIVE_SOL_MINT) {
+        
+        if (solChange > 0 && tokenSentMint && tokenSentMint !== this.NATIVE_SOL_MINT) {
             console.log(`[BalanceAnalysis] ✅ SELL Detected (SOL in, Token out). SOL change: ${solChange}, Token sent: ${shortenAddress(tokenSentMint)}`);
-            return { isSwap: true, details: { tradeType: 'sell', inputMint: tokenSentMint, outputMint: this.NATIVE_SOL_MINT, inputAmountRaw: tokenSentAmount.toString(), outputAmountRaw: Math.abs(solChange).toString(), tokenDecimals: tokenDecimalsForChange } };
+            return { isSwap: true, details: { tradeType: 'sell', inputMint: tokenSentMint, outputMint: this.NATIVE_SOL_MINT, inputAmountRaw: tokenSentAmount.toString(), outputAmountLamports: solChange, tokenDecimals: tokenDecimalsForChange } };
         }
-        if (tokenReceivedMint && tokenSentMint && tokenReceivedMint !== this.NATIVE_SOL_MINT && tokenSentMint !== this.NATIVE_SOL_MINT) {
-            console.log(`[BalanceAnalysis] ✅ TOKEN-TO-TOKEN SWAP Detected (Token out, Token in). Token sent: ${shortenAddress(tokenSentMint)}, Token received: ${shortenAddress(tokenReceivedMint)}`);
-            return { isSwap: true, details: { tradeType: 'buy', inputMint: tokenSentMint, outputMint: tokenReceivedMint, inputAmountRaw: tokenSentAmount.toString(), outputAmountRaw: tokenReceivedAmount.toString(), tokenDecimals: tokenDecimalsForChange } };
+        
+        // Token-to-token swaps (no SOL change)
+        if (solChange === 0 && tokenSentMint && tokenReceivedMint && tokenSentMint !== tokenReceivedMint) {
+            console.log(`[BalanceAnalysis] ✅ TOKEN-TO-TOKEN SWAP Detected. Token sent: ${shortenAddress(tokenSentMint)}, Token received: ${shortenAddress(tokenReceivedMint)}`);
+            return { isSwap: true, details: { tradeType: 'swap', inputMint: tokenSentMint, outputMint: tokenReceivedMint, inputAmountRaw: tokenSentAmount.toString(), outputAmountRaw: tokenReceivedAmount.toString(), tokenDecimals: tokenDecimalsForChange } };
+        }
+        
+        // Only copy REAL swaps, not just any movement
+        // A real swap MUST involve a change in SOL AND tokens, OR at least two different tokens
+        if ((solChange !== 0 && tokenChanges.size >= 1) || tokenChanges.size >= 2) {
+            // This condition is now implicitly handled by the buy/sell/swap logic above
+            // If we reach this point and none of those matched, it's not a clear swap
+            console.log(`[BalanceAnalysis] ⚠️ Movement detected but not a clear swap pattern. SOL: ${solChange}, Tokens: ${tokenChanges.size}`);
         }
 
         console.log(`[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.`);
@@ -239,6 +254,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         }
 
 
+
     // --- MAIN TRANSACTION ANALYSIS FUNCTION ---
     async analyzeTransactionForCopy(signature, preFetchedTx, traderPublicKey) {
         console.log(`[ANALYZER-V5-HELIUS] Processing sig: ${shortenAddress(signature)}`);
@@ -260,23 +276,41 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // ===============================================
         // =========== STAGE 1: DATA ACQUISITION ===========
         // ===============================================
-        let transactionResponse = preFetchedTx;
-        let isWebhookData = !!preFetchedTx;
-    
+        let transactionResponse = null;
+        let transactionObject = null;
+        let meta = null;
+
         try {
-            if (!transactionResponse) {
+            // This is the structure from our JSON dump.
+            // We need to pass the ENTIRE object, not just the '.transaction' part.
+            if (preFetchedTx && preFetchedTx.transaction && preFetchedTx.meta) {
+                console.log(`[ANALYZER] Using full pre-fetched gRPC stream object...`);
+                transactionResponse = preFetchedTx; // Pass the WHOLE thing
+            } 
+            // This handles older webhook formats or already-unpacked data.
+            else if (preFetchedTx) { 
+                 console.log(`[ANALYZER] Using pre-fetched webhook data...`);
+                 transactionResponse = preFetchedTx;
+            }
+            // The fallback if no pre-fetched data is available at all.
+            else {
                 console.log(`[ANALYZER] No pre-fetched data, fetching from RPC...`);
                 transactionResponse = await this.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
                 if (!transactionResponse) throw new Error("RPC returned no result for transaction.");
-            } else {
-                console.log(`[ANALYZER] Using pre-fetched data, type: ${transactionResponse.type || 'unknown'}`);
             }
             
-            if (!transactionResponse.meta || transactionResponse.meta.err) {
+            // Extract normalized data
+            transactionObject = transactionResponse.transaction || transactionResponse;
+            meta = transactionResponse.meta;
+            
+            // Set the webhook data flag based on whether we have pre-fetched data
+            const isWebhookData = !!preFetchedTx;
+            
+            if (!meta || meta.err) {
                 console.log(`[ANALYZER] ❌ Transaction failed or lacks metadata:`, {
-                    hasMeta: !!transactionResponse.meta,
-                    hasError: !!transactionResponse.meta?.err,
-                    error: transactionResponse.meta?.err
+                    hasMeta: !!meta,
+                    hasError: !!meta?.err,
+                    error: meta?.err
                 });
                 return { isCopyable: false, reason: "Transaction failed on-chain or lacks metadata.", rawTransaction: transactionResponse };
             }
@@ -290,7 +324,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // ===============================================
         // ============ STAGE 2: DATA NORMALIZATION ========
         // ===============================================
-        const { meta } = transactionResponse;
+        // Variables already extracted in STAGE 1
         
         // SAFETY CHECK: Validate meta object exists
         if (!meta) {
@@ -300,25 +334,23 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         const finalTraderPk = new PublicKey(traderPublicKey);
         
         // SAFETY CHECK: Validate transaction structure before accessing instructions
-        if (!transactionResponse.transaction) {
+        if (!transactionObject) {
             console.log(`[ANALYZER] ❌ Invalid transaction structure: missing transaction object`);
             return { isCopyable: false, reason: "Invalid transaction structure - transaction object missing", rawTransaction: transactionResponse };
         }
         
-        if (!transactionResponse.transaction.message) {
+        if (!transactionObject.message) {
             console.log(`[ANALYZER] ❌ Invalid transaction structure: missing message object`);
             return { isCopyable: false, reason: "Invalid transaction structure - message object missing", rawTransaction: transactionResponse };
         }
         
-        const instructions = isWebhookData
-            ? transactionResponse.transaction.instructions || []
-            : transactionResponse.transaction.message.instructions || [];
+        const instructions = transactionObject.message.instructions || [];
         
         // VALIDATION: Ensure instructions is an array
         if (!Array.isArray(instructions)) {
             console.log(`[ANALYZER] ❌ Invalid instructions structure:`, {
-                hasTransaction: !!transactionResponse.transaction,
-                hasMessage: !!transactionResponse.transaction?.message,
+                hasTransaction: !!transactionObject,
+                hasMessage: !!transactionObject?.message,
                 instructionsType: typeof instructions,
                 isArray: Array.isArray(instructions),
                 instructionsValue: instructions
@@ -326,7 +358,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             return { isCopyable: false, reason: "Invalid transaction structure - instructions not found or not an array", rawTransaction: transactionResponse };
         }
         
-        const rawAccountKeys = transactionResponse.transaction.message.accountKeys;
+        const rawAccountKeys = transactionObject.message.accountKeys;
         
         // SAFETY CHECK: Validate accountKeys before processing
         if (!Array.isArray(rawAccountKeys) || rawAccountKeys.length === 0) {
@@ -345,175 +377,165 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         });
     
         // ===============================================
-        // ========== STAGE 3: CORE ANALYSIS ===============
+        // ========== STAGE 3: CORE ANALYSIS (Universal) ===
         // ===============================================
-        console.log(`[ANALYZER] 🔍 Starting core analysis...`);
         
-        let balanceAnalysis;
-        try {
-            balanceAnalysis = this.analyzeBalanceChangesInternal(meta, accountKeys, finalTraderPk);
-            console.log(`[ANALYZER] Balance analysis result:`, balanceAnalysis);
-        } catch (error) {
-            console.error(`[ANALYZER] ❌ Balance analysis failed:`, error);
-            balanceAnalysis = { isSwap: false, reason: `Balance analysis error: ${error.message}` };
+        const balanceAnalysis = this.analyzeBalanceChangesInternal(meta, accountKeys, finalTraderPk);
+
+        // STEP 1: Check if this is actually a trade transaction
+        if (!balanceAnalysis.isSwap) {
+            console.log(`[ANALYZER] ❌ Not a trade transaction - skipping platform analysis`);
+            return { isCopyable: false, reason: "No swap detected in balance changes.", rawTransaction: transactionResponse };
         }
-    
-        let instructionAnalysis = {
-            found: false,
-            dexPlatform: 'Unknown DEX',
-            platformProgramId: null,
-            platformSpecificData: {}
-        };
-    
-        // VITAL UPGRADE: Combine outer and inner instructions for a full analysis
-        let allInstructions = [...instructions];
+
+        console.log(`[ANALYZER] ✅ Trade detected! Analyzing platform...`);
+
+        // 🔬 NEW: DEEP ANALYSIS - Dive into inner instructions, loadedAddresses, and logMessages
+        console.log(`[ANALYZER] 🔬 Performing deep analysis for platform detection...`);
+        const deepAnalysis = this._deepAnalyzeTransactionForPlatforms(transactionResponse);
         
-        // SAFELY process inner instructions if they exist
-        if (meta.innerInstructions && Array.isArray(meta.innerInstructions)) {
-            try {
-                const innerInstructions = meta.innerInstructions.flatMap(i => i.instructions || []);
-                allInstructions = [...allInstructions, ...innerInstructions];
-            } catch (error) {
-                console.log(`[ANALYZER] ⚠️ Error processing inner instructions:`, error.message);
-                // Continue with just the outer instructions
-            }
-        }
+        // Determine instruction analysis based on deep analysis results
+        let instructionAnalysis;
         
-        if (config.LOG_LEVEL === 'debug') {
-            console.log(`[ANALYZER] 🔍 Analyzing ${allInstructions.length} instructions for DEX programs...`);
-        }
-        
-        // SAFETY CHECK: Ensure we have instructions to analyze
-        if (allInstructions.length === 0) {
-            if (config.LOG_LEVEL === 'debug') {
-                console.log(`[ANALYZER] ⚠️ No instructions found to analyze`);
-            }
-            instructionAnalysis = { 
-                found: false, 
-                dexPlatform: 'Unknown DEX', 
-                reason: 'No instructions found in transaction' 
+        if (deepAnalysis.platformMatches.length > 0) {
+            // Deep analysis found platform matches, use those
+            const [primaryProgramId, primaryPlatform] = deepAnalysis.platformMatches[0];
+            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform} (${shortenAddress(primaryProgramId)})`);
+            
+            // Create instruction analysis from deep analysis
+            instructionAnalysis = {
+                found: true,
+                dexPlatform: primaryPlatform,
+                platformProgramId: primaryProgramId,
+                platformSpecificData: {},
+                confidence: 'high',
+                source: 'deep-analysis',
+                platformMatches: deepAnalysis.platformMatches,
+                unknownProgramIds: deepAnalysis.unknownProgramIds
             };
+            
+            console.log(`[ANALYZER] ✅ Platform detected via deep analysis: ${instructionAnalysis.dexPlatform}`);
+            console.log(`[ANALYZER] ⏭️ Skipping traditional analysis - platform already identified`);
         } else {
-            try {
-                for (const ix of allInstructions) {
-                    const programId = this._resolveProgramId(ix, accountKeys);
-                    if (!programId) {
-                        if (config.LOG_LEVEL === 'debug') {
-                            console.log(`[ANALYZER] ⚠️ Could not resolve program ID for instruction:`, ix);
-                        }
-                        continue;
-                    }
+            // Deep analysis found no platforms, fall back to traditional analysis
+            console.log(`[ANALYZER] 🔄 Deep analysis found no platforms, falling back to traditional analysis...`);
+            
+            instructionAnalysis = (() => {
+                // This is our universal "Dive Deep" loop.
+                // It will check every single instruction against our entire platform library.
+                console.log(`[ANALYZER] 🔍 Analyzing ${instructions.length} instructions for platform detection...`);
+                console.log(`[ANALYZER] 📝 Transaction Signature: ${signature}`);
                     
-                    if (config.LOG_LEVEL === 'debug') {
-                        console.log(`[ANALYZER] 📋 Instruction program ID: ${shortenAddress(programId.toBase58())}`);
-                    }
-            
-                    // Find which known DEX program this instruction calls
-                    const platformMatch = Object.entries(this.platformIds).find(([name, pId]) => {
+                for (const ix of instructions) {
+                    const programId = this._resolveProgramId(ix, accountKeys);
+                    if (!programId) continue;
+                    
+                    // Find a match in our entire DEX library (from config.js)
+                    const platformMatch = Object.entries(this.platformIds).find(([key, pId]) => {
                         if (Array.isArray(pId)) return pId.some(id => id.equals(programId));
-                        if (pId instanceof PublicKey) return pId.equals(programId);
-                        return false;
+                        return pId instanceof PublicKey && pId.equals(programId);
                     });
-            
+                
                     if (platformMatch) {
-                        console.log(`[ANALYZER] ✅ Found DEX: ${this._mapConfigKeyToPlatformName(platformMatch[0])}`);
-                        instructionAnalysis.found = true;
-                        instructionAnalysis.dexPlatform = this._mapConfigKeyToPlatformName(platformMatch[0]);
-                        instructionAnalysis.platformProgramId = programId.toBase58();
+                        const platformName = this._mapConfigKeyToPlatformName(platformMatch[0]);
+                        console.log(`[ANALYZER] ✅ Platform detected: ${platformName} (${shortenAddress(programId.toBase58())})`);
                         
-                        // Extract more details if it's a Raydium Launchpad trade
-                        if (instructionAnalysis.dexPlatform === 'Raydium Launchpad' && ix.accounts.length > 6) {
-                            instructionAnalysis.platformSpecificData = {
-                                poolId: ix.accounts[2]?.toBase58(),
-                                configId: '4K3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3Q2xqcV' // This is a global constant for Launchpad
-                            };
+                        let platformSpecificData = {};
+                        // Extract crucial data if possible (like Meteora Pool ID)
+                        if (platformName === 'Meteora DBC' && ix.accounts.length > 0) {
+                            platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
                         }
-                        break; // Found the primary DEX instruction, we can stop searching.
-                    } else if (config.LOG_LEVEL === 'debug') {
-                        console.log(`[ANALYZER] ❌ No platform match found for program ID: ${shortenAddress(programId.toBase58())}`);
-                    }
-                }
-            } catch (error) {
-                console.error(`[ANALYZER] ❌ Instruction analysis failed:`, error);
-                instructionAnalysis = { found: false, dexPlatform: 'Unknown DEX', reason: `Instruction analysis error: ${error.message}` };
-            }
-        }
-        
-                // --- COMBINE RESULTS ---
-                if (config.LOG_LEVEL === 'debug') {
-                    console.log(`[ANALYZER] 📊 Analysis Summary:`);
-                    console.log(`[ANALYZER]   - Balance Analysis: ${balanceAnalysis.isSwap ? '✅ SWAP DETECTED' : '❌ No swap'}`);
-                    console.log(`[ANALYZER]   - Instruction Analysis: ${instructionAnalysis.found ? '✅ DEX FOUND' : '❌ No DEX'}`);
-                    console.log(`[ANALYZER]   - Balance Details:`, balanceAnalysis.details || 'None');
-                    console.log(`[ANALYZER]   - Instruction Details:`, instructionAnalysis);
-                }
-        
-                // --- NEW DECISION LOGIC ---
-                let swapDetails = {};
-                
-                // CASE 1: BOTH AGREE - The perfect scenario
-                if (balanceAnalysis.isSwap && instructionAnalysis.found) {
-                    console.log(`[ANALYZER] 🤝 Consensus found between Balance and Instruction analysis.`);
-                    swapDetails = {
-                        ...instructionAnalysis,
-                        ...balanceAnalysis.details // Balance analysis provides the definitive mints and amounts
-                    };
-                } 
-                // CASE 2: INSTRUCTION-ONLY - Balance analysis failed (e.g., complex Meteora tx), but we KNOW the platform.
-                else if (instructionAnalysis.found && !balanceAnalysis.isSwap) {
-                    console.log(`[ANALYZER] ⚠️ Instruction-only match. Attempting to derive swap details...`);
-                    // Attempt to extract swap details directly from the transaction metadata.
-                    const derivedDetails = this._deriveDetailsFromMetadata(meta, traderPublicKey);
-                    if (derivedDetails.isSwap) {
-                         swapDetails = {
-                            ...instructionAnalysis,
-                            ...derivedDetails.details // Use derived details as a fallback
+                        
+                        // We found our match, we can return the result and stop looping.
+                        return {
+                            found: true,
+                            dexPlatform: platformName,
+                            platformProgramId: programId.toBase58(),
+                            platformSpecificData: platformSpecificData
                         };
-                         console.log(`[ANALYZER] ✅ Successfully derived swap details from metadata.`);
-                    } else {
-                         console.log(`[ANALYZER] ❌ Could not derive swap details for instruction-only match.`);
-                         return { isCopyable: false, reason: `Known DEX found (${instructionAnalysis.dexPlatform}), but couldn't confirm swap details from balance changes.`, rawTransaction: transactionResponse };
                     }
-                } 
-                // CASE 3: BALANCE-ONLY - Instruction was unknown (e.g., new router), but balances clearly changed.
-                else if (balanceAnalysis.isSwap && !instructionAnalysis.found) {
-                     console.log(`[ANALYZER] ⚠️ Balance-only match. Heuristic required for platform identification.`);
-                     // In a future version, you could add a heuristic here. For now, we'll call it uncopyable.
-                     return { isCopyable: false, reason: `Clear swap detected, but the DEX program is unknown.`, rawTransaction: transactionResponse };
-                }
-                // CASE 4: BOTH FAILED
-                else {
-                    return { isCopyable: false, reason: `Balance analysis failed AND no known DEX instruction was found.`, rawTransaction: transactionResponse };
                 }
                 
-                console.log(`[ANALYZER] 🔄 Finalized swap details:`, swapDetails);
-    
-        // ===============================================
-        // ======== STAGE 4: FINAL DECISION LOGIC ==========
-        // ===============================================
-        if (!swapDetails.tradeType || !swapDetails.dexPlatform || swapDetails.dexPlatform === 'Unknown DEX' || !swapDetails.outputMint) {
-            console.log(`[ANALYZER] ❌ Analysis incomplete. Missing:`, {
-                tradeType: !!swapDetails.tradeType,
-                dexPlatform: !!swapDetails.dexPlatform,
-                platformValid: swapDetails.dexPlatform !== 'Unknown DEX',
-                outputMint: !!swapDetails.outputMint
-            });
-            return { isCopyable: false, reason: `Analysis incomplete. Could not determine trade type, platform, or token. Platform Found: ${swapDetails.dexPlatform}`, rawTransaction: transactionResponse };
+                // If the loop finishes without finding any known DEX program ID.
+                console.log(`[ANALYZER] ❌ No known platform detected in any instruction`);
+                
+                // Show unique program IDs found for debugging
+                const foundProgramIds = new Set();
+                for (const ix of instructions) {
+                    const programId = this._resolveProgramId(ix, accountKeys);
+                    if (programId) {
+                        foundProgramIds.add(programId.toBase58());
+                    }
+                }
+                
+                if (foundProgramIds.size > 0) {
+                    console.log(`[ANALYZER] 🔍 Program IDs found (SHORTENED): ${Array.from(foundProgramIds).map(id => shortenAddress(id)).join(', ')}`);
+                    console.log(`[ANALYZER] 🔍 Program IDs found (COMPLETE): ${Array.from(foundProgramIds).join(', ')}`);
+                }
+                
+                // Fallback: Try to detect Pump.fun by transaction pattern
+                const pumpFunDetected = this._detectPumpFunByPattern(instructions, accountKeys);
+                if (pumpFunDetected) {
+                    console.log(`[ANALYZER] 🔍 Fallback detection: Pump.fun detected by transaction pattern`);
+                    return {
+                        found: true,
+                        dexPlatform: 'Pump.fun',
+                        platformProgramId: 'Pump.fun (pattern detected)',
+                        platformSpecificData: {}
+                    };
+                }
+
+                // STEP 2: For unknown platforms, just log them (don't try to execute)
+                console.log(`[ANALYZER] 🔍 Unknown platform detected - logging for investigation`);
+                console.log(`[ANALYZER] 📝 Transaction signature: ${signature}`);
+                console.log(`[ANALYZER] 🔍 All program IDs found: ${Array.from(foundProgramIds).join(', ')}`);
+                console.log(`[ANALYZER] ⚠️ This transaction will NOT be executed - platform unknown`);
+                
+                return { 
+                    found: false, 
+                    dexPlatform: 'Unknown DEX (Logged for Investigation)',
+                    reason: 'Platform not recognized - needs investigation'
+                };
+            })();
         }
-    
+        
+        // ===============================================
+        // =========== STAGE 4: FINAL DECISION ===========
+        // ===============================================
+        
+        // STEP 3: Only execute if we have a known platform
+        if (instructionAnalysis.dexPlatform.includes('Unknown DEX')) {
+            console.log(`[ANALYZER] 🚫 Unknown platform - transaction will NOT be executed`);
+            console.log(`[ANALYZER] 📊 Trade details: ${balanceAnalysis.details.tradeType} ${balanceAnalysis.details.inputMint} → ${balanceAnalysis.details.outputMint}`);
+            console.log(`[ANALYZER] 🔍 Platform: ${instructionAnalysis.dexPlatform}`);
+            console.log(`[ANALYZER] ⚠️ Add this platform to config.js to enable copy trading`);
+            
+            return { 
+                isCopyable: false, 
+                reason: `Platform not recognized: ${instructionAnalysis.reason || 'Unknown DEX'}`,
+                rawTransaction: transactionResponse,
+                tradeDetails: balanceAnalysis.details,
+                platformInfo: instructionAnalysis
+            };
+        }
+        
+        // We have a confirmed swap with a KNOWN platform. We will execute it.
         const finalDetails = {
-            ...swapDetails,
-            traderPubkey: finalTraderPk.toBase58()
+            ...balanceAnalysis.details, // The definitive amounts and mints
+            dexPlatform: instructionAnalysis.dexPlatform, // Known platform
+            platformProgramId: instructionAnalysis.platformProgramId,
+            platformSpecificData: instructionAnalysis.platformSpecificData,
+            traderPubkey: finalTraderPk.toBase58(),
+            // NEW: Pass original transaction data for universal instruction building
+            originalTransaction: transactionResponse
         };
         
-        // Create clean summary instead of logging raw data
         const tradeSummary = this._createTradeSummary(finalDetails, transactionResponse);
         console.log(`[ANALYZER] 🎉 SUCCESS! ${tradeSummary}`);
         
         return {
             isCopyable: true,
             reason: `Trade detected on ${finalDetails.dexPlatform}.`,
-            rawTransaction: config.LOG_LEVEL === 'debug' ? transactionResponse : null, // Only include raw data in debug mode
             details: finalDetails,
             summary: tradeSummary
         };
@@ -521,15 +543,20 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     
     _resolveProgramId(instruction, allAccountKeys) {
         try {
+            // Handle compiled instructions (like from LaserStream/Jupiter)
             if (instruction.programIdIndex !== undefined && allAccountKeys?.[instruction.programIdIndex]) {
-                return allAccountKeys[instruction.programIdIndex];
+                const resolved = allAccountKeys[instruction.programIdIndex];
+                return resolved;
             }
+            
+            // Handle direct program IDs (like from RPC)
             if (instruction.programId instanceof PublicKey) {
                 return instruction.programId;
             }
             if (typeof instruction.programId === 'string') {
                 return new PublicKey(instruction.programId);
             }
+            
             return null;
         } catch (e) {
             console.warn(`Error resolving programId for instruction: ${e.message}`);
@@ -570,79 +597,94 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
 
         console.log(`[Parser] Detected ${routerName} router transaction. Checking inner instructions...`);
 
-        // 2️⃣ Define Known Inner Programs
+        // 2️⃣ Define Known Inner Programs (PRIORITIZED ORDER)
         const knownInnerPrograms = [
-            // --- Pump.fun ---
-            { ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT], name: 'Pump.fun' },
-            { ids: [this.platformIds.PUMP_FUN_AMM], name: 'Pump.fun AMM' },
+            // --- Pump.fun (HIGHEST PRIORITY - BC trades) ---
+            { ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT], name: 'Pump.fun', priority: 1 },
+            // --- Pump.fun AMM (LOWER PRIORITY - only if no BC detected) ---
+            { ids: [this.platformIds.PUMP_FUN_AMM], name: 'Pump.fun AMM', priority: 2 },
             // --- Raydium ---
-            { ids: [this.platformIds.RAYDIUM_LAUNCHPAD], name: 'Raydium Launchpad' },
-            { ids: [this.platformIds.RAYDIUM_V4], name: 'Raydium V4' },
-            { ids: [this.platformIds.RAYDIUM_CLMM], name: 'Raydium CLMM' },
-            { ids: [this.platformIds.RAYDIUM_CPMM], name: 'Raydium CPMM' },
+            { ids: [this.platformIds.RAYDIUM_LAUNCHPAD], name: 'Raydium Launchpad', priority: 3 },
+            { ids: [this.platformIds.RAYDIUM_V4], name: 'Raydium V4', priority: 3 },
+            { ids: [this.platformIds.RAYDIUM_CLMM], name: 'Raydium CLMM', priority: 3 },
+            { ids: [this.platformIds.RAYDIUM_CPMM], name: 'Raydium CPMM', priority: 3 },
             // --- Meteora ---
-            { ids: [this.platformIds.METEORA_DLMM], name: 'Meteora DLMM' },
+            { ids: [this.platformIds.METEORA_DLMM], name: 'Meteora DLMM', priority: 3 },
             ...(Array.isArray(this.platformIds.METEORA_DBC)
-                ? this.platformIds.METEORA_DBC.map(id => ({ ids: [id], name: 'Meteora DBC' }))
+                ? this.platformIds.METEORA_DBC.map(id => ({ ids: [id], name: 'Meteora DBC', priority: 3 }))
                 : []
             ),
-            { ids: [this.platformIds.METEORA_CP_AMM], name: 'Meteora CP Amm' },
+            { ids: [this.platformIds.METEORA_CP_AMM], name: 'Meteora CP Amm', priority: 3 },
             // --- Jupiter ---
-            { ids: [this.platformIds['Jupiter Aggregator']], name: 'Jupiter Aggregator' }
+            { ids: [this.platformIds['Jupiter Aggregator']], name: 'Jupiter Aggregator', priority: 3 }
         ].filter(p => p.ids?.length);
 
-        // 3️⃣ Scan Inner Instructions
+        // 3️⃣ Scan Inner Instructions with Priority System
+        let detectedPlatforms = [];
+        
         for (const innerParsedIx of parsedInstructions) {
             const innerProgramId = new PublicKey(innerParsedIx.programId);
             if (!innerProgramId) continue;
 
             for (const program of knownInnerPrograms) {
-
-                // <<<<< START OF MIGRATION-AWARE LOGIC >>>>>
                 if (program.ids.some(id => id instanceof PublicKey && id.equals(innerProgramId))) {
-                    console.log(`[Parser] ✅ ${routerName} routed to: ${program.name}`);
-
-                    const tokenMintForCheck = (generalBalanceAnalysis.details.tradeType === 'buy')
-                        ? generalBalanceAnalysis.details.outputMint
-                        : generalBalanceAnalysis.details.inputMint;
-
-                    let isMigrated = false;
-                    let newPlatformDetails = null;
-
-                    // Only check for migration if we have a token to check
-                    if (tokenMintForCheck) {
-                        const migrationInfo = await this._checkTokenMigrationStatus(tokenMintForCheck);
-                        if (migrationInfo?.hasMigrated) {
-                            isMigrated = true;
-                            newPlatformDetails = migrationInfo;
-                            console.log(`[MIGRATION AWARE] Token ${shortenAddress(tokenMintForCheck)} has migrated to ${newPlatformDetails.newDexPlatform}! Overriding trade platform.`);
-                        }
-                    }
-
-                    // If a migration is detected, we override the platform details with the NEW platform.
-                    const finalDetails = isMigrated ? {
-                        ...generalBalanceAnalysis.details,
-                        dexPlatform: newPlatformDetails.newDexPlatform, // e.g., 'Raydium V4'
-                        platformProgramId: new PublicKey(newPlatformDetails.newPlatformProgramId), // Use the new program ID
-                        platformSpecificData: newPlatformDetails.platformSpecificData, // e.g., { poolId: 'newPool123' }
-                        originalPlatform: program.name // Keep track of where it came from
-                    } : {
-                        ...generalBalanceAnalysis.details,
-                        dexPlatform: program.name,
-                        platformProgramId: innerProgramId
-                    };
-
-                    return {
-                        isCopyable: true,
-                        reason: `${routerName} via ${finalDetails.dexPlatform} detected.${isMigrated ? ' (MIGRATED)' : ''}`,
-                        details: finalDetails
-                    };
+                    detectedPlatforms.push({
+                        ...program,
+                        programId: innerProgramId
+                    });
                 }
-                // <<<<< END OF MIGRATION-AWARE LOGIC >>>>>
             }
         }
 
-        // 4️⃣ Fallback: Router detected but unknown inner route
+        // 4️⃣ Select Best Platform Based on Priority
+        if (detectedPlatforms.length > 0) {
+            // Sort by priority (lower number = higher priority)
+            detectedPlatforms.sort((a, b) => a.priority - b.priority);
+            const bestPlatform = detectedPlatforms[0];
+            
+            console.log(`[Parser] ✅ ${routerName} routed to: ${bestPlatform.name} (Priority: ${bestPlatform.priority})`);
+            if (detectedPlatforms.length > 1) {
+                console.log(`[Parser] 📋 Also detected: ${detectedPlatforms.slice(1).map(p => `${p.name} (${p.priority})`).join(', ')}`);
+            }
+
+            const tokenMintForCheck = (generalBalanceAnalysis.details.tradeType === 'buy')
+                ? generalBalanceAnalysis.details.outputMint
+                : generalBalanceAnalysis.details.inputMint;
+
+            let isMigrated = false;
+            let newPlatformDetails = null;
+
+            // Only check for migration if we have a token to check
+            if (tokenMintForCheck) {
+                const migrationInfo = await this._checkTokenMigrationStatus(tokenMintForCheck);
+                if (migrationInfo?.hasMigrated) {
+                    isMigrated = true;
+                    newPlatformDetails = migrationInfo;
+                    console.log(`[MIGRATION AWARE] Token ${shortenAddress(tokenMintForCheck)} has migrated to ${newPlatformDetails.newDexPlatform}! Overriding trade platform.`);
+                }
+            }
+
+            // If a migration is detected, we override the platform details with the NEW platform.
+            const finalDetails = isMigrated ? {
+                ...generalBalanceAnalysis.details,
+                dexPlatform: newPlatformDetails.newDexPlatform, // e.g., 'Raydium V4'
+                platformProgramId: new PublicKey(newPlatformDetails.newPlatformProgramId), // Use the new program ID
+                platformSpecificData: newPlatformDetails.platformSpecificData, // e.g., { poolId: 'newPool123' }
+                originalPlatform: bestPlatform.name // Keep track of where it came from
+            } : {
+                ...generalBalanceAnalysis.details,
+                dexPlatform: bestPlatform.name,
+                platformProgramId: bestPlatform.programId
+            };
+
+            return {
+                isCopyable: true,
+                reason: `${routerName} via ${finalDetails.dexPlatform} detected.${isMigrated ? ' (MIGRATED)' : ''}`,
+                details: finalDetails
+            };
+        }
+
+        // 5️⃣ Fallback: Router detected but unknown inner route
         return {
             isCopyable: false,
             reason: `${routerName} router (unknown underlying route) detected.`,
@@ -951,7 +993,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     _mapConfigKeyToPlatformName(key) {
         // More specific checks must come first
         if (key === 'PUMP_FUN_AMM') return 'Pump.fun AMM';
-        if (key === 'PUMP_FUN' || key === 'PUMP_FUN_VARIANT') return 'Pump.fun BC'; // Specify BC for Bonding Curve
+        if (key === 'PUMP_FUN' || key === 'PUMP_FUN_VARIANT' || key === 'PUMP_FUN_NEW') return 'Pump.fun'; // All Pump.fun variants
 
         if (key.includes('RAYDIUM_LAUNCHPAD')) return 'Raydium Launchpad';
         if (key.includes('RAYDIUM_V4')) return 'Raydium AMM';
@@ -961,6 +1003,11 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         if (key.includes('METEORA_DBC')) return 'Meteora DBC';
         if (key.includes('METEORA_CP_AMM')) return 'Meteora CP-AMM';
         if (key.includes('Jupiter')) return 'Jupiter Aggregator';
+        if (key.includes('PHOTON')) return 'Photon';
+        if (key.includes('AXIOM')) return 'Axiom';
+        if (key.includes('OPENBOOK')) return 'Openbook';
+        if (key.includes('UNKNOWN_DEX_1')) return 'Unknown DEX 1';
+        if (key.includes('CUSTOM_DEX_BUY')) return 'Custom DEX Buy'; // New platform for BUY trades
         
         return 'Unknown DEX';
     }
@@ -1018,61 +1065,424 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     }
     // ===== [END] NEW MIGRATION-AWARE HELPER ===== //
 
+    /**
+     * Identify which program IDs from a transaction are missing from our config
+     * This helps us know what to add to support new platforms
+     */
+    _identifyMissingProgramIds(foundProgramIds) {
+        const missing = [];
+        const knownProgramIds = new Set();
+        
+        // Collect all known program IDs from config
+        Object.values(this.platformIds).forEach(pId => {
+            if (Array.isArray(pId)) {
+                pId.forEach(id => knownProgramIds.add(id.toBase58()));
+            } else if (pId instanceof PublicKey) {
+                knownProgramIds.add(id.toBase58());
+            }
+        });
+        
+        // Find which ones we don't have
+        foundProgramIds.forEach(programId => {
+            if (!knownProgramIds.has(programId)) {
+                missing.push(programId);
+            }
+        });
+        
+        return missing;
+    }
+
+    /**
+     * Check if an address is a valid program ID (not an account address)
+     */
+    _isValidProgramId(address) {
+        try {
+            // Known system program IDs that are NOT DEX platforms
+            const systemPrograms = [
+                '11111111111111111111111111111111',           // System Program
+                'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token
+                'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022
+                'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25YtWvfZMj8cng', // Associated Token
+                'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token (variant)
+                'ComputeBudget111111111111111111111111111111', // Compute Budget
+                'SysvarRent111111111111111111111111111111111', // Sysvar Rent
+                'SysvarC1ock11111111111111111111111111111111', // Sysvar Clock
+                'jito1bA6L9erHapzQJv2HmzMSPByND3e3HmkLcBfsdCJ', // Jito
+                'jitodontfront111111111111111tradewithPhoton', // Jito Front
+                'pfeeB5h3jqo3qo3qo3qo3qo3qo3qo3qo3qo3qo3qo', // Pump.fun Fee
+                '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk', // Pump.fun Global
+                'CebN5WGQ4jvEPvsVU4EoHEpgzq1S77jyZ52gXSJGTk5M' // Pump.fun Fee Recipient
+            ];
+            
+            // If it's a known system program, it's not a DEX platform
+            if (systemPrograms.includes(address)) {
+                return false;
+            }
+            
+            // Check if it's in our known platform IDs
+            for (const [key, pId] of Object.entries(this.platformIds)) {
+                if (Array.isArray(pId)) {
+                    if (pId.some(id => id.toBase58() === address)) {
+                        return true; // This is a known DEX platform
+                    }
+                } else if (pId instanceof PublicKey && pId.toBase58() === address) {
+                    return true; // This is a known DEX platform
+                }
+            }
+            
+            // For now, only consider known platforms as valid program IDs
+            // This prevents us from picking up random account addresses
+            return false;
+            
+        } catch (error) {
+            console.warn(`[DEEP-ANALYSIS] Error validating program ID: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * DEEP ANALYSIS: Dive into inner instructions, loadedAddresses, and logMessages
+     * to identify the REAL platform program IDs that executed the trade
+     */
+    _deepAnalyzeTransactionForPlatforms(transactionResponse) {
+        try {
+            console.log(`[DEEP-ANALYSIS] 🔍 Diving deep into transaction structure...`);
+            
+            const allProgramIds = new Set();
+            const platformMatches = new Map();
+            
+            // 1️⃣ Extract all possible program IDs from different sources
+            const sources = {
+                outerInstructions: [],
+                innerInstructions: [],
+                loadedAddresses: [],
+                logMessages: [],
+                accountKeys: []
+            };
+
+            // Outer instructions
+            if (transactionResponse.transaction?.message?.instructions) {
+                sources.outerInstructions = transactionResponse.transaction.message.instructions;
+                console.log(`[DEEP-ANALYSIS] 📋 Found ${sources.outerInstructions.length} outer instructions`);
+            }
+
+            // Inner instructions (CRITICAL for platform detection)
+            if (transactionResponse.meta?.innerInstructions) {
+                sources.innerInstructions = transactionResponse.meta.innerInstructions;
+                console.log(`[DEEP-ANALYSIS] 🔬 Found ${sources.innerInstructions.length} inner instruction groups`);
+                
+                // Flatten all inner instructions
+                const allInnerIx = sources.innerInstructions.flatMap(group => group.instructions || []);
+                console.log(`[DEEP-ANALYSIS] 🔬 Total inner instructions: ${allInnerIx.length}`);
+                
+                // Extract program IDs from inner instructions
+                allInnerIx.forEach(ix => {
+                    if (ix.programId) {
+                        const programId = typeof ix.programId === 'string' ? ix.programId : ix.programId.toString();
+                        allProgramIds.add(programId);
+                        console.log(`[DEEP-ANALYSIS] 🔬 Inner IX Program: ${shortenAddress(programId)}`);
+                    }
+                });
+            }
+
+            // Loaded addresses (address table lookups)
+            if (transactionResponse.meta?.loadedAddresses) {
+                sources.loadedAddresses = transactionResponse.meta.loadedAddresses;
+                console.log(`[DEEP-ANALYSIS] 📚 Loaded addresses found:`, Object.keys(sources.loadedAddresses));
+                
+                // Extract program IDs from loaded addresses
+                Object.values(sources.loadedAddresses).forEach(addressGroup => {
+                    if (Array.isArray(addressGroup)) {
+                        addressGroup.forEach(addr => {
+                            if (addr && typeof addr === 'string') {
+                                allProgramIds.add(addr);
+                                console.log(`[DEEP-ANALYSIS] 📚 Loaded Address: ${shortenAddress(addr)}`);
+                            }
+                        });
+                    }
+                });
+            }
+
+            // Log messages (CRITICAL for program execution traces)
+            if (transactionResponse.meta?.logMessages) {
+                sources.logMessages = transactionResponse.meta.logMessages;
+                console.log(`[DEEP-ANALYSIS] 📝 Found ${sources.logMessages.length} log messages`);
+                
+                // Extract program IDs from log messages
+                sources.logMessages.forEach(log => {
+                    // Look for "Program X invoke [Y]" patterns
+                    const programInvokeMatch = log.match(/Program ([A-Za-z0-9]{32,44}) invoke \[(\d+)\]/);
+                    if (programInvokeMatch) {
+                        const programId = programInvokeMatch[1];
+                        const stackHeight = programInvokeMatch[2];
+                        
+                        // Validate this is actually a program ID (not an account address)
+                        if (this._isValidProgramId(programId)) {
+                            allProgramIds.add(programId);
+                            console.log(`[DEEP-ANALYSIS] 📝 Program Invoke: ${shortenAddress(programId)} at stack ${stackHeight}`);
+                        } else {
+                            console.log(`[DEEP-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                        }
+                    }
+                    
+                    // Look for "Program X success" patterns
+                    const programSuccessMatch = log.match(/Program ([A-Za-z0-9]{32,44}) success/);
+                    if (programSuccessMatch) {
+                        const programId = programSuccessMatch[1];
+                        
+                        // Validate this is actually a program ID
+                        if (this._isValidProgramId(programId)) {
+                            allProgramIds.add(programId);
+                            console.log(`[DEEP-ANALYSIS] 📝 Program Success: ${shortenAddress(programId)}`);
+                        } else {
+                            console.log(`[DEEP-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                        }
+                    }
+                });
+            }
+
+            // Account keys (from outer transaction)
+            if (transactionResponse.transaction?.message?.accountKeys) {
+                sources.accountKeys = transactionResponse.transaction.message.accountKeys;
+                console.log(`[DEEP-ANALYSIS] 🔑 Found ${sources.accountKeys.length} account keys`);
+            }
+
+            // 2️⃣ Check each program ID against our known platforms
+            console.log(`[DEEP-ANALYSIS] 🎯 Checking ${allProgramIds.size} unique program IDs against known platforms...`);
+            
+            // Debug: Show what we're looking for
+            console.log(`[DEEP-ANALYSIS] 🔍 Looking for actual program IDs in transaction...`);
+            console.log(`[DEEP-ANALYSIS] 📊 Found ${allProgramIds.size} program IDs to analyze`);
+            
+            allProgramIds.forEach(programId => {
+                // Find which config key this program ID matches
+                let matchedConfigKey = null;
+                for (const [key, pId] of Object.entries(this.platformIds)) {
+                    if (Array.isArray(pId)) {
+                        if (pId.some(id => id.toBase58() === programId)) {
+                            matchedConfigKey = key;
+                            break;
+                        }
+                    } else if (pId instanceof PublicKey && pId.toBase58() === programId) {
+                        matchedConfigKey = key;
+                        break;
+                    }
+                }
+                
+                if (matchedConfigKey) {
+                    const platformName = this._mapConfigKeyToPlatformName(matchedConfigKey);
+                    platformMatches.set(programId, platformName);
+                    console.log(`[DEEP-ANALYSIS] ✅ PLATFORM MATCH: ${shortenAddress(programId)} → ${platformName} (via ${matchedConfigKey})`);
+                } else {
+                    console.log(`[DEEP-ANALYSIS] ❓ Unknown Program: ${shortenAddress(programId)}`);
+                }
+            });
+
+            // 3️⃣ Return comprehensive analysis
+            const result = {
+                totalProgramIds: allProgramIds.size,
+                platformMatches: Array.from(platformMatches.entries()),
+                unknownProgramIds: Array.from(allProgramIds).filter(id => !platformMatches.has(id)),
+                sources: {
+                    outerInstructions: sources.outerInstructions.length,
+                    innerInstructions: sources.innerInstructions.length,
+                    loadedAddresses: Object.keys(sources.loadedAddresses).length,
+                    logMessages: sources.logMessages.length,
+                    accountKeys: sources.accountKeys.length
+                }
+            };
+
+            // Log deep analysis results to JSON file instead of console
+            this.transactionLogger.logDeepAnalysis('deep_analysis', result);
+
+            return result;
+
+        } catch (error) {
+            console.error(`[DEEP-ANALYSIS] ❌ Error in deep analysis:`, error.message);
+            return {
+                totalProgramIds: 0,
+                platformMatches: [],
+                unknownProgramIds: [],
+                sources: { outerInstructions: 0, innerInstructions: 0, loadedAddresses: 0, logMessages: 0, accountKeys: 0 },
+                error: error.message
+            };
+        }
+    }
+
+    // Enhanced DEX detection by analyzing instruction patterns and account structures
+    _detectDexByInstructionPatterns(instructions, accountKeys, meta) {
+        try {
+            console.log(`[ENHANCED-DEX] 🔍 Analyzing instruction patterns for DEX detection...`);
+            
+            // Look for common DEX patterns
+            const patterns = {
+                // Raydium-like patterns
+                raydium: {
+                    hasTokenSwap: false,
+                    hasPoolInstruction: false,
+                    hasLiquidityInstruction: false
+                },
+                // Meteora-like patterns  
+                meteora: {
+                    hasWhirlpoolInstruction: false,
+                    hasLiquidityInstruction: false
+                },
+                // Jupiter-like patterns
+                jupiter: {
+                    hasSwapInstruction: false,
+                    hasTokenTransfer: false
+                },
+                // Custom DEX patterns
+                custom: {
+                    hasComplexSwap: false,
+                    hasMultipleTokenTransfers: false
+                }
+            };
+
+            // Analyze each instruction for patterns
+            for (const ix of instructions) {
+                const programId = this._resolveProgramId(ix, accountKeys);
+                if (!programId) continue;
+                
+                const programIdStr = programId.toBase58();
+                
+                // Check for token transfers (indicates swap activity)
+                if (ix.accounts && ix.accounts.length >= 3) {
+                    // Look for token program involvement
+                    const hasTokenProgram = accountKeys.some(key => 
+                        key.toBase58() === 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA'
+                    );
+                    
+                    if (hasTokenProgram && ix.accounts.length >= 4) {
+                        patterns.custom.hasComplexSwap = true;
+                        patterns.custom.hasMultipleTokenTransfers = true;
+                    }
+                }
+
+                // Check for specific instruction data patterns
+                if (ix.data && ix.data.length > 0) {
+                    const dataStr = ix.data.toString('base64');
+                    
+                    // Look for swap-like instruction discriminators
+                    if (dataStr.startsWith('6vx8P') || dataStr.startsWith('1GqUcqN2sBtddBCfmeWeGYf')) {
+                        patterns.custom.hasComplexSwap = true;
+                        console.log(`[ENHANCED-DEX] 🔍 Found swap-like instruction data: ${dataStr.substring(0, 10)}...`);
+                    }
+                }
+            }
+
+            // Check log messages for DEX hints
+            if (meta && meta.logMessages) {
+                const logs = meta.logMessages.join(' ').toLowerCase();
+                
+                // Look for DEX-specific log patterns
+                if (logs.includes('instruction: buy') || logs.includes('instruction: swap')) {
+                    patterns.custom.hasComplexSwap = true;
+                    console.log(`[ENHANCED-DEX] 🔍 Found swap instruction in logs`);
+                }
+                
+                if (logs.includes('program') && logs.includes('invoke')) {
+                    // Count program invocations to identify complexity
+                    const programInvocations = logs.match(/program [a-zA-Z0-9]{32,44} invoke/g);
+                    if (programInvocations && programInvocations.length > 3) {
+                        patterns.custom.hasComplexSwap = true;
+                        console.log(`[ENHANCED-DEX] 🔍 Complex transaction with ${programInvocations.length} program invocations`);
+                    }
+                }
+            }
+
+            // Determine the most likely DEX platform
+            if (patterns.custom.hasComplexSwap && patterns.custom.hasMultipleTokenTransfers) {
+                console.log(`[ENHANCED-DEX] ✅ Detected custom DEX with complex swap pattern`);
+                return {
+                    found: true,
+                    dexPlatform: 'Custom DEX (Pattern Detected)',
+                    platformProgramId: 'Custom DEX (Enhanced Detection)',
+                    platformSpecificData: {
+                        detectionMethod: 'instruction_pattern_analysis',
+                        complexity: 'high',
+                        instructionCount: instructions.length
+                    }
+                };
+            }
+
+            return { found: false };
+            
+        } catch (error) {
+            console.error(`[ENHANCED-DEX] ❌ Error in enhanced DEX detection:`, error);
+            return { found: false };
+        }
+    }
+
+    /**
+     * Fallback method to detect Pump.fun transactions by pattern
+     * This helps catch transactions that might use newer program IDs
+     */
+    _detectPumpFunByPattern(instructions, accountKeys) {
+        try {
+            console.log(`[ANALYZER] 🔍 Attempting Pump.fun pattern detection...`);
+            
+            // Look for Pump.fun-specific accounts in the transaction
+            const pumpFunAccounts = [
+                '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk', // PUMP_FUN_GLOBAL
+                'CebN5WGQ4jvEPvsVU4EoHEpgzq1S77jyZ52gXSJGTk5M', // PUMP_FUN_FEE_RECIPIENT
+            ];
+            
+            // Check if any Pump.fun accounts are present
+            const hasPumpFunAccounts = accountKeys.some(key => 
+                pumpFunAccounts.includes(key.toBase58())
+            );
+            
+            if (hasPumpFunAccounts) {
+                console.log(`[ANALYZER] 🔍 Pump.fun accounts detected in transaction`);
+                return true;
+            }
+            
+            // Look for Pump.fun discriminators in instruction data
+            for (const ix of instructions) {
+                if (ix.data && ix.data.length >= 8) {
+                    const data = Buffer.from(ix.data);
+                    const discriminator = data.slice(0, 8);
+                    
+                    // Check against known Pump.fun discriminators
+                    if (discriminator.equals(config.PUMP_FUN_BUY_DISCRIMINATOR) ||
+                        discriminator.equals(config.PUMP_FUN_SELL_DISCRIMINATOR) ||
+                        discriminator.equals(config.PUMP_AMM_BUY_DISCRIMINATOR) ||
+                        discriminator.equals(config.PUMP_AMM_SELL_DISCRIMINATOR)) {
+                        console.log(`[ANALYZER] 🔍 Pump.fun discriminator detected in instruction data`);
+                        return true;
+                    }
+                }
+            }
+            
+            // Additional check: Look for common Pump.fun instruction patterns
+            // Pump.fun often has specific account structures
+            if (instructions.length >= 2 && accountKeys.length >= 5) {
+                console.log(`[ANALYZER] 🔍 Checking for Pump.fun instruction patterns...`);
+                // This is a heuristic - Pump.fun transactions often have multiple instructions
+                // and specific account structures
+            }
+            
+            console.log(`[ANALYZER] ❌ No Pump.fun pattern detected`);
+            return false;
+        } catch (error) {
+            console.warn(`[ANALYZER] ⚠️ Error in Pump.fun pattern detection:`, error.message);
+            return false;
+        }
+    }
+
     // ===============================================
     // ========== NOISE FILTERING METHODS ===========
     // ===============================================
     
     /**
      * Pre-filter to identify and skip noise transactions that are clearly not trades
+     * PURE COPY BOT: NO NOISE FILTERING - Copy everything!
      */
     _isNoiseTransaction(transactionData) {
-        try {
-            // Quick checks for common noise patterns
-            if (!transactionData?.transaction?.message?.instructions) {
-                return false; // Can't analyze, let it through
-            }
-
-            const instructions = transactionData.transaction.message.instructions;
-            const accountKeys = transactionData.transaction.message.accountKeys || [];
-            const logMessages = transactionData.meta?.logMessages || [];
-
-            // 1. Only ComputeBudget + System program calls (account creation/transfers)
-            const hasOnlySystemPrograms = instructions.every(ix => {
-                const programId = this._resolveProgramId(ix, accountKeys);
-                if (!programId) return false;
-                let programIdStr;
-                try {
-                    programIdStr = typeof programId === 'string' ? programId : programId.toBase58();
-                } catch (error) {
-                    console.log(`[NOISE-FILTER] Error converting programId to string: ${error.message}`);
-                    return false;
-                }
-                return programIdStr === 'ComputeBudget111111111111111111111111111111' ||
-                       programIdStr === '11111111111111111111111111111111' ||
-                       programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
-            });
-
-            // 2. Token account creation pattern (ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL)
-            const isTokenAccountCreation = logMessages.some(log => 
-                log.includes('Initialize the associated token account') ||
-                log.includes('Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL')
-            ) && !this._hasAnyDexProgram(accountKeys);
-
-            // 3. Simple SOL transfer with minimal compute units
-            const isSimpleTransfer = transactionData.meta?.computeUnitsConsumed < 5000 &&
-                                   instructions.length <= 3 &&
-                                   hasOnlySystemPrograms;
-
-            // 4. Very small SOL amounts (dust transactions)
-            const hasMinimalSOLMovement = this._hasMinimalSOLMovement(transactionData);
-
-            return hasOnlySystemPrograms || isTokenAccountCreation || 
-                   (isSimpleTransfer && hasMinimalSOLMovement);
-
-        } catch (error) {
-            console.log(`[NOISE-FILTER] Error checking noise: ${error.message}`);
-            return false; // If we can't determine, let it through
-        }
+        // PURE COPY BOT: Copy EVERY transaction, no matter what!
+        console.log(`[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!`);
+        return false; // Never filter anything out
     }
 
     /**
@@ -1106,9 +1516,9 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                 } catch (error) {
                     return false;
                 }
-                return programIdStr === 'ComputeBudget111111111111111111111111111111' ||
-                       programIdStr === '11111111111111111111111111111111' ||
-                       programIdStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL';
+                        return programIdStr === config.COMPUTE_BUDGET_PROGRAM_ID.toBase58() ||
+               programIdStr === config.SYSTEM_PROGRAM_ID.toBase58() ||
+                       programIdStr === config.ASSOCIATED_TOKEN_PROGRAM_ID.toBase58();
             });
 
             if (hasOnlySystemPrograms) {
@@ -1222,6 +1632,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             return 'N/A';
         }
     }
+
 }
 
 // CommonJS export

@@ -6,7 +6,7 @@
 
 const WebSocket = require('ws');
 const { shortenAddress } = require('./utils.js');
-const { WS_URL } = require('./patches/config.js'); // Import the WebSocket URL from config
+const { WS_URL } = require('./config.js'); // Import the WebSocket URL from config
 
 class WebSocketManager {
     constructor() {

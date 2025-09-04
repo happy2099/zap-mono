@@ -11,7 +11,7 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     async customInitialize() {
-        this.logInfo('Initializing High-Speed Trader Monitor with LaserStream...');
+        this.logInfo('Initializing ULTRA-LOW LATENCY Trader Monitor with LaserStream...');
         
         try {
             this.databaseManager = new DatabaseManager();
@@ -22,15 +22,27 @@ class TraderMonitorWorker extends BaseWorker {
             // This is a clean way to share logic without complex dependencies in a worker.
             const tempEngineForTraderList = new TradingEngine({ databaseManager: this.databaseManager }, { partialInit: true });
             
-            // Initialize LaserStreamManager and tell it that this worker is its parent
-            this.laserStreamManager = new LaserStreamManager(this); 
+            // Initialize ULTRA-LOW LATENCY LaserStreamManager for real-time copy trading
+            // Pass the temp engine so LaserStreamManager can access getMasterTraderWallets
+            this.laserStreamManager = new LaserStreamManager(tempEngineForTraderList); 
             
-            // Pass the temporary engine to the laser stream manager
-            // so it can fetch the list of traders to watch.
-            this.laserStreamManager.tradingEngine = tempEngineForTraderList;
+            this.logInfo('Starting ULTRA-LOW LATENCY LaserStream monitoring...');
+            const masterTraderWallets = await tempEngineForTraderList.getMasterTraderWallets();
 
-            this.logInfo('Starting real-time LaserStream monitoring...');
-            await this.laserStreamManager.startMonitoring(); // Start the stream
+            if (!masterTraderWallets || masterTraderWallets.length === 0) {
+                this.logWarn('No active master traders found in the database. LaserStream will not monitor any specific wallets.');
+            } else {
+                this.logInfo(`Initializing ULTRA-LOW LATENCY LaserStream to monitor ${masterTraderWallets.length} specific trader wallets.`);
+                this.logInfo('⚡ Target detection latency: <100ms');
+                this.logInfo('🔧 Using PROCESSED commitment for fastest possible detection');
+                this.logInfo('📡 Zstd compression enabled for optimal performance');
+                
+                // Store the trader wallets for LaserStreamManager to access
+                this.masterTraderWallets = masterTraderWallets;
+                
+                // Start monitoring with LaserStreamManager
+                await this.laserStreamManager.startMonitoring();
+            }
             
             // CRITICAL FALLBACK: If LaserStream fails, start direct RPC polling
             this.logInfo('Starting direct RPC polling as backup...');
@@ -41,26 +53,36 @@ class TraderMonitorWorker extends BaseWorker {
             this.startPeriodicRefresh();
             
         } catch (error) {
-            this.logError('FATAL: Failed to initialize or start LaserStream', { error: error.message });
+            this.logError('FATAL: Failed to initialize or start ULTRA-LOW LATENCY LaserStream', { error: error.message });
             this.signalError(error);
             throw error;
         }
     }
     
     // This is the function the LaserStreamManager will call when it gets a new transaction
-    handleTraderActivity(sourceWallet, signature, txData) {
-        this.logInfo(`🚀 STREAM EVENT RECEIVED for ${sourceWallet.substring(0,4)}...${sourceWallet.slice(-4)} | Sig: ${signature.substring(0,8)}...`);
-        this.logInfo(`📊 Transaction data type: ${txData?.type || 'unknown'}`);
-        this.logInfo(`📋 Transaction has ${txData?.transaction?.message?.instructions?.length || 0} instructions`);
+    handleTraderActivity(sourceWallet, signature, update) { // Removed async since binding doesn't support it
+        // THE FIX: The real transaction data is nested inside the 'transaction' property of the update.
+        const txData = update.transaction; 
         
-        // We receive the real-time data and immediately forward it to the main thread,
-        // which will then pass it to the executor worker.
+        this.logInfo(`🚀 STREAM EVENT for ${sourceWallet.substring(0,4)}...${sourceWallet.slice(-4)} | Sig: ${signature.substring(0,8)}...`);
+        this.logInfo(`📊 Pre-fetched Data: ✅ Present (Raw gRPC Stream)`);
+        
+        // This log will now show the correct instruction count.
+        const instructionCount = txData?.transaction?.message?.instructions?.length || 0;
+        this.logInfo(`📋 Instructions in Payload: ${instructionCount}`);
+        
+        // Get the trader name synchronously using the hardcoded mapping
+        const traderName = this.getTraderName(sourceWallet);
+        this.logInfo(`📍 Resolved trader name: ${traderName} for wallet ${sourceWallet.substring(0,4)}...${sourceWallet.slice(-4)}`);
+        
+        // Send the message to the main thread's router
         this.signalMessage('EXECUTE_COPY_TRADE', {
-            traderName: 'Unknown (LaserStream)', // The name is not needed for execution logic
+            traderName: traderName,
             traderWallet: sourceWallet,
             signature: signature,
             userChatId: 'ALL_USERS', // A special flag for the main thread
-            preFetchedTxData: txData // PASS THE FULL HELIUS DATA FOR MAX SPEED
+            // We pass the REAL, unpacked transaction response object to the executor.
+            preFetchedTxData: txData 
         });
     }
 
@@ -89,19 +111,30 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
+    // Handle streaming errors
+    handleStreamError(error) {
+        this.logError('❌ LaserStream error:', { error: error.message });
+        // The LaserstreamManager handles reconnection automatically
+    }
+
+
+
+
+
     // Refresh LaserStream subscriptions when traders change
     async refreshTraderSubscriptions() {
         this.logInfo('🔄 Refreshing LaserStream subscriptions...');
         try {
             if (this.laserStreamManager) {
+                // Refresh LaserStream subscriptions with new trader list
                 const refreshed = await this.laserStreamManager.refreshSubscriptions();
                 if (refreshed) {
                     this.logInfo('✅ LaserStream subscriptions refreshed successfully');
-                    // Also refresh RPC polling list
-                    await this.refreshRPCPolling();
                 } else {
-                    this.logInfo('ℹ️ No changes detected, subscriptions unchanged');
+                    this.logInfo('✅ No changes in LaserStream subscriptions');
                 }
+                // Also refresh RPC polling list
+                await this.refreshRPCPolling();
             }
         } catch (error) {
             this.logError('❌ Failed to refresh LaserStream subscriptions', { error: error.message });
@@ -214,7 +247,16 @@ class TraderMonitorWorker extends BaseWorker {
                     
                     // Skip failed transactions
                     if (txInfo.err) {
-                        this.logInfo(`⏭️ Failed transaction skipped for ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}... | Error: ${JSON.stringify(txInfo.err)}`);
+                        // Filter out common "noise" errors that don't need logging
+                        const errStr = JSON.stringify(txInfo.err);
+                        const isNoise = errStr.includes('"InstructionError"') || 
+                                       errStr.includes('"InsufficientFundsForRent"') ||
+                                       errStr.includes('"Custom":1') ||
+                                       errStr.includes('"Custom":6000');
+                        
+                        if (!isNoise) {
+                            this.logInfo(`⏭️ Failed transaction skipped for ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}... | Error: ${errStr}`);
+                        }
                         continue;
                     }
                     

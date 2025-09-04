@@ -55,13 +55,33 @@ class TelegramUI {
             console.warn("⚠️ TelegramUI: No valid bot token found, running in headless mode.");
             return { success: true, mode: 'headless' };
         }
-        this.bot = new TelegramBot(BOT_TOKEN, { polling: { interval: 300, autoStart: true, params: { timeout: 10 } } });
+        this.bot = new TelegramBot(BOT_TOKEN, { polling: { interval: 300, autoStart: false, params: { timeout: 10 } } });
         this.logger.info("TelegramBot instance created:", this.bot ? "Success" : "Failed");
         this.bot.getMe().then(me => this.logger.info(`Telegram Bot authorized for: @${me.username}`)).catch(err => {
             console.error("Telegram Bot authorization failed:", err);
             this.bot = null;
         });
         this.setupEventListeners();
+        
+        // Don't start polling automatically - let the worker control it
+        console.log("⚠️ TelegramUI: Bot created but polling NOT started automatically");
+    }
+
+    // Add method to manually start polling
+    startPolling() {
+        if (!this.bot) {
+            console.error("❌ Cannot start polling: Bot not initialized");
+            return false;
+        }
+        
+        try {
+            this.bot.startPolling({ interval: 300, params: { timeout: 10 } });
+            console.log("✅ TelegramUI: Polling started manually");
+            return true;
+        } catch (error) {
+            console.error("❌ Failed to start polling:", error.message);
+            return false;
+        }
     }
 
     bindActionHandlers(handlers) {

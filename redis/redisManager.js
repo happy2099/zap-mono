@@ -6,6 +6,7 @@
 
 const redis = require('redis');
 const { promisify } = require('util');
+const config = require('../config.js');
 
 class RedisManager {
     constructor() {
@@ -278,7 +279,7 @@ async getPreSignedTx(tokenMint) {
         
         // Pre-load common pool states
         const commonTokens = [
-            'So11111111111111111111111111111111111111112', // WSOL
+            config.NATIVE_SOL_MINT, // WSOL
             'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', // USDC
             // Add more common tokens as needed
         ];

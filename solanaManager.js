@@ -864,7 +864,7 @@ class SolanaManager {
    async getBalance(publicKeyString) {
        try {
            const balance = await this.connection.getBalance(new PublicKey(publicKeyString));
-           return balance / LAMPORTS_PER_SOL;
+           return balance / config.LAMPORTS_PER_SOL_CONST;
        } catch (error) {
            console.error(`Failed to get balance for ${publicKeyString}:`, error);
            return 0;
@@ -881,7 +881,7 @@ class SolanaManager {
            if (!fromKeypair) throw new Error(`Wallet '${fromWalletLabel}' not found.`);
 
            const toPublicKey = new PublicKey(toAddress);
-           const amountLamports = amountSol * LAMPORTS_PER_SOL;
+           const amountLamports = amountSol * config.LAMPORTS_PER_SOL_CONST;
 
            const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
 

@@ -1,4 +1,3 @@
-
 // ==========================================
 // ====== ZapBot TradingEngine (HARDENED) ======
 // ==========================================
@@ -15,6 +14,7 @@ const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 const traceLogger = require('./traceLogger.js');
 const { SingaporeSenderManager } = require('./singaporeSenderManager.js');
+const TransactionLogger = require('./transactionLogger.js');
 // const UnifiedPrebuilder = require('./unifiedPrebuilder.js');
 const sellInstructionCache = new Map();
 
@@ -48,11 +48,13 @@ class TradingEngine {
 
         this.isProcessing = new Set();
         this.traderCutoffSignatures = new Map();
+        this.traceLogger = traceLogger;
+        this.transactionLogger = new TransactionLogger();
         
         // Initialize Singapore Sender Manager for ultra-fast execution
         this.singaporeSenderManager = new SingaporeSenderManager();
         
-        console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration.");
+        console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration (ENABLED).");
     }
 
 handleLaserStreamData(sourceWallet, signature, txData) {
@@ -86,6 +88,27 @@ async getMasterTraderWallets() {
     } catch (error) {
         console.error(`[HELPER] Error compiling master trader list:`, error);
         return [];
+    }
+}
+
+/**
+ * Get trader name from wallet address
+ */
+async getTraderName(walletAddress) {
+    try {
+        const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
+        
+        for (const [userId, traders] of Object.entries(tradersByUser)) {
+            for (const trader of traders) {
+                if (trader.wallet_address === walletAddress) {
+                    return trader.name;
+                }
+            }
+        }
+        return 'Unknown Trader';
+    } catch (error) {
+        console.error(`[HELPER] Error getting trader name for ${walletAddress}:`, error);
+        return 'Unknown Trader';
     }
 }
 
@@ -141,10 +164,13 @@ async _getNewTransactions(walletAddress, cutoffSignature) {
 
 async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, preFetchedTxData = null) {
     console.log(`[PROCESS_SIG] 🎯 Processing signature for copy trade:`);
-    console.log(`   📍 Source wallet: ${shortenAddress(sourceWalletAddress)}`);
+    
+    // Get trader name for better logging
+    const traderName = await this.getTraderName(sourceWalletAddress);
+    console.log(`   📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
     console.log(`   🔑 Signature: ${shortenAddress(signature)}`);
     console.log(`   📊 Has pre-fetched data: ${!!preFetchedTxData}`);
-    console.log(`   📋 Pre-fetched data type: ${preFetchedTxData?.type || 'none'}`);
+    console.log(`   📋 Pre-fetched data: ${preFetchedTxData ? '✅ Present' : '❌ None'}`);
     
     // This is the universal entry point now for both streams and polling.
     // We delegate immediately to the master execution function.
@@ -171,7 +197,9 @@ async handleWalletStreamEvent(txData) {
     // Destructure IMMEDIATELY for error safety
     const { signature, traderAddress } = txData;
     try {
-        console.log(`[EXPRESS_LANE] Event from ${shortenAddress(traderAddress)} | Sig: ${shortenAddress(signature)}`);
+        // Get trader name for better logging
+        const traderName = await this.getTraderName(traderAddress);
+        console.log(`[EXPRESS_LANE] Event from ${traderName} (${shortenAddress(traderAddress)}) | Sig: ${shortenAddress(signature)}`);
 
         // STEP 1: Mint Extraction
         const targetMint = this._extractMintFromStreamData(txData);
@@ -370,10 +398,27 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
 
     try {
         console.log(`[EXECUTE_MASTER] 🔍 Starting analysis for transaction ${shortenAddress(signature)}...`);
-        console.log(`[EXECUTE_MASTER] 📍 Source wallet: ${shortenAddress(sourceWalletAddress)}`);
+        
+        // Get trader name for better logging
+        const traderName = await this.getTraderName(sourceWalletAddress);
+        console.log(`[EXECUTE_MASTER] 📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
         console.log(`[EXECUTE_MASTER] 📊 Pre-fetched data available: ${!!preFetchedTxData}`);
         
         const analysisResult = await this.transactionAnalyzer.analyzeTransactionForCopy(signature, preFetchedTxData, sourceWalletAddress);
+
+        // Defensive Check: Ensure the details object and platform-specific data exist
+        if (analysisResult.isCopyable && !analysisResult.details?.platformSpecificData) {
+            // If the core data is missing, add an empty object to prevent crashes downstream.
+            analysisResult.details.platformSpecificData = {};
+        }
+
+        // =========================================================
+        // ======= REMOVED: HIGH-CONFIDENCE EXECUTION GATE ========
+        // =========================================================
+        // ALL trades are now copyable - we'll use Jupiter fallback for unknown DEX
+        // =========================================================
+        // =================== END EXECUTION GATE ==================
+        // =========================================================
         
         // Clean summary instead of massive JSON dump
         if (analysisResult.isCopyable && analysisResult.summary) {
@@ -404,6 +449,8 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
             'Meteora DLMM': { builder: platformBuilders.buildMeteoraDLMMInstruction, units: 1000000 },
             'Meteora DBC': { builder: platformBuilders.buildMeteoraDBCInstruction, units: 1000000 },
             'Meteora CP-AMM': { builder: platformBuilders.buildMeteoraCpAmmInstruction, units: 1000000 },
+            'Photon': { builder: null, units: 1400000 }, // Use Jupiter API fallback
+            'Unknown DEX 1': { builder: platformBuilders.buildJupiterInstruction, units: 1400000 }, // Use Jupiter for unknown platform
         };
         const executorConfig = platformExecutorMap[analysisResult.details.dexPlatform];
 
@@ -422,7 +469,8 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         }
         
         if (copyJobs.length === 0) {
-            console.log(`[EXECUTE_MASTER] ⚠️ No active traders found for wallet ${shortenAddress(sourceWalletAddress)}`);
+            const traderName = await this.getTraderName(sourceWalletAddress);
+            console.log(`[EXECUTE_MASTER] ⚠️ No active traders found for ${traderName} (${shortenAddress(sourceWalletAddress)})`);
             return;
         }
         
@@ -500,7 +548,6 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
             'Meteora DLMM': platformBuilders.buildMeteoraDLMMInstruction,
             'Meteora DBC': platformBuilders.buildMeteoraDBCInstruction,
             'Meteora CP-AMM': platformBuilders.buildMeteoraCpAmmInstruction,
-            'Jupiter Aggregator': platformBuilders.buildJupiterSwapInstruction,
         };
 
         const builder = builderMap[sellTradeDetails.dexPlatform];
@@ -636,7 +683,13 @@ const finalInstructions = [
         await traceLogger.recordOutcome(masterTxSignature, 'SUCCESS', signature);
         console.log(`[EXECUTION] ✅ Success for user ${userChatId} on ${tradeDetails.dexPlatform}. Sig: ${signature}`);
 
-        const finalizedDetails = { ...tradeDetails, signature, solSpent: solAmountForNotification, solFee: solFee };
+        const finalizedDetails = { 
+            ...tradeDetails, 
+            signature, 
+            solSpent: solAmountForNotification, 
+            solFee: solFee,
+            tradeType: tradeDetails.tradeType || 'copy' // Ensure tradeType is present
+        };
         await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, finalizedDetails);
         if (isBuy) {
             await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, finalizedDetails.outputAmountRaw || "0", solAmountForNotification);
@@ -901,15 +954,18 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
             userWallet: keypair.publicKey.toBase58(),
             slippageBps: 2500,
         });
-        await traceLogger.appendTrace(masterTxSignature, 'step5_jupiterBuild', { status: 'SUCCESS', transactionCount: serializedTxs.length });
+        
+        // V6 API FIX: Handle both single object and array responses from Jupiter
+        const txArray = Array.isArray(serializedTxs) ? serializedTxs : [serializedTxs];
+        await traceLogger.appendTrace(masterTxSignature, 'step5_jupiterBuild', { status: 'SUCCESS', transactionCount: txArray.length });
 
         // **SAFETY CHECK for Jupiter API**
-        if (!serializedTxs || serializedTxs.length === 0) {
+        if (!txArray || txArray.length === 0) {
             throw new Error("Jupiter API failed to return a valid transaction route.");
         }
 
         let finalSignature = null;
-        for (const txString of serializedTxs) {
+        for (const txString of txArray) {
             // Step 1: Decode the base64 string into a Buffer
             const txBuffer = Buffer.from(txString, 'base64');
 
@@ -938,7 +994,11 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
         } else {
             await this.databaseManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
         }
-        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { ...tradeDetails, signature: finalSignature });
+        await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { 
+            ...tradeDetails, 
+            signature: finalSignature,
+            tradeType: tradeDetails.tradeType || 'copy' // Ensure tradeType is present
+        });
 
 
    } catch (e) {
@@ -1544,11 +1604,167 @@ async checkPumpFunMigration(tokenMint) {
     // ==========================================================
 
     /**
+     * Validate if a trade is actually copyable
+     * Filters out fee-only transactions, same-token swaps, and invalid trades
+     */
+    _validateTradeForCopy(tradeDetails) {
+        console.log(`[TRADE-VALIDATION] 🔍 Validating trade for copy...`);
+        
+        try {
+            if (!tradeDetails) throw new Error("tradeDetails object is missing.");
+
+            const { tradeType, inputMint, outputMint, inputAmountRaw, outputAmountRaw, outputAmountLamports } = tradeDetails;
+
+            // 1. Must have valid mints, and they must be different.
+            if (!inputMint || !outputMint || inputMint === outputMint) {
+                throw new Error('Invalid or identical mint addresses.');
+            }
+
+            const isBuy = tradeType === 'buy';
+
+            if (isBuy) {
+                // For a BUY, we must be spending SOL and receiving tokens.
+                const solIn = new BN(tradeDetails.inputAmountLamports || '0');
+                const tokensOut = new BN(outputAmountRaw || '0');
+                if (solIn.isZero() || tokensOut.isZero()) {
+                    throw new Error(`Invalid BUY: Must have non-zero SOL input and Token output.`);
+                }
+            } else { // It's a SELL
+                // For a SELL, we must be sending tokens and receiving SOL.
+                const tokensIn = new BN(inputAmountRaw || '0');
+                const solOut = new BN(outputAmountLamports || '0');
+                if (tokensIn.isZero() || solOut.isZero()) {
+                    throw new Error(`Invalid SELL: Must have non-zero Token input and SOL output.`);
+                }
+            }
+
+            console.log(`[TRADE-VALIDATION] ✅ Trade validation passed! Type: ${tradeType}`);
+            return true;
+
+        } catch (error) {
+            console.error(`[TRADE-VALIDATION] ❌ FAILED: ${error.message}`);
+            // We re-throw the error so the calling function can catch it and log it.
+            throw error; 
+        }
+    }
+
+    /**
      * Execute copy trade using Singapore Sender endpoint for ultra-fast execution
      */
+    // Build universal instructions from original transaction data
+    async _buildUniversalInstructions(tradeDetails, userAmountBN, userPublicKey) {
+        try {
+            console.log(`[UNIVERSAL-BUILDER] 🔧 Building universal instructions for Unknown DEX`);
+            
+            // We need the original transaction data to extract instructions
+            // This should be passed from the analyzer
+            if (!tradeDetails.originalTransaction) {
+                throw new Error("Original transaction data not available for universal building");
+            }
+
+            const originalTx = tradeDetails.originalTransaction;
+            const instructions = originalTx.message?.instructions || [];
+            const accountKeys = originalTx.message?.accountKeys || [];
+
+            if (instructions.length === 0) {
+                throw new Error("No instructions found in original transaction");
+            }
+
+            // Find the main swap instruction (filter out system/token programs)
+            const swapInstruction = instructions.find(ix => {
+                const programId = accountKeys[ix.programIdIndex];
+                if (!programId) return false;
+                
+                const programIdStr = programId.toString();
+                // Exclude common system programs
+                return !['11111111111111111111111111111111', 
+                        'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
+                        'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+                        'ComputeBudget111111111111111111111111111111'].includes(programIdStr);
+            });
+
+            if (!swapInstruction) {
+                throw new Error("No valid swap instruction found in original transaction");
+            }
+
+            const programId = accountKeys[swapInstruction.programIdIndex];
+            console.log(`[UNIVERSAL-BUILDER] 🎯 Detected platform: ${shortenAddress(programId.toString())}`);
+
+            // Create user instruction with same structure but user's public key
+            const userInstruction = {
+                programId: programId,
+                accounts: swapInstruction.accounts.map((account, index) => {
+                    const accountKey = accountKeys[account];
+                    
+                    // Replace the main signer account (usually index 0) with user's public key
+                    if (index === 0) {
+                        return {
+                            pubkey: userPublicKey,
+                            isSigner: true,
+                            isWritable: true
+                        };
+                    }
+                    
+                    // Keep other accounts as they are
+                    return {
+                        pubkey: accountKey,
+                        isSigner: false, // User is the only signer
+                        isWritable: account.isWritable || false
+                    };
+                }),
+                data: swapInstruction.data // Use the same instruction data
+            };
+
+            console.log(`[UNIVERSAL-BUILDER] ✅ Built universal instruction for platform ${shortenAddress(programId.toString())}`);
+            return [userInstruction];
+
+        } catch (error) {
+            console.error(`[UNIVERSAL-BUILDER] ❌ Failed to build universal instruction: ${error.message}`);
+            throw error;
+        }
+    }
+
+    // Calculate user's copy trade amount based on trade type and database data
+    async _calculateUserCopyTradeAmount(userChatId, tradeDetails) {
+        try {
+            const BN = require('bn.js');
+            
+            if (tradeDetails.tradeType === 'buy') {
+                // For BUY trades: Use user's SOL amount per trade setting
+                const solAmounts = await this.databaseManager.loadSolAmounts();
+                const userSolAmount = solAmounts[userChatId] || 0.01; // Default 0.01 SOL
+                const solAmountLamports = Math.floor(userSolAmount * 1e9); // Convert to lamports
+                
+                console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} SOL amount per trade: ${userSolAmount} SOL (${solAmountLamports} lamports)`);
+                return new BN(solAmountLamports);
+                
+            } else if (tradeDetails.tradeType === 'sell') {
+                // For SELL trades: Use user's actual token balance
+                const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                const userTokenBalance = userPositions.get(tradeDetails.inputMint);
+                
+                if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
+                    throw new Error(`User ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens to sell`);
+                }
+                
+                console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} token balance: ${userTokenBalance.amountRaw} raw units`);
+                return new BN(userTokenBalance.amountRaw.toString());
+                
+            } else {
+                throw new Error(`Unknown trade type: ${tradeDetails.tradeType}`);
+            }
+            
+        } catch (error) {
+            console.error(`[SINGAPORE-SENDER] ❌ Error calculating user copy trade amount:`, error);
+            // Fallback to default amount
+            return new BN('1000000000'); // 1 SOL default
+        }
+    }
+
     async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, executorConfig) {
         try {
             console.log(`[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
+            console.log(`[SINGAPORE-SENDER] 🔑 Master signature: ${masterSignature}`);
             console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
             console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
 
@@ -1564,6 +1780,7 @@ async checkPumpFunMigration(tokenMint) {
             // Build trade instructions using platform builders
             const builderMap = {
                 'Pump.fun': platformBuilders.buildPumpFunInstruction,
+                'Pump.fun BC': platformBuilders.buildPumpFunInstruction, 
                 'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
                 'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
                 'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
@@ -1572,27 +1789,168 @@ async checkPumpFunMigration(tokenMint) {
                 'Meteora DLMM': platformBuilders.buildMeteoraDLMMInstruction,
                 'Meteora DBC': platformBuilders.buildMeteoraDBCInstruction,
                 'Meteora CP-AMM': platformBuilders.buildMeteoraCpAmmInstruction,
-                'Jupiter Aggregator': platformBuilders.buildJupiterSwapInstruction,
+                'Photon': platformBuilders.buildJupiterInstruction, // Use Jupiter API for Photon
+                'Unknown DEX': platformBuilders.buildJupiterInstruction, // Jupiter fallback for unknown platforms
+                'Custom DEX Buy': platformBuilders.buildCustomDexBuyInstruction, // Use specific Custom DEX Buy builder
+                'Custom DEX (Pattern Detected)': platformBuilders.buildJupiterInstruction, // Use Jupiter for pattern-detected DEX
             };
 
+            // Validate trade before processing
+            try {
+                this._validateTradeForCopy(tradeDetails);
+            } catch (validationError) {
+                console.log(`[SINGAPORE-SENDER] ❌ Trade validation failed: ${validationError.message}`);
+                console.log(`[SINGAPORE-SENDER] 🚫 Skipping invalid trade - not a real swap`);
+                throw new Error(`Trade validation failed: ${validationError.message}`);
+            }
+
+            // Calculate user's copy trade amount based on trade type FIRST
+            const userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
+            
             const builder = builderMap[tradeDetails.dexPlatform];
-            if (!builder) {
+            
+            // If no specific builder, use universal builder for known platforms
+            if (!builder && tradeDetails.dexPlatform !== 'Unknown DEX') {
+                console.log(`[SINGAPORE-SENDER] 🔧 No specific builder for ${tradeDetails.dexPlatform} - using universal builder`);
+                
+                try {
+                    const universalInstructions = await this._buildUniversalInstructions(tradeDetails, userAmountBN, keypair.publicKey);
+                    if (universalInstructions && universalInstructions.length > 0) {
+                        console.log(`[SINGAPORE-SENDER] ✅ Universal instructions built successfully: ${universalInstructions.length} instructions`);
+                        
+                        // Execute the universal instructions directly
+                        const result = await this.singaporeSenderManager.executeCopyTrade(
+                            universalInstructions,
+                            keypair,
+                            {
+                                platform: tradeDetails.dexPlatform,
+                                tradeType: tradeDetails.tradeType,
+                                userChatId,
+                                traderName,
+                                masterSignature,
+                                userAmountBN: userAmountBN.toString()
+                            }
+                        );
+                        
+                        console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        return; // Exit early, trade completed
+                    }
+                } catch (error) {
+                    console.error(`[SINGAPORE-SENDER] ❌ Universal instruction building failed:`, error);
+                    console.log(`[SINGAPORE-SENDER] 🔄 Falling back to Jupiter...`);
+                }
+            }
+
+            if (!builder && tradeDetails.dexPlatform === 'Unknown DEX') {
                 throw new Error(`No builder available for platform: ${tradeDetails.dexPlatform}`);
             }
 
+            // Log when using Jupiter fallback
+            if (tradeDetails.dexPlatform === 'Unknown DEX') {
+                console.log(`[SINGAPORE-SENDER] 🔄 Using Jupiter fallback for Unknown DEX platform`);
+                console.log(`[SINGAPORE-SENDER] 📍 This ensures ALL trades are copyable regardless of platform`);
+            }
+
+            // For SELL trades, check if user has position before proceeding
+            if (tradeDetails.tradeType === 'sell') {
+                try {
+                    const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                    const userTokenBalance = userPositions.get(tradeDetails.inputMint);
+                    
+                    if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
+                        console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
+                        return; // Skip this trade, don't build transaction
+                    }
+                    console.log(`[SINGAPORE-SENDER] ✅ SELL trade validated - user has ${userTokenBalance.amountRaw} raw units of ${shortenAddress(tradeDetails.inputMint)}`);
+                } catch (error) {
+                    console.error(`[SINGAPORE-SENDER] ❌ Error checking user position for SELL:`, error);
+                    return; // Skip on error
+                }
+            }
+
+                        // userAmountBN is already calculated above
+
+            // NEW: Universal platform detection and instruction building
+            if (tradeDetails.dexPlatform === 'Unknown DEX') {
+                console.log(`[SINGAPORE-SENDER] 🔍 Unknown DEX detected - attempting universal instruction building`);
+                
+                // Try to build universal instruction from original transaction data
+                try {
+                    const universalInstructions = await this._buildUniversalInstructions(tradeDetails, userAmountBN, keypair.publicKey);
+                    if (universalInstructions && universalInstructions.length > 0) {
+                        console.log(`[SINGAPORE-SENDER] ✅ Universal instructions built successfully: ${universalInstructions.length} instructions`);
+                        
+                        // Execute the universal instructions directly
+                        const result = await this.singaporeSenderManager.executeCopyTrade(
+                            universalInstructions,
+                            keypair,
+                            {
+                                platform: 'Universal DEX',
+                                tradeType: tradeDetails.tradeType,
+                                userChatId,
+                                traderName,
+                                masterSignature,
+                                userAmountBN: userAmountBN.toString()
+                            }
+                        );
+                        
+                        console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        return; // Exit early, trade completed
+                    }
+                } catch (error) {
+                    console.error(`[SINGAPORE-SENDER] ❌ Universal instruction building failed:`, error);
+                    console.log(`[SINGAPORE-SENDER] 🔄 Falling back to Jupiter...`);
+                }
+            }
+            
             // Build instructions with enhanced options
             const builderOptions = {
                 connection: this.solanaManager.connection,
                 keypair,
                 userPublicKey: keypair.publicKey,
-                swapDetails: tradeDetails,
-                amountBN: new BN(tradeDetails.inputAmountRaw || '1000000000'), // Default 1 SOL
-                slippageBps: 500, // 5% slippage for copy trades
+                swapDetails: {
+                    ...tradeDetails,
+                    inputAmountRaw: userAmountBN.toString(), // Use user's calculated amount
+                    outputAmountRaw: '0' // Will be calculated by SDK
+                },
+                amountBN: userAmountBN,
+                slippageBps: tradeDetails.slippageBps || 500, // Use master trader's slippage
                 cacheManager: this.redisManager,
+                apiManager: this.apiManager, // Add apiManager for Pump.fun API calls
+                sdk: new (require('@pump-fun/pump-sdk').PumpSdk)(this.solanaManager.connection), // Add Pump.fun SDK instance
             };
 
+            // Add compute budget instructions to ensure proper execution
+            const computeBudgetInstructions = [
+                ComputeBudgetProgram.setComputeUnitLimit({
+                    units: 200_000 // Set reasonable compute limit for copy trades
+                }),
+                ComputeBudgetProgram.setComputeUnitPrice({
+                    microLamports: 50_000 // Set reasonable priority fee
+                })
+            ];
+
             console.log(`[SINGAPORE-SENDER] 🔧 Building instructions for ${tradeDetails.dexPlatform}...`);
-            const instructions = await builder(builderOptions);
+            console.log(`[SINGAPORE-SENDER] 🔑 Transaction signature: ${masterSignature}`);
+            console.log(`[SINGAPORE-SENDER] 💰 Master trader amount: ${tradeDetails.inputAmountRaw} raw units`);
+            console.log(`[SINGAPORE-SENDER] 💰 User copy trade amount: ${userAmountBN.toString()} raw units`);
+            
+            // Log builder options to JSON file for detailed analysis
+            this.transactionLogger.logCopyTradeExecution(masterSignature, {
+                platform: tradeDetails.dexPlatform,
+                builderOptions: builderOptions,
+                userAmount: userAmountBN.toString(),
+                masterAmount: tradeDetails.inputAmountRaw
+            }, { status: 'building_instructions' });
+            
+            // Build platform-specific instructions
+            const platformInstructions = await builder(builderOptions);
+            
+            // Combine compute budget instructions with platform instructions
+            const instructions = [...computeBudgetInstructions, ...platformInstructions];
+            
+            console.log(`[SINGAPORE-SENDER] 🔧 Added ${computeBudgetInstructions.length} compute budget instructions`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Total instructions: ${instructions.length}`);
 
             if (!instructions || instructions.length === 0) {
                 throw new Error(`Failed to build instructions for ${tradeDetails.dexPlatform}`);
@@ -1600,51 +1958,110 @@ async checkPumpFunMigration(tokenMint) {
 
             console.log(`[SINGAPORE-SENDER] ✅ Built ${instructions.length} instructions`);
 
-            // Prepare trade details for Singapore Sender
+            // Prepare trade details for Singapore Sender with user's amounts
             const enhancedTradeDetails = {
                 ...tradeDetails,
                 tokenMint: tradeDetails.outputMint,
                 tradeSize: 'Standard',
                 userChatId,
                 traderName,
-                masterSignature
+                masterSignature,
+                // Use user's calculated amounts, not master trader's
+                inputAmountRaw: userAmountBN.toString(),
+                userAmountBN: userAmountBN.toString()
             };
 
-            // Execute via Singapore Sender
-            const result = await this.singaporeSenderManager.executeCopyTrade(
-                instructions,
-                keypair,
-                enhancedTradeDetails
-            );
-
-            console.log(`[SINGAPORE-SENDER] 🎉 Copy trade executed successfully!`);
-            console.log(`[SINGAPORE-SENDER] 📊 Result:`, {
-                signature: shortenAddress(result.signature),
-                tipAmount: result.tipAmount,
-                computeUnits: result.computeUnits,
-                endpoint: result.endpoint
-            });
-
-            // Send notification
-            if (this.notificationManager) {
-                await this.notificationManager.notifySuccessfulCopy(
-                    userChatId,
-                    traderName,
-                    tradeDetails,
-                    result.signature,
-                    'singapore-sender'
+            // Execute via Singapore Sender (ULTRA-FAST EXECUTION)
+            console.log(`[SINGAPORE-SENDER] 🚀 Executing ULTRA-FAST copy trade...`);
+            console.log(`[SINGAPORE-SENDER] ⚡ Target execution time: <200ms`);
+            
+            try {
+                // Use the new ultra-fast execution method
+                const result = await this.singaporeSenderManager.executeCopyTrade(
+                    instructions,
+                    keypair,
+                    {
+                        // ULTRA-FAST execution options
+                        platform: tradeDetails.dexPlatform,
+                        tradeType: tradeDetails.tradeType,
+                        userChatId,
+                        traderName,
+                        masterSignature,
+                        // Performance optimizations
+                        priorityFee: 'dynamic', // Use dynamic priority fee
+                        computeUnits: 'dynamic', // Use dynamic compute units
+                        tipAmount: 'dynamic'    // Use dynamic Jito tip
+                    }
                 );
+
+                console.log(`[SINGAPORE-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
+                console.log(`[SINGAPORE-SENDER] 🔑 Copy signature: ${result.signature}`);
+                console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${result.executionTime}ms`);
+                console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${result.confirmationTime}ms`);
+                console.log(`[SINGAPORE-SENDER] 📊 Result:`, {
+                    signature: shortenAddress(result.signature),
+                    executionTime: result.executionTime,
+                    confirmationTime: result.confirmationTime,
+                    tipAmount: result.tipAmount,
+                    tipAccount: shortenAddress(result.tipAccount)
+                });
+
+                // Check if execution meets ultra-fast targets
+                if (result.executionTime < 200) {
+                    console.log(`[SINGAPORE-SENDER] ⚡ ULTRA-FAST TARGET ACHIEVED: ${result.executionTime}ms execution!`);
+                } else if (result.executionTime < 400) {
+                    console.log(`[SINGAPORE-SENDER] 🚀 FAST TARGET ACHIEVED: ${result.executionTime}ms execution`);
+                } else {
+                    console.log(`[SINGAPORE-SENDER] ⚠️ Execution time: ${result.executionTime}ms (above target)`);
+                }
+
+                // Send notification with proper tradeResult object
+                if (this.notificationManager) {
+                    const tradeResult = {
+                        signature: result.signature,
+                        tradeType: tradeDetails.tradeType,
+                        inputMint: tradeDetails.inputMint,
+                        outputMint: tradeDetails.outputMint,
+                        inputAmountRaw: tradeDetails.inputAmountRaw,
+                        outputAmountRaw: tradeDetails.outputAmountRaw,
+                        solSpent: tradeDetails.tradeType === 'buy' ? tradeDetails.outputAmountLamports / 1e9 : 0,
+                        solReceived: tradeDetails.tradeType === 'sell' ? tradeDetails.outputAmountLamports / 1e9 : 0,
+                        tokenDecimals: tradeDetails.tokenDecimals || 9,
+                        solFee: result.tipAmount / 1e9
+                    };
+
+                    await this.notificationManager.notifySuccessfulCopy(
+                        userChatId,
+                        traderName,
+                        'zap', // copyWalletLabel
+                        tradeResult
+                    );
+                }
+
+                // Log success
+                await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
+                    userChatId,
+                    success: true,
+                    signature: result.signature,
+                    tipAmount: result.tipAmount
+                });
+
+                return result;
+
+            } catch (executionError) {
+                console.error(`[SINGAPORE-SENDER] ❌ Real execution failed: ${executionError.message}`);
+                
+                // Send error notification
+                if (this.notificationManager) {
+                    await this.notificationManager.sendErrorNotification(
+                        userChatId,
+                        `Copy trade execution failed: ${executionError.message}`,
+                        'singapore-sender-execution'
+                    );
+                }
+
+                throw executionError;
             }
-
-            // Log success
-            await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
-                userChatId,
-                success: true,
-                signature: result.signature,
-                tipAmount: result.tipAmount
-            });
-
-            return result;
 
         } catch (error) {
             console.error(`[SINGAPORE-SENDER] ❌ Copy trade execution failed for user ${userChatId}:`, error);

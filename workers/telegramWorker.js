@@ -24,6 +24,21 @@ class TelegramWorker extends BaseWorker {
 
     async customInitialize() {
         try {
+            // Check if another instance is already running
+            if (global.telegramWorkerInstance) {
+                this.logWarn('⚠️ Another Telegram worker instance detected! This may cause conflicts.');
+                this.logWarn('⚠️ Previous instance:', global.telegramWorkerInstance);
+            }
+            
+            // Mark this as the active instance
+            global.telegramWorkerInstance = {
+                workerId: this.workerId,
+                timestamp: Date.now(),
+                pid: process.pid
+            };
+            
+            this.logInfo('✅ This worker marked as active Telegram instance');
+            
             // Initialize core managers - dynamic require to avoid caching
             const { DatabaseManager } = require('../database/databaseManager');
             this.databaseManager = new DatabaseManager();
@@ -51,7 +66,14 @@ class TelegramWorker extends BaseWorker {
                 throw new Error("TelegramUI failed to initialize TelegramBot instance");
             } else {
                 this.setupActionHandlers();
-                this.logInfo('Telegram UI initialized successfully');
+                
+                // Manually start polling to avoid conflicts
+                const pollingStarted = this.telegramUi.startPolling();
+                if (pollingStarted) {
+                    this.logInfo('Telegram UI initialized successfully with polling started');
+                } else {
+                    this.logWarn('Telegram UI initialized but polling failed to start');
+                }
             }
 
         } catch (error) {

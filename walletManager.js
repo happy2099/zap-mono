@@ -491,7 +491,7 @@ class WalletManager extends EventEmitter {
 
     try {
       const balanceLamports = await this.connection.getBalance(wallet.publicKey, 'confirmed');
-      const newBalanceSol = balanceLamports / LAMPORTS_PER_SOL;
+              const newBalanceSol = balanceLamports / config.LAMPORTS_PER_SOL_CONST;
       wallet.balance = newBalanceSol;
       wallet.lastBalanceUpdate = Date.now();
       return newBalanceSol;

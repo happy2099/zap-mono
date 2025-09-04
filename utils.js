@@ -95,7 +95,7 @@ function formatLamports(lamportsInput, precision = 6) {
         lamports = Number(lamportsInput);
     }
     if (isNaN(lamports)) return escapeMarkdownV2('N/A');
-    const solValue = lamports / LAMPORTS_PER_SOL;
+    const solValue = lamports / config.LAMPORTS_PER_SOL_CONST;
     return escapeMarkdownV2(solValue.toFixed(precision));
 }
 
