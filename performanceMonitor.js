@@ -36,7 +36,6 @@ class PerformanceMonitor {
         this.maxHistorySize = 1000;
         
         console.log('[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized');
-        console.log('[PERFORMANCE-MONITOR] ⚡ Target: <100ms detection + <200ms execution = <300ms total');
     }
 
     // Record LaserStream detection latency

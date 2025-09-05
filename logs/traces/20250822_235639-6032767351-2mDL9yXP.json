@@ -632,7 +632,7 @@
       "timestamp": "2025-08-22T18:26:39.903Z",
       "builderFunction": "buildMeteoraDBCInstruction",
       "inputParameters": {
-        "connection": "Connection(https://mainnet.helius-rpc.com/?api-key=1b3e4d64-cda8-4490-bd5f-1c3ada1b377a)",
+        "connection": "Connection(https://atlas-mainnet.helius-rpc.com/?api-key=1b3e4d64-cda8-4490-bd5f-1c3ada1b377a)",
         "keypair": "[CENSORED]",
         "userPublicKey": "HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS",
         "swapDetails": {

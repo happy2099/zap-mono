@@ -69,8 +69,8 @@ SHARED_BUFFER_SIZE=1048576
 SHARED_BUFFER_COUNT=10
 
 # Solana Configuration
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
-WS_URL=wss://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+RPC_URL=https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+WS_URL=wss://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
 SOLANA_TRACKER_API_KEY=YOUR_SOLANA_TRACKER_KEY
 
 # Telegram Configuration

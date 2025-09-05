@@ -44,20 +44,20 @@
 [websocket] Initializing worker...
 [DB] DatabaseManager initialized successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [telegram] Initializing worker...
 [DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
 [DB] Database tables created successfully 
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [DB] DatabaseManager initialized successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [WM Init] SolanaManager instance set.
 [ApiManager] Initialized with Helius-native logic.
 ✅ Worker websocket is ready
@@ -68,7 +68,7 @@ SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d82
 [2025-09-03T07:25:24.921Z] [analyzer] [INFO] Queue processing started { interval: 1000 }
 [2025-09-03T07:25:24.922Z] [analyzer] [INFO] Transaction analyzer worker initialized successfully {}
 [analyzer] Worker initialized successfully
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [WM Init] SolanaManager instance set.
 ✅ Worker telegram is ready
 [WM Init] Initializing WalletManager in DATABASE-ONLY mode...
@@ -110,9 +110,9 @@ SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d82
 [TradeNotificationManager] Initialized in Threaded Dispatch mode.
 [SINGAPORE-SENDER] 🚀 Manager initialized with Singapore regional endpoints
 [SINGAPORE-SENDER] 🌏 Endpoints: {
-  "rpc": "https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
-  "sender": "https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
-  "laserstream": "wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769"
+  "rpc": "https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
+  "sender": "https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
+  "laserstream": "wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769"
 }
 TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration.
 [2025-09-03T07:25:26.255Z] [executor] [INFO] Trade executor worker initialized successfully {}

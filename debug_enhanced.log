@@ -1,0 +1,230 @@
+
+> zapbot@1.5.2 start:threaded
+> node start.js --threading
+
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[PERFORMANCE-MONITOR] ⚡ Target: <100ms detection + <200ms execution = <300ms total
+[PERFORMANCE-MONITOR] 🔄 Periodic saving started (every 60s)
+🚀 Starting ZapBot with Helius integration...
+⚡ ULTRA-LOW LATENCY optimizations enabled:
+   - LaserStream: <100ms detection target
+   - Sender: <200ms execution target
+   - Overall: <300ms copy trade cycle target
+📊 Performance monitoring active
+📊 Initializing SQLite database...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+✅ Database initialized successfully
+🔴 Initializing Redis for flight data...
+✅ RedisManager initialized successfully
+🔥 Warming up Redis cache...
+✅ Cache warming completed
+✅ Redis initialized successfully
+🧵 Threaded mode: Skipping legacy DataManager initialization
+🔄 Checking for data migration...
+✅ Database already contains data, skipping migration.
+🤖 Starting main ZapBot application...
+🧵 Starting in THREADED mode...
+🧵 ThreadedZapBot initialized with worker configuration
+🚀 Starting ThreadedZapBot initialization...
+🔧 Initializing worker threads...
+🔧 Created worker: telegram
+🔧 Created worker: monitor
+🔧 Created worker: executor
+🔧 Created worker: data
+🔧 Created worker: websocket
+🔧 Created worker: analyzer
+✅ 6 workers initialized
+💓 Worker monitoring started (interval: 30000ms)
+⏳ Waiting for workers to be ready...
+[data] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+✅ Worker data is ready
+[DB] DatabaseManager initialized successfully 
+[2025-09-05T11:59:20.615Z] [data] [INFO] Database manager worker initialized successfully {}
+[data] Worker initialized successfully
+[executor] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[executor] Initialization failed: TypeError: Endpoint URL must start with `http:` or `https:`.
+    at assertEndpointUrl (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:4507:11)
+    at new Connection (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:6099:25)
+    at new SolanaManager (/home/sunny/zap-mono-grk1522/solanaManager.js:65:26)
+    at TradeExecutorWorker.customInitialize (/home/sunny/zap-mono-grk1522/workers/tradeExecutorWorker.js:56:34)
+    at async TradeExecutorWorker.initialize (/home/sunny/zap-mono-grk1522/workers/templates/baseWorker.js:24:13)
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+[2025-09-05T11:59:21.560Z] [executor] [ERROR] Failed to initialize trade executor worker { error: 'Endpoint URL must start with `http:` or `https:`.' }
+❌ Worker executor reported error: Endpoint URL must start with `http:` or `https:`.
+[analyzer] Initializing worker...
+[analyzer] Initialization failed: TypeError: Endpoint URL must start with `http:` or `https:`.
+    at assertEndpointUrl (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:4507:11)
+    at new Connection (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:6099:25)
+    at new SolanaManager (/home/sunny/zap-mono-grk1522/solanaManager.js:65:26)
+    at TransactionAnalyzerWorker.customInitialize (/home/sunny/zap-mono-grk1522/workers/transactionAnalyzerWorker.js:31:34)
+    at TransactionAnalyzerWorker.initialize (/home/sunny/zap-mono-grk1522/workers/templates/baseWorker.js:24:24)
+    at Object.<anonymous> (/home/sunny/zap-mono-grk1522/workers/transactionAnalyzerWorker.js:269:12)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object..js (node:internal/modules/cjs/loader:1839:10)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+❌ Worker analyzer reported error: Endpoint URL must start with `http:` or `https:`.
+RPCLoadBalancer initialized with 1 endpoints.
+[2025-09-05T11:59:21.592Z] [analyzer] [ERROR] Failed to initialize transaction analyzer worker { error: 'Endpoint URL must start with `http:` or `https:`.' }
+[websocket] Initializing worker...
+[websocket] Initialization failed: TypeError: Endpoint URL must start with `http:` or `https:`.
+    at assertEndpointUrl (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:4507:11)
+    at new Connection (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:6099:25)
+    at new SolanaManager (/home/sunny/zap-mono-grk1522/solanaManager.js:65:26)
+    at WebSocketWorker.customInitialize (/home/sunny/zap-mono-grk1522/workers/websocketWorker.js:26:34)
+    at WebSocketWorker.initialize (/home/sunny/zap-mono-grk1522/workers/templates/baseWorker.js:24:24)
+    at Object.<anonymous> (/home/sunny/zap-mono-grk1522/workers/websocketWorker.js:217:12)
+    at Module._compile (node:internal/modules/cjs/loader:1706:14)
+    at Object..js (node:internal/modules/cjs/loader:1839:10)
+    at Module.load (node:internal/modules/cjs/loader:1441:32)
+    at Function._load (node:internal/modules/cjs/loader:1263:12)
+❌ Worker websocket reported error: Endpoint URL must start with `http:` or `https:`.
+RPCLoadBalancer initialized with 1 endpoints.
+[2025-09-05T11:59:21.727Z] [websocket] [ERROR] Failed to initialize WebSocket worker { error: 'Endpoint URL must start with `http:` or `https:`.' }
+[telegram] Initializing worker...
+[2025-09-05T11:59:22.101Z] [telegram] [INFO] ✅ This worker marked as active Telegram instance {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[telegram] Initialization failed: TypeError: Endpoint URL must start with `http:` or `https:`.
+    at assertEndpointUrl (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:4507:11)
+    at new Connection (/home/sunny/zap-mono-grk1522/node_modules/@solana/web3.js/lib/index.cjs.js:6099:25)
+    at new SolanaManager (/home/sunny/zap-mono-grk1522/solanaManager.js:65:26)
+    at TelegramWorker.customInitialize (/home/sunny/zap-mono-grk1522/workers/telegramWorker.js:47:34)
+    at async TelegramWorker.initialize (/home/sunny/zap-mono-grk1522/workers/templates/baseWorker.js:24:13)
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+[2025-09-05T11:59:22.146Z] [telegram] [ERROR] Failed to initialize Telegram worker { error: 'Endpoint URL must start with `http:` or `https:`.' }
+❌ Worker telegram reported error: Endpoint URL must start with `http:` or `https:`.
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[PERFORMANCE-MONITOR] ⚡ Target: <100ms detection + <200ms execution = <300ms total
+[monitor] Initializing worker...
+[2025-09-05T11:59:22.936Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY Trader Monitor with LaserStream... {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+[LASERSTREAM-ENHANCED] 🚀 Manager initialized with Singapore regional endpoints.
+[LASERSTREAM-ENHANCED] 🌏 Singapore Endpoints: {
+  "laserstream": "wss://sgp-laserstream.helius-rpc.com",
+  "rpc": "https://sgp.helius-rpc.com",
+  "sender": "https://sgp-sender.helius-rpc.com/fast"
+}
+[2025-09-05T11:59:22.951Z] [monitor] [INFO] Starting ULTRA-LOW LATENCY LaserStream monitoring... {}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[2025-09-05T11:59:22.953Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY LaserStream to monitor 2 specific trader wallets. {}
+[2025-09-05T11:59:22.953Z] [monitor] [INFO] ⚡ Target detection latency: <100ms {}
+[2025-09-05T11:59:22.953Z] [monitor] [INFO] 🔧 Using PROCESSED commitment for fastest possible detection {}
+[2025-09-05T11:59:22.953Z] [monitor] [INFO] 📡 Zstd compression enabled for optimal performance {}
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[LASERSTREAM-ENHANCED] 🎯 Subscribing to 2 master trader wallets...
+[LASERSTREAM-ENHANCED] 📍 Traders: DfMx...Xhzj, suqh...HQfK
+[LASERSTREAM-ENHANCED] 🔧 Using enhanced subscription with data slicing and Singapore endpoint
+[LASERSTREAM-ENHANCED] ✅ Stream connected to Singapore endpoint. ID: 3dc81fbe-cc4c-40c9-bffe-57ddfaf1d09d
+[2025-09-05T11:59:22.996Z] [monitor] [INFO] Starting direct RPC polling as backup... {}
+[2025-09-05T11:59:22.997Z] [monitor] [INFO] 🚀 Starting dynamic direct RPC polling... {}
+[HELPER] Compiling list of all active trader wallets to monitor...
+✅ Worker monitor is ready
+[HELPER] Found 2 unique active trader wallets to monitor.
+[2025-09-05T11:59:22.998Z] [monitor] [INFO] 📊 Monitoring 2 wallets via RPC polling {}
+[2025-09-05T11:59:22.998Z] [monitor] [INFO] ✅ Dynamic direct RPC polling started successfully {}
+[2025-09-05T11:59:22.998Z] [monitor] [INFO] Starting periodic subscription refresh... {}
+[2025-09-05T11:59:22.998Z] [monitor] [INFO] ✅ Periodic refresh started (every 5 minutes) {}
+[monitor] Worker initialized successfully
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+[HELPER] Compiling list of all active trader wallets to monitor...
+[HELPER] Found 2 unique active trader wallets to monitor.
+💓 Health check: unhealthy { workers: 6, ready: 2 }
+📨 Message from monitor: PONG {
+  type: 'PONG',
+  workerName: 'monitor',
+  timestamp: 1757073590381,
+  uptime: 27446,
+  messageCount: 1,
+  errorCount: 0
+}
+📨 Message from data: PONG {
+  type: 'PONG',
+  workerName: 'data',
+  timestamp: 1757073590382,
+  uptime: 29794,
+  messageCount: 1,
+  errorCount: 0
+}
+❌ ThreadedZapBot initialization failed: Error: Timeout waiting for workers to be ready
+    at ThreadedZapBot.waitForWorkersReady (/home/sunny/zap-mono-grk1522/threadedZapBot.js:408:15)
+    at async ThreadedZapBot.initialize (/home/sunny/zap-mono-grk1522/threadedZapBot.js:95:13)
+    at async ZapBotStartup.startThreadedApplication (/home/sunny/zap-mono-grk1522/start.js:165:13)
+    at async ZapBotStartup.startMainApplication (/home/sunny/zap-mono-grk1522/start.js:134:17)
+    at async ZapBotStartup.initialize (/home/sunny/zap-mono-grk1522/start.js:78:13)
+    at async main (/home/sunny/zap-mono-grk1522/start.js:436:9)
+🛑 Shutting down ThreadedZapBot...
+[monitor] Received shutdown signal
+[data] Received shutdown signal
+[2025-09-05T11:59:50.427Z] [monitor] [INFO] Stopping LaserStream... {}
+[LASERSTREAM-ENHANCED] 🛑 Shutting down Singapore stream...
+[2025-09-05T11:59:50.427Z] [monitor] [INFO] Stopping RPC polling... {}
+[2025-09-05T11:59:50.427Z] [monitor] [INFO] 🛑 Periodic refresh stopped {}
+📤 Worker monitor shutdown complete
+[2025-09-05T11:59:50.428Z] [data] [INFO] Database manager worker cleanup completed {}
+📤 Worker data shutdown complete
+📤 Worker data exited with code 0
+📤 Worker monitor exited with code 0
+
+thread 'tokio-runtime-worker' panicked at /home/runner/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/napi-2.16.17/src/threadsafe_function.rs:248:9:
+ThreadsafeFunction was aborted, can not clone it
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+✅ ThreadedZapBot shutdown completed
+❌ Failed to start threaded application: Error: Timeout waiting for workers to be ready
+    at ThreadedZapBot.waitForWorkersReady (/home/sunny/zap-mono-grk1522/threadedZapBot.js:408:15)
+    at async ThreadedZapBot.initialize (/home/sunny/zap-mono-grk1522/threadedZapBot.js:95:13)
+    at async ZapBotStartup.startThreadedApplication (/home/sunny/zap-mono-grk1522/start.js:165:13)
+    at async ZapBotStartup.startMainApplication (/home/sunny/zap-mono-grk1522/start.js:134:17)
+    at async ZapBotStartup.initialize (/home/sunny/zap-mono-grk1522/start.js:78:13)
+    at async main (/home/sunny/zap-mono-grk1522/start.js:436:9)
+❌ Failed to start main application: Error: Timeout waiting for workers to be ready
+    at ThreadedZapBot.waitForWorkersReady (/home/sunny/zap-mono-grk1522/threadedZapBot.js:408:15)
+    at async ThreadedZapBot.initialize (/home/sunny/zap-mono-grk1522/threadedZapBot.js:95:13)
+    at async ZapBotStartup.startThreadedApplication (/home/sunny/zap-mono-grk1522/start.js:165:13)
+    at async ZapBotStartup.startMainApplication (/home/sunny/zap-mono-grk1522/start.js:134:17)
+    at async ZapBotStartup.initialize (/home/sunny/zap-mono-grk1522/start.js:78:13)
+    at async main (/home/sunny/zap-mono-grk1522/start.js:436:9)
+❌ Startup failed: Error: Timeout waiting for workers to be ready
+    at ThreadedZapBot.waitForWorkersReady (/home/sunny/zap-mono-grk1522/threadedZapBot.js:408:15)
+    at async ThreadedZapBot.initialize (/home/sunny/zap-mono-grk1522/threadedZapBot.js:95:13)
+    at async ZapBotStartup.startThreadedApplication (/home/sunny/zap-mono-grk1522/start.js:165:13)
+    at async ZapBotStartup.startMainApplication (/home/sunny/zap-mono-grk1522/start.js:134:17)
+    at async ZapBotStartup.initialize (/home/sunny/zap-mono-grk1522/start.js:78:13)
+    at async main (/home/sunny/zap-mono-grk1522/start.js:436:9)
+🧹 Cleaning up resources...
+✅ Cleanup completed

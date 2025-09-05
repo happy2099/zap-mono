@@ -55,7 +55,27 @@ class BaseWorker {
     }
 
     async handleMessage(message) {
-        const handler = this.messageHandlers.get(message.type);
+        let handler = this.messageHandlers.get(message.type);
+        
+        // Special case-insensitive handling for telegram worker
+        if (!handler && this.workerName === 'telegram') {
+            // Try common case variations for telegram messages
+            const caseVariations = [
+                message.type.toUpperCase(),
+                message.type.toLowerCase(),
+                'SEND_MESSAGE',  // Most common fallback
+                'PIN_MESSAGE'
+            ];
+            
+            for (const variation of caseVariations) {
+                handler = this.messageHandlers.get(variation);
+                if (handler) {
+                    console.log(`[${this.workerName}] 🔧 Fixed case mismatch: ${message.type} -> ${variation}`);
+                    break;
+                }
+            }
+        }
+        
         if (handler) {
             await handler(message);
         } else {
@@ -99,6 +119,7 @@ class BaseWorker {
     }
 
     async handlePing(message) {
+        // Send PONG response without logging to reduce verbosity
         this.signalMessage('PONG', {
             uptime: Date.now() - this.startTime,
             messageCount: this.messageCount,

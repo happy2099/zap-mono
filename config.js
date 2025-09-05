@@ -15,20 +15,20 @@ const config = {
     ADMIN_CHAT_ID: process.env.ADMIN_CHAT_ID || '6032767351',
 
     // --- Solana Network ---
-    RPC_URL: process.env.RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+    RPC_URL: process.env.RPC_URL || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
     WS_URL: process.env.WS_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
     LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
     RPC_FALLBACK_URLS: process.env.RPC_FALLBACK_URLS ? process.env.RPC_FALLBACK_URLS.split(',') : [],
 
     // --- Singapore Regional Endpoints (Optimized for Asia-Pacific) ---
     SINGAPORE_ENDPOINTS: {
-        rpc: process.env.SGP_RPC_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
-        sender: process.env.SGP_SENDER_URL || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+        rpc: process.env.SGP_RPC_URL || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
+        sender: process.env.SGP_SENDER_URL || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
         laserstream: process.env.SGP_LASERSTREAM_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
         websocket: process.env.SGP_WS_URL || 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
     },
     
-    SENDER_ENDPOINT: process.env.SENDER_ENDPOINT || 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769', // Helius mainnet endpoint for lowest latency
+    SENDER_ENDPOINT: process.env.SENDER_ENDPOINT || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com', // Enhanced Helius endpoint for lowest latency
     TIP_ACCOUNTS: [
         "4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE",
         "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ",

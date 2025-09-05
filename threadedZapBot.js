@@ -183,7 +183,8 @@ class ThreadedZapBot {
                     const handler = this.messageHandlers.get(message.type);
                     if (handler) {
                         handler(workerName, message);
-                    } else {
+                    } else if (message.type !== 'PONG') {
+                        // Log all messages except PONG to reduce verbosity
                         console.log(`📨 Message from ${workerName}:`, message.type, message);
                     }
             }

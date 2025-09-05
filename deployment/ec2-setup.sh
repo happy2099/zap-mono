@@ -347,8 +347,8 @@ REDIS_HOST=localhost
 REDIS_PORT=$REDIS_PORT
 
 # Solana
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
-WS_URL=wss://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+RPC_URL=https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
+WS_URL=wss://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY
 
 # Telegram
 TELEGRAM_BOT_TOKEN=YOUR_BOT_TOKEN

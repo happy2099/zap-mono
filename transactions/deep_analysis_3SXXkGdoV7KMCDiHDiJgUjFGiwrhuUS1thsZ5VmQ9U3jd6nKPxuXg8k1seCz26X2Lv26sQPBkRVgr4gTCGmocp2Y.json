@@ -1,0 +1,146 @@
+{
+  "timestamp": "2025-09-05T14:51:08.492Z",
+  "signature": "3SXXkGdoV7KMCDiHDiJgUjFGiwrhuUS1thsZ5VmQ9U3jd6nKPxuXg8k1seCz26X2Lv26sQPBkRVgr4gTCGmocp2Y",
+  "traderAddress": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+  "analysisType": "comprehensive_transaction_analysis",
+  "summary": {
+    "totalProgramsExecuted": 11,
+    "identifiedPlatforms": 2,
+    "unknownPrograms": 9,
+    "analysisConfidence": "low"
+  },
+  "platformDetection": {
+    "identifiedPlatforms": [
+      {
+        "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "platformName": "Pump.fun",
+        "confidence": "high",
+        "detectionMethod": "program_id_match",
+        "description": "Meme token launchpad and trading platform"
+      },
+      {
+        "programId": "BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW",
+        "platformName": "Photon",
+        "confidence": "high",
+        "detectionMethod": "program_id_match",
+        "description": "Trading platform: Photon"
+      }
+    ],
+    "unknownPrograms": [
+      {
+        "programId": "SysvarRecentB1ockHashes11111111111111111111",
+        "type": "system_program",
+        "description": "Solana system program for recent block hashes"
+      },
+      {
+        "programId": "jitodontfront111111111111111tradewithPhoton",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "SysvarRent111111111111111111111111111111111",
+        "type": "system_program",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "AVUCZyuT35YSuj4RH7fwiyPu82Djn2Hfg7y2ND2XcnZH",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      }
+    ]
+  },
+  "transactionStructure": {
+    "outerInstructions": 5,
+    "innerInstructions": 1,
+    "loadedAddresses": 2,
+    "programExecutionTraces": 37,
+    "accountKeys": 15,
+    "complexity": "low"
+  },
+  "eventTraces": [
+    {
+      "type": "program_invocation",
+      "programId": "BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW",
+      "stackHeight": 1,
+      "logIndex": 6,
+      "logMessage": "Program BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW invoke [1]",
+      "timestamp": 1757083868472
+    },
+    {
+      "type": "program_invocation",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "stackHeight": 2,
+      "logIndex": 8,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [2]",
+      "timestamp": 1757083868474
+    },
+    {
+      "type": "program_invocation",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "stackHeight": 3,
+      "logIndex": 26,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [3]",
+      "timestamp": 1757083868478
+    },
+    {
+      "type": "program_completion",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "logIndex": 28,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+      "timestamp": 1757083868478
+    },
+    {
+      "type": "program_completion",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "logIndex": 30,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+      "timestamp": 1757083868478
+    },
+    {
+      "type": "program_completion",
+      "programId": "BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW",
+      "logIndex": 34,
+      "logMessage": "Program BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW success",
+      "timestamp": 1757083868479
+    }
+  ],
+  "analysisMetadata": {
+    "analysisVersion": "2.0",
+    "eventBasedDetection": true,
+    "logMessageAnalysis": false,
+    "innerInstructionAnalysis": true,
+    "programExecutionTracing": true
+  },
+  "recommendations": [
+    "Primary platform identified: Pump.fun",
+    "9 unknown programs require platform identification",
+    "Transaction shows low complexity with nested instructions",
+    "Event-based detection successfully identified main trading platform"
+  ],
+  "logType": "deep_analysis"
+}

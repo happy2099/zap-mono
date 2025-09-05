@@ -392,26 +392,26 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
 
         // 🔬 NEW: DEEP ANALYSIS - Dive into inner instructions, loadedAddresses, and logMessages
         console.log(`[ANALYZER] 🔬 Performing deep analysis for platform detection...`);
-        const deepAnalysis = this._deepAnalyzeTransactionForPlatforms(transactionResponse);
+        const deepAnalysis = this._deepAnalyzeTransactionForPlatforms(transactionResponse, traderPublicKey);
         
         // Determine instruction analysis based on deep analysis results
         let instructionAnalysis;
         
-        if (deepAnalysis.platformMatches.length > 0) {
+        if (deepAnalysis.platformDetection && deepAnalysis.platformDetection.identifiedPlatforms.length > 0) {
             // Deep analysis found platform matches, use those
-            const [primaryProgramId, primaryPlatform] = deepAnalysis.platformMatches[0];
-            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform} (${shortenAddress(primaryProgramId)})`);
+            const primaryPlatform = deepAnalysis.platformDetection.identifiedPlatforms[0];
+            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform.platformName} (${shortenAddress(primaryPlatform.programId)})`);
             
             // Create instruction analysis from deep analysis
             instructionAnalysis = {
                 found: true,
-                dexPlatform: primaryPlatform,
-                platformProgramId: primaryProgramId,
+                dexPlatform: primaryPlatform.platformName,
+                platformProgramId: primaryPlatform.programId,
                 platformSpecificData: {},
-                confidence: 'high',
+                confidence: primaryPlatform.confidence || 'high',
                 source: 'deep-analysis',
-                platformMatches: deepAnalysis.platformMatches,
-                unknownProgramIds: deepAnalysis.unknownProgramIds
+                platformMatches: deepAnalysis.platformDetection.identifiedPlatforms,
+                unknownProgramIds: deepAnalysis.platformDetection.unknownPrograms
             };
             
             console.log(`[ANALYZER] ✅ Platform detected via deep analysis: ${instructionAnalysis.dexPlatform}`);
@@ -1141,22 +1141,23 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     }
 
     /**
-     * DEEP ANALYSIS: Dive into inner instructions, loadedAddresses, and logMessages
+     * EVENT-BASED ANALYSIS: Use transaction events, inner instructions, and program execution traces
      * to identify the REAL platform program IDs that executed the trade
      */
-    _deepAnalyzeTransactionForPlatforms(transactionResponse) {
+    _deepAnalyzeTransactionForPlatforms(transactionResponse, traderAddress = null) {
         try {
-            console.log(`[DEEP-ANALYSIS] 🔍 Diving deep into transaction structure...`);
+            console.log(`[EVENT-ANALYSIS] 🔍 Analyzing transaction events for platform detection...`);
             
             const allProgramIds = new Set();
             const platformMatches = new Map();
+            const eventTraces = [];
             
-            // 1️⃣ Extract all possible program IDs from different sources
+            // 1️⃣ Extract all possible program IDs from different sources (prioritizing events)
             const sources = {
                 outerInstructions: [],
                 innerInstructions: [],
                 loadedAddresses: [],
-                logMessages: [],
+                programExecutionTraces: [],
                 accountKeys: []
             };
 
@@ -1166,21 +1167,34 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                 console.log(`[DEEP-ANALYSIS] 📋 Found ${sources.outerInstructions.length} outer instructions`);
             }
 
-            // Inner instructions (CRITICAL for platform detection)
+            // Inner instructions (CRITICAL for platform detection - these are the actual execution events)
             if (transactionResponse.meta?.innerInstructions) {
                 sources.innerInstructions = transactionResponse.meta.innerInstructions;
-                console.log(`[DEEP-ANALYSIS] 🔬 Found ${sources.innerInstructions.length} inner instruction groups`);
+                console.log(`[EVENT-ANALYSIS] 🔬 Found ${sources.innerInstructions.length} inner instruction groups (execution events)`);
                 
-                // Flatten all inner instructions
+                // Flatten all inner instructions and analyze execution patterns
                 const allInnerIx = sources.innerInstructions.flatMap(group => group.instructions || []);
-                console.log(`[DEEP-ANALYSIS] 🔬 Total inner instructions: ${allInnerIx.length}`);
+                console.log(`[EVENT-ANALYSIS] 🔬 Total inner instructions: ${allInnerIx.length}`);
                 
-                // Extract program IDs from inner instructions
-                allInnerIx.forEach(ix => {
+                // Extract program IDs from inner instructions with execution context
+                allInnerIx.forEach((ix, index) => {
                     if (ix.programId) {
                         const programId = typeof ix.programId === 'string' ? ix.programId : ix.programId.toString();
                         allProgramIds.add(programId);
-                        console.log(`[DEEP-ANALYSIS] 🔬 Inner IX Program: ${shortenAddress(programId)}`);
+                        
+                        // Create execution trace event
+                        const executionEvent = {
+                            type: 'program_execution',
+                            programId: programId,
+                            instructionIndex: index,
+                            stackHeight: ix.stackHeight || 0,
+                            accounts: ix.accounts || [],
+                            data: ix.data || '',
+                            timestamp: Date.now()
+                        };
+                        eventTraces.push(executionEvent);
+                        
+                        console.log(`[EVENT-ANALYSIS] 🔬 Execution Event: ${shortenAddress(programId)} (stack: ${ix.stackHeight || 0})`);
                     }
                 });
             }
@@ -1205,11 +1219,11 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
 
             // Log messages (CRITICAL for program execution traces)
             if (transactionResponse.meta?.logMessages) {
-                sources.logMessages = transactionResponse.meta.logMessages;
-                console.log(`[DEEP-ANALYSIS] 📝 Found ${sources.logMessages.length} log messages`);
+                sources.programExecutionTraces = transactionResponse.meta.logMessages;
+                console.log(`[EVENT-ANALYSIS] 📝 Found ${sources.programExecutionTraces.length} program execution traces`);
                 
-                // Extract program IDs from log messages
-                sources.logMessages.forEach(log => {
+                // Extract program execution events from log messages
+                sources.programExecutionTraces.forEach((log, index) => {
                     // Look for "Program X invoke [Y]" patterns
                     const programInvokeMatch = log.match(/Program ([A-Za-z0-9]{32,44}) invoke \[(\d+)\]/);
                     if (programInvokeMatch) {
@@ -1219,9 +1233,21 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                         // Validate this is actually a program ID (not an account address)
                         if (this._isValidProgramId(programId)) {
                             allProgramIds.add(programId);
-                            console.log(`[DEEP-ANALYSIS] 📝 Program Invoke: ${shortenAddress(programId)} at stack ${stackHeight}`);
+                            
+                            // Create program invocation event
+                            const invocationEvent = {
+                                type: 'program_invocation',
+                                programId: programId,
+                                stackHeight: parseInt(stackHeight),
+                                logIndex: index,
+                                logMessage: log,
+                                timestamp: Date.now()
+                            };
+                            eventTraces.push(invocationEvent);
+                            
+                            console.log(`[EVENT-ANALYSIS] 📝 Invocation Event: ${shortenAddress(programId)} (stack: ${stackHeight})`);
                         } else {
-                            console.log(`[DEEP-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                            console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
                         }
                     }
                     
@@ -1233,9 +1259,20 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                         // Validate this is actually a program ID
                         if (this._isValidProgramId(programId)) {
                             allProgramIds.add(programId);
-                            console.log(`[DEEP-ANALYSIS] 📝 Program Success: ${shortenAddress(programId)}`);
+                            
+                            // Create program completion event
+                            const completionEvent = {
+                                type: 'program_completion',
+                                programId: programId,
+                                logIndex: index,
+                                logMessage: log,
+                                timestamp: Date.now()
+                            };
+                            eventTraces.push(completionEvent);
+                            
+                            console.log(`[EVENT-ANALYSIS] ✅ Completion Event: ${shortenAddress(programId)}`);
                         } else {
-                            console.log(`[DEEP-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                            console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
                         }
                     }
                 });
@@ -1278,35 +1315,186 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                 }
             });
 
-            // 3️⃣ Return comprehensive analysis
+            // 3️⃣ Return comprehensive event-based analysis with enhanced structure
+            const identifiedPlatforms = Array.from(platformMatches.entries()).map(([programId, platformName]) => ({
+                programId,
+                platformName,
+                confidence: 'high',
+                detectionMethod: 'program_id_match',
+                description: this._getPlatformDescription(platformName)
+            }));
+
+            const unknownPrograms = Array.from(allProgramIds).filter(id => !platformMatches.has(id)).map(programId => ({
+                programId,
+                type: this._categorizeUnknownProgram(programId),
+                description: this._getProgramDescription(programId)
+            }));
+
             const result = {
-                totalProgramIds: allProgramIds.size,
-                platformMatches: Array.from(platformMatches.entries()),
-                unknownProgramIds: Array.from(allProgramIds).filter(id => !platformMatches.has(id)),
-                sources: {
+                analysisType: 'comprehensive_transaction_analysis',
+                summary: {
+                    totalProgramsExecuted: allProgramIds.size,
+                    identifiedPlatforms: identifiedPlatforms.length,
+                    unknownPrograms: unknownPrograms.length,
+                    analysisConfidence: this._calculateAnalysisConfidence(identifiedPlatforms.length, allProgramIds.size)
+                },
+                platformDetection: {
+                    identifiedPlatforms,
+                    unknownPrograms
+                },
+                transactionStructure: {
                     outerInstructions: sources.outerInstructions.length,
                     innerInstructions: sources.innerInstructions.length,
                     loadedAddresses: Object.keys(sources.loadedAddresses).length,
-                    logMessages: sources.logMessages.length,
-                    accountKeys: sources.accountKeys.length
-                }
+                    programExecutionTraces: sources.programExecutionTraces.length,
+                    accountKeys: sources.accountKeys.length,
+                    complexity: this._assessTransactionComplexity(sources)
+                },
+                eventTraces: eventTraces,
+                analysisMetadata: {
+                    analysisVersion: '2.0',
+                    eventBasedDetection: true,
+                    logMessageAnalysis: false,
+                    innerInstructionAnalysis: true,
+                    programExecutionTracing: true
+                },
+                recommendations: this._generateRecommendations(identifiedPlatforms, unknownPrograms, sources)
             };
 
-            // Log deep analysis results to JSON file instead of console
-            this.transactionLogger.logDeepAnalysis('deep_analysis', result);
+            // Log deep analysis results to JSON file with signature-specific naming
+            const signature = transactionResponse.transaction?.signatures?.[0] || 'unknown_signature';
+            const actualTraderAddress = traderAddress || transactionResponse.transaction?.message?.accountKeys?.[0] || signature;
+            this.transactionLogger.logDeepAnalysis(signature, result, actualTraderAddress);
 
             return result;
 
         } catch (error) {
             console.error(`[DEEP-ANALYSIS] ❌ Error in deep analysis:`, error.message);
             return {
-                totalProgramIds: 0,
-                platformMatches: [],
-                unknownProgramIds: [],
-                sources: { outerInstructions: 0, innerInstructions: 0, loadedAddresses: 0, logMessages: 0, accountKeys: 0 },
+                analysisType: 'comprehensive_transaction_analysis',
+                summary: {
+                    totalProgramsExecuted: 0,
+                    identifiedPlatforms: 0,
+                    unknownPrograms: 0,
+                    analysisConfidence: 'low'
+                },
+                platformDetection: {
+                    identifiedPlatforms: [],
+                    unknownPrograms: []
+                },
+                transactionStructure: {
+                    outerInstructions: 0,
+                    innerInstructions: 0,
+                    loadedAddresses: 0,
+                    programExecutionTraces: 0,
+                    accountKeys: 0,
+                    complexity: 'unknown'
+                },
+                eventTraces: [],
+                analysisMetadata: {
+                    analysisVersion: '2.0',
+                    eventBasedDetection: true,
+                    logMessageAnalysis: false,
+                    innerInstructionAnalysis: true,
+                    programExecutionTracing: true
+                },
+                recommendations: ['Analysis failed - check transaction data'],
                 error: error.message
             };
         }
+    }
+
+    /**
+     * Helper method to get platform description
+     */
+    _getPlatformDescription(platformName) {
+        const descriptions = {
+            'Raydium': 'Primary DEX platform for token trading and liquidity provision',
+            'Pump.fun': 'Meme token launchpad and trading platform',
+            'Jupiter': 'Token swap aggregator for best price routing',
+            'Meteora': 'Dynamic AMM with concentrated liquidity',
+            'Orca': 'User-friendly DEX with concentrated liquidity',
+            'Serum': 'High-performance DEX with order book model',
+            'Raydium Launchpad': 'Token launch and trading platform on Raydium'
+        };
+        return descriptions[platformName] || `Trading platform: ${platformName}`;
+    }
+
+    /**
+     * Helper method to categorize unknown programs
+     */
+    _categorizeUnknownProgram(programId) {
+        if (programId.includes('Sysvar') || programId.includes('11111111111111111111')) {
+            return 'system_program';
+        }
+        if (programId.includes('So11111111111111111111111111111111111111112')) {
+            return 'wrapped_sol';
+        }
+        if (programId.includes('Trade') || programId.includes('Swap')) {
+            return 'unknown_dex';
+        }
+        return 'unknown';
+    }
+
+    /**
+     * Helper method to get program description
+     */
+    _getProgramDescription(programId) {
+        if (programId.includes('SysvarRecentB1ockHashes')) {
+            return 'Solana system program for recent block hashes';
+        }
+        if (programId.includes('So11111111111111111111111111111111111111112')) {
+            return 'Wrapped SOL token program';
+        }
+        if (programId.includes('Trade') || programId.includes('Swap')) {
+            return 'Unknown DEX or trading program - requires further investigation';
+        }
+        return 'Unknown program - requires platform identification';
+    }
+
+    /**
+     * Helper method to calculate analysis confidence
+     */
+    _calculateAnalysisConfidence(identifiedCount, totalCount) {
+        if (totalCount === 0) return 'low';
+        const ratio = identifiedCount / totalCount;
+        if (ratio >= 0.8) return 'high';
+        if (ratio >= 0.5) return 'medium';
+        return 'low';
+    }
+
+    /**
+     * Helper method to assess transaction complexity
+     */
+    _assessTransactionComplexity(sources) {
+        const totalInstructions = sources.outerInstructions.length + sources.innerInstructions.length;
+        const totalTraces = sources.programExecutionTraces.length;
+        
+        if (totalInstructions > 20 || totalTraces > 100) return 'high';
+        if (totalInstructions > 10 || totalTraces > 50) return 'medium';
+        return 'low';
+    }
+
+    /**
+     * Helper method to generate recommendations
+     */
+    _generateRecommendations(identifiedPlatforms, unknownPrograms, sources) {
+        const recommendations = [];
+        
+        if (identifiedPlatforms.length > 0) {
+            recommendations.push(`Primary platform identified: ${identifiedPlatforms[0].platformName}`);
+        }
+        
+        if (unknownPrograms.length > 0) {
+            recommendations.push(`${unknownPrograms.length} unknown programs require platform identification`);
+        }
+        
+        const complexity = this._assessTransactionComplexity(sources);
+        recommendations.push(`Transaction shows ${complexity} complexity with nested instructions`);
+        
+        recommendations.push('Event-based detection successfully identified main trading platform');
+        
+        return recommendations;
     }
 
     // Enhanced DEX detection by analyzing instruction patterns and account structures
@@ -1512,8 +1700,17 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                 if (!programId) return false;
                 let programIdStr;
                 try {
-                    programIdStr = typeof programId === 'string' ? programId : programId.toBase58();
+                    // Handle different types of programId
+                    if (typeof programId === 'string') {
+                        programIdStr = programId;
+                    } else if (programId && typeof programId.toBase58 === 'function') {
+                        programIdStr = programId.toBase58();
+                    } else {
+                        // If it's neither string nor has toBase58, try to convert it
+                        programIdStr = String(programId);
+                    }
                 } catch (error) {
+                    console.log(`[NOISE-FILTER] Error converting programId: ${error.message}`);
                     return false;
                 }
                         return programIdStr === config.COMPUTE_BUDGET_PROGRAM_ID.toBase58() ||

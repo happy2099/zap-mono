@@ -48,6 +48,7 @@ class TradingEngine {
 
         this.isProcessing = new Set();
         this.traderCutoffSignatures = new Map();
+        this.lastWalletCount = null; // Track wallet count to reduce logging verbosity
         this.traceLogger = traceLogger;
         this.transactionLogger = new TransactionLogger();
         
@@ -67,7 +68,6 @@ handleLaserStreamData(sourceWallet, signature, txData) {
 
 
 async getMasterTraderWallets() {
-    console.log(`[HELPER] Compiling list of all active trader wallets to monitor...`);
     try {
         // Use database instead of old dataManager
         const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
@@ -83,7 +83,11 @@ async getMasterTraderWallets() {
         }
         
         const walletArray = Array.from(walletsToMonitor);
-        console.log(`[HELPER] Found ${walletArray.length} unique active trader wallets to monitor.`);
+        // Only log when wallet count changes
+        if (!this.lastWalletCount || this.lastWalletCount !== walletArray.length) {
+            console.log(`[HELPER] 📊 Monitoring ${walletArray.length} active trader wallets`);
+            this.lastWalletCount = walletArray.length;
+        }
         return walletArray;
     } catch (error) {
         console.error(`[HELPER] Error compiling master trader list:`, error);
@@ -645,25 +649,28 @@ if (isBuy) {
             tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
         }
 
-        const buildOptions = { connection: this.solanaManager.connection, keypair, swapDetails: tradeDetails, amountBN, slippageBps: isBuy ? 2500 : 9000, cacheManager: this.redisManager }; // <-- CORRECTED
+        const buildOptions = { 
+            connection: this.solanaManager.connection, 
+            keypair, 
+            swapDetails: tradeDetails, 
+            amountBN, 
+            slippageBps: isBuy ? 2500 : 9000, 
+            cacheManager: this.redisManager,
+            apiManager: this.apiManager,
+            sdk: this.sdk
+        };
         const preSellBalance = await this.solanaManager.connection.getBalance(keypair.publicKey);
         const instructions = await builder(buildOptions);
         if (!instructions || !instructions.length) throw new Error("Platform builder returned no instructions.");
         
-        // ✅ CRITICAL FIX: Add compute budget instructions.
-        // NOTE: Helius Sender API adds the Jito tip for us, so we only need these two.
-        // ✅ DYNAMIC FEE LOGIC: Call the new estimator
-const priorityFee = await this.solanaManager.getPriorityFeeEstimate(
-    [...preInstructions, ...instructions], // Pass all non-fee instructions
-    keypair.publicKey
-);
-
-const finalInstructions = [
-    ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits || 1400000 }),
-    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee }), // Use the dynamic fee
-    ...preInstructions,
-    ...instructions
-];
+        // ✅ HELIUS SENDER HANDLES COMPUTE BUDGET AUTOMATICALLY
+        // No need to add compute budget instructions - Helius Sender will add them
+        const finalInstructions = [
+            ...preInstructions,
+            ...instructions
+        ];
+        
+        console.log(`[TRADING-ENGINE] 🎯 Letting Helius Sender handle compute budget automatically`);
 
         const { signature, error: sendError } = await this.solanaManager.sendVersionedTransaction({ instructions: finalInstructions, signer: keypair });
                 // ======= FEE CAPTURE START =======
@@ -1724,6 +1731,7 @@ async checkPumpFunMigration(tokenMint) {
         }
     }
 
+
     // Calculate user's copy trade amount based on trade type and database data
     async _calculateUserCopyTradeAmount(userChatId, tradeDetails) {
         try {
@@ -1744,7 +1752,8 @@ async checkPumpFunMigration(tokenMint) {
                 const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                 
                 if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
-                    throw new Error(`User ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens to sell`);
+                    console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
+                    return null; // Return null to indicate no position
                 }
                 
                 console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} token balance: ${userTokenBalance.amountRaw} raw units`);
@@ -1775,7 +1784,7 @@ async checkPumpFunMigration(tokenMint) {
             }
 
             const { keypair, wallet } = walletPacket;
-            console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet.label}`);
+            console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
 
             // Build trade instructions using platform builders
             const builderMap = {
@@ -1807,6 +1816,12 @@ async checkPumpFunMigration(tokenMint) {
             // Calculate user's copy trade amount based on trade type FIRST
             const userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
             
+            // If user has no position for SELL trade, skip gracefully
+            if (userAmountBN === null) {
+                console.log(`[SINGAPORE-SENDER] ⏭️ Skipping copy trade for user ${userChatId} - no position found`);
+                return; // Exit gracefully without throwing error
+            }
+            
             const builder = builderMap[tradeDetails.dexPlatform];
             
             // If no specific builder, use universal builder for known platforms
@@ -1832,7 +1847,11 @@ async checkPumpFunMigration(tokenMint) {
                             }
                         );
                         
-                        console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        if (result.success) {
+                            console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        } else {
+                            console.log(`[SINGAPORE-SENDER] ❌ Universal copy trade FAILED!`);
+                        }
                         return; // Exit early, trade completed
                     }
                 } catch (error) {
@@ -1894,7 +1913,11 @@ async checkPumpFunMigration(tokenMint) {
                             }
                         );
                         
-                        console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        if (result.success) {
+                            console.log(`[SINGAPORE-SENDER] ✅ Universal copy trade executed successfully!`);
+                        } else {
+                            console.log(`[SINGAPORE-SENDER] ❌ Universal copy trade FAILED!`);
+                        }
                         return; // Exit early, trade completed
                     }
                 } catch (error) {
@@ -1903,6 +1926,17 @@ async checkPumpFunMigration(tokenMint) {
                 }
             }
             
+            // Validate required mint fields before building instructions
+            if (!tradeDetails.inputMint || !tradeDetails.outputMint) {
+                console.error(`[SINGAPORE-SENDER] ❌ Missing required mint fields:`, {
+                    inputMint: tradeDetails.inputMint,
+                    outputMint: tradeDetails.outputMint,
+                    tradeType: tradeDetails.tradeType,
+                    dexPlatform: tradeDetails.dexPlatform
+                });
+                throw new Error(`Cannot execute ${tradeDetails.dexPlatform} trade: missing inputMint or outputMint fields`);
+            }
+
             // Build instructions with enhanced options
             const builderOptions = {
                 connection: this.solanaManager.connection,
@@ -1920,15 +1954,9 @@ async checkPumpFunMigration(tokenMint) {
                 sdk: new (require('@pump-fun/pump-sdk').PumpSdk)(this.solanaManager.connection), // Add Pump.fun SDK instance
             };
 
-            // Add compute budget instructions to ensure proper execution
-            const computeBudgetInstructions = [
-                ComputeBudgetProgram.setComputeUnitLimit({
-                    units: 200_000 // Set reasonable compute limit for copy trades
-                }),
-                ComputeBudgetProgram.setComputeUnitPrice({
-                    microLamports: 50_000 // Set reasonable priority fee
-                })
-            ];
+            // ✅ HELIUS SENDER HANDLES COMPUTE BUDGET AUTOMATICALLY
+            // No need to add compute budget instructions - Helius Sender will add them
+            console.log(`[SINGAPORE-SENDER] 🎯 Letting Helius Sender handle compute budget automatically`);
 
             console.log(`[SINGAPORE-SENDER] 🔧 Building instructions for ${tradeDetails.dexPlatform}...`);
             console.log(`[SINGAPORE-SENDER] 🔑 Transaction signature: ${masterSignature}`);
@@ -1944,13 +1972,10 @@ async checkPumpFunMigration(tokenMint) {
             }, { status: 'building_instructions' });
             
             // Build platform-specific instructions
-            const platformInstructions = await builder(builderOptions);
+            const instructions = await builder(builderOptions);
             
-            // Combine compute budget instructions with platform instructions
-            const instructions = [...computeBudgetInstructions, ...platformInstructions];
-            
-            console.log(`[SINGAPORE-SENDER] 🔧 Added ${computeBudgetInstructions.length} compute budget instructions`);
-            console.log(`[SINGAPORE-SENDER] 🔧 Total instructions: ${instructions.length}`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Built ${instructions.length} platform instructions`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Helius Sender will add compute budget automatically`);
 
             if (!instructions || instructions.length === 0) {
                 throw new Error(`Failed to build instructions for ${tradeDetails.dexPlatform}`);
@@ -1977,8 +2002,12 @@ async checkPumpFunMigration(tokenMint) {
             
             try {
                 // Use the new ultra-fast execution method
+                // Pass only the core trade instructions (without compute budget)
+                const coreInstructions = instructions.filter(ix => 
+                    !ix.programId || !ix.programId.equals || !ix.programId.equals(ComputeBudgetProgram.programId)
+                );
                 const result = await this.singaporeSenderManager.executeCopyTrade(
-                    instructions,
+                    coreInstructions,
                     keypair,
                     {
                         // ULTRA-FAST execution options
@@ -1994,8 +2023,13 @@ async checkPumpFunMigration(tokenMint) {
                     }
                 );
 
-                console.log(`[SINGAPORE-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
-                console.log(`[SINGAPORE-SENDER] 🔑 Copy signature: ${result.signature}`);
+                if (result.success) {
+                    console.log(`[SINGAPORE-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
+                    console.log(`[SINGAPORE-SENDER] 🔑 Copy signature: ${result.signature}`);
+                } else {
+                    console.log(`[SINGAPORE-SENDER] ❌ ULTRA-FAST copy trade FAILED!`);
+                    console.log(`[SINGAPORE-SENDER] 🔑 Failed signature: ${result.signature}`);
+                }
                 console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${result.executionTime}ms`);
                 console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${result.confirmationTime}ms`);
                 console.log(`[SINGAPORE-SENDER] 📊 Result:`, {

@@ -107,16 +107,6 @@ CREATE TABLE IF NOT EXISTS user_trading_settings (
     UNIQUE(user_id)
 );
 
--- Blackbox logging table for debugging and monitoring
-CREATE TABLE IF NOT EXISTS blackbox_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    component TEXT NOT NULL,
-    level TEXT NOT NULL DEFAULT 'INFO',
-    message TEXT NOT NULL,
-    data TEXT, -- JSON data for additional context
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_traders_user_wallet ON traders(user_id, wallet);
 CREATE INDEX IF NOT EXISTS idx_trades_user_time ON trades(user_id, executed_at);
@@ -126,6 +116,3 @@ CREATE INDEX IF NOT EXISTS idx_user_positions_user_token ON user_positions(user_
 CREATE INDEX IF NOT EXISTS idx_user_trading_settings_user ON user_trading_settings(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_wallets_user ON user_wallets(user_id);
 
--- Blackbox logging indexes
-CREATE INDEX IF NOT EXISTS idx_blackbox_component_time ON blackbox_logs(component, timestamp);
-CREATE INDEX IF NOT EXISTS idx_blackbox_level_time ON blackbox_logs(level, timestamp);

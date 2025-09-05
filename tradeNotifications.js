@@ -31,16 +31,20 @@ class TradeNotificationManager {
     // Internal helper to abstract sending messages
     async _sendMessage(chatId, text, options = {}) {
         const finalOptions = { parse_mode: 'MarkdownV2', disable_web_page_preview: true, ...options };
+        
+        // Ensure text is properly escaped for MarkdownV2 if not already escaped
+        const escapedText = text.includes('\\-') ? text : escapeMarkdownV2(text);
+        
         if (this.workerManager) {
             // Dispatch to the Telegram worker thread if in a threaded environment
             this.workerManager.dispatch('telegram', {
                 type: 'SEND_MESSAGE',
-                payload: { chatId, text, options: finalOptions }
+                payload: { chatId, text: escapedText, options: finalOptions }
             });
         } else if (this.bot) {
             // Send directly using the bot instance if running single-threaded
             // This is a direct command, so we 'await' it.
-            return this.bot.sendMessage(chatId, text, finalOptions);
+            return this.bot.sendMessage(chatId, escapedText, finalOptions);
         } else {
              // If neither is available, we log the failure to send.
             console.error(`[NotificationManager] Cannot send message: No bot instance or worker manager available. ChatID: ${chatId}`);

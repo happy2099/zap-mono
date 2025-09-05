@@ -171,8 +171,7 @@ const { struct, u64, u8 } = require('@solana/buffer-layout');
 const traceLogger = require('./traceLogger.js');
 
 // --- PROTOCOL SDKs ---
-const { PumpSdk } = require('@pump-fun/pump-sdk');
-const { PumpAmmSdk } = require('@pump-fun/pump-swap-sdk');
+const { PumpSdk, pumpPoolAuthorityPda, canonicalPumpPoolPda, PUMP_AMM_PROGRAM_ID } = require('@pump-fun/pump-sdk');
 const RaydiumV2_raw = require('@raydium-io/raydium-sdk');
  const RaydiumV2 = RaydiumV2_raw.default || RaydiumV2_raw;
 
@@ -248,14 +247,45 @@ async function buildPumpFunInstruction(builderOptions) {
     if (!sdk) throw new Error("Pump.fun builder requires an sdk instance.");
 
     const isBuy = swapDetails.tradeType === 'buy';
+    
+    // Enhanced debug logging for swapDetails
+    console.log(`[PUMP_BUILDER_BC-SDK] 🔍 SwapDetails debug:`, {
+        tradeType: swapDetails.tradeType,
+        inputMint: swapDetails.inputMint,
+        outputMint: swapDetails.outputMint,
+        hasInputMint: !!swapDetails.inputMint,
+        hasOutputMint: !!swapDetails.outputMint,
+        inputMintType: typeof swapDetails.inputMint,
+        outputMintType: typeof swapDetails.outputMint
+    });
+    
     const tokenMint = isBuy ? swapDetails.outputMint : swapDetails.inputMint;
-    const tokenMintPk = new PublicKey(tokenMint);
+    
+    // Validate tokenMint before creating PublicKey
+    if (!tokenMint || typeof tokenMint !== 'string') {
+        throw new Error(`Invalid tokenMint for Pump.fun: ${tokenMint}. Expected string, got ${typeof tokenMint}. SwapDetails: ${JSON.stringify(swapDetails, null, 2)}`);
+    }
+    
+    console.log(`[PUMP_BUILDER_BC-SDK] 🔍 TokenMint validation: ${tokenMint} (type: ${typeof tokenMint})`);
+    
+    let tokenMintPk;
+    try {
+        tokenMintPk = new PublicKey(tokenMint);
+    } catch (error) {
+        throw new Error(`Failed to create PublicKey from tokenMint "${tokenMint}": ${error.message}`);
+    }
 
     console.log(`[PUMP_BUILDER_BC-SDK] Building ${isBuy ? 'BUY' : 'SELL'} for ${shortenAddress(tokenMint)}...`);
 
     try {
         // --- Get Critical Coin Data (including creator) from API ---
         const coinData = await apiManager.getPumpFunCoinData(tokenMint);
+        
+        // Validate creator data before creating PublicKey
+        if (!coinData || !coinData.creator || typeof coinData.creator !== 'string') {
+            throw new Error(`Invalid creator data for Pump.fun token ${tokenMint}: ${JSON.stringify(coinData)}`);
+        }
+        
         const creatorPk = new PublicKey(coinData.creator);
         
         const feeRecipient = new PublicKey(config.PUMP_FUN_FEE_RECIPIENT);
@@ -414,25 +444,44 @@ async function buildPumpFunAmmInstruction(builderOptions) {
         const tokenMint = isBuy ? swapDetails.outputMint : swapDetails.inputMint;
         if (!tokenMint) throw new Error("PumpFun AMM Builder: Token mint is missing from swapDetails.");
 
+        // Validate tokenMint before creating PublicKey
+        if (typeof tokenMint !== 'string') {
+            throw new Error(`Invalid tokenMint for Pump.fun AMM: ${tokenMint}. Expected string, got ${typeof tokenMint}`);
+        }
+
+        console.log(`[PUMP_BUILDER_AMM] 🔍 TokenMint validation: ${tokenMint} (type: ${typeof tokenMint})`);
+
         // --- INTEL GATHERING (THIS IS THE FIX) ---
-        // Use the proper Pump.fun AMM SDK for instruction building
-        const pumpAmmSdk = new PumpAmmSdk(connection);
+        // Use the proper Pump.fun SDK for AMM instruction building
+        const pumpSdk = new PumpSdk(connection);
         
         // Get the canonical pool for this token using the available functions
-        const pumpPoolAuthority = pumpAmmSdk.pumpPoolAuthorityPda(new PublicKey(tokenMint));
-        const canonicalPool = pumpAmmSdk.poolKey(0, pumpPoolAuthority, new PublicKey(tokenMint), new PublicKey(config.NATIVE_SOL_MINT))[0];
+        let pumpPoolAuthority, canonicalPool;
+        try {
+            pumpPoolAuthority = pumpPoolAuthorityPda(new PublicKey(tokenMint));
+            canonicalPool = canonicalPumpPoolPda(new PublicKey(tokenMint));
+        } catch (error) {
+            throw new Error(`Failed to create PublicKey objects for Pump.fun AMM: ${error.message}`);
+        }
         
-        // Get swap state for the user
-        const swapState = await pumpAmmSdk.swapSolanaState(canonicalPool, keypair.publicKey);
-        
-        // Build instructions using the SDK
+        // Build instructions using the PumpSdk
         let instructions;
         if (isBuy) {
-            // Buy tokens with SOL
-            instructions = await pumpAmmSdk.buyBaseInput(swapState, amountBN, slippageBps / 100);
+            // Buy tokens with SOL using AMM
+            instructions = await pumpSdk.buyInstructions(
+                keypair.publicKey,
+                new PublicKey(tokenMint),
+                amountBN,
+                slippageBps / 100
+            );
         } else {
-            // Sell tokens for SOL
-            instructions = await pumpAmmSdk.sellBaseInput(swapState, amountBN, slippageBps / 100);
+            // Sell tokens for SOL using AMM
+            instructions = await pumpSdk.sellInstructions(
+                keypair.publicKey,
+                new PublicKey(tokenMint),
+                amountBN,
+                slippageBps / 100
+            );
         }
 
         // Add nonce instruction if provided
@@ -1077,7 +1126,14 @@ async function buildMeteoraDBCInstruction(builderOptions) {
         console.log(`[METEORA_DBC_DEBUG] Received builderOptions:`, JSON.stringify(safeLogOptions, null, 2));
         
         const isBuy = swapDetails.tradeType === 'buy';
-        const poolIdPk = new PublicKey(swapDetails.platformSpecificData.poolId);
+        
+        // Validate poolId before creating PublicKey
+        const poolId = swapDetails.platformSpecificData.poolId;
+        if (!poolId || typeof poolId !== 'string') {
+            throw new Error(`Invalid poolId for Meteora DBC: ${poolId}. Expected string, got ${typeof poolId}`);
+        }
+        
+        const poolIdPk = new PublicKey(poolId);
         
         console.log(`[METEORA_DBC_SDK] Building ${swapDetails.tradeType.toUpperCase()} for pool ${shortenAddress(poolIdPk.toBase58())}.`);
 

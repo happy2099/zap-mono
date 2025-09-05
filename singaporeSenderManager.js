@@ -10,7 +10,7 @@ class SingaporeSenderManager {
     constructor() {
         // ULTRA-FAST Singapore regional endpoints (optimized for Asia-Pacific)
         this.singaporeEndpoints = {
-            rpc: 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
+            rpc: 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
             sender: 'https://sender.helius-rpc.com/fast', // ULTRA-FAST global sender
             laserstream: 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
         };
@@ -49,9 +49,8 @@ class SingaporeSenderManager {
         };
 
         console.log('[SINGAPORE-SENDER] 🚀 ULTRA-FAST Manager initialized with Singapore regional endpoints');
-        console.log(`[SINGAPORE-SENDER] 🌏 Endpoints: ${JSON.stringify(this.singaporeEndpoints, null, 2)}`);
-        console.log(`[SINGAPORE-SENDER] ⚡ Target execution time: <200ms`);
-        console.log(`[SINGAPORE-SENDER] 🔧 Jito tip accounts: ${this.tipAccounts.length} configured`);
+        // console.log(`[SINGAPORE-SENDER] 🌏 Endpoints: ${JSON.stringify(this.singaporeEndpoints, null, 2)}`);
+        // console.log(`[SINGAPORE-SENDER] 🔧 Jito tip accounts: ${this.tipAccounts.length} configured`);
         
         // Start health monitoring
         this.startHealthMonitoring();
@@ -67,29 +66,45 @@ class SingaporeSenderManager {
     // Health check for Singapore endpoints
     async healthCheck() {
         try {
+            // Use getSlot instead of getHealth - more reliable and universal
             const response = await fetch(this.singaporeEndpoints.rpc, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     jsonrpc: '2.0',
                     id: 1,
-                    method: 'getHealth'
+                    method: 'getSlot'
                 })
             });
             
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
             const result = await response.json();
-            this.isHealthy = result.result === 'ok';
+            const wasHealthy = this.isHealthy;
+            
+            // Check if we got a valid slot number (indicates RPC is working)
+            this.isHealthy = !result.error && typeof result.result === 'number' && result.result > 0;
             this.lastHealthCheck = Date.now();
             
-            if (this.isHealthy) {
-                console.log(`[SINGAPORE-SENDER] ✅ Health check passed at ${new Date().toISOString()}`);
-            } else {
-                console.warn(`[SINGAPORE-SENDER] ⚠️ Health check failed at ${new Date().toISOString()}`);
+            // Only log on status changes to reduce verbosity
+            if (this.isHealthy !== wasHealthy) {
+                if (this.isHealthy) {
+                    console.log(`[SINGAPORE-SENDER] ✅ Health restored (slot: ${result.result})`);
+                } else {
+                    console.warn(`[SINGAPORE-SENDER] ⚠️ Health check failed: ${result.error?.message || 'Invalid response'}`);
+                }
             }
             
         } catch (error) {
-            console.error('[SINGAPORE-SENDER] ❌ Health check error:', error);
+            const wasHealthy = this.isHealthy;
             this.isHealthy = false;
+            
+            // Only log on status changes to reduce verbosity
+            if (wasHealthy) {
+                console.error('[SINGAPORE-SENDER] ❌ Health check error:', error.message);
+            }
         }
     }
 
@@ -146,20 +161,28 @@ class SingaporeSenderManager {
             // EXECUTE VIA SENDER ENDPOINT
             const signature = await this.sendViaSender(optimizedTransaction);
             
-            // CONFIRM TRANSACTION
-            const confirmationTime = await this.confirmTransaction(signature);
+            // CONFIRM TRANSACTION AND VALIDATE SUCCESS
+            const confirmationResult = await this.confirmTransaction(signature);
+            const { confirmationTime, success } = confirmationResult;
             
             // CALCULATE EXECUTION TIME
             const executionTime = Date.now() - startTime;
-            this.updateExecutionStats(executionTime, true);
+            this.updateExecutionStats(executionTime, success);
             
             // RECORD WITH PERFORMANCE MONITOR
             performanceMonitor.recordExecutionLatency(executionTime);
             
-            console.log(`[SINGAPORE-SENDER] ✅ ULTRA-FAST execution completed in ${executionTime}ms!`);
-            console.log(`[SINGAPORE-SENDER] 📝 Signature: ${signature}`);
-            console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
-            console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
+            if (success) {
+                console.log(`[SINGAPORE-SENDER] ✅ ULTRA-FAST execution completed in ${executionTime}ms!`);
+                console.log(`[SINGAPORE-SENDER] 📝 Signature: ${signature}`);
+                console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
+                console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
+            } else {
+                console.log(`[SINGAPORE-SENDER] ❌ ULTRA-FAST execution FAILED in ${executionTime}ms!`);
+                console.log(`[SINGAPORE-SENDER] 📝 Failed signature: ${signature}`);
+                console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
+                console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
+            }
             
             // Check if execution meets ultra-fast targets
             if (executionTime < 200) {
@@ -174,6 +197,7 @@ class SingaporeSenderManager {
                 signature,
                 executionTime,
                 confirmationTime,
+                success,
                 tipAmount: tipAmountSOL,
                 tipAccount: tipAccount.toString()
             };
@@ -225,7 +249,7 @@ class SingaporeSenderManager {
             const allInstructions = [...originalTransaction.instructions];
             
             // ADD COMPUTE BUDGET INSTRUCTIONS (must be first)
-            const computeUnits = options.computeUnits || 100_000;
+            const computeUnits = options.computeUnits || 400_000; // Increased from 100,000 to 400,000 for Pump.fun
             const priorityFee = typeof options.priorityFee === 'string' && options.priorityFee === 'dynamic' ? 
                 200_000 : (options.priorityFee || 200_000); // Convert 'dynamic' to default value
             
@@ -299,8 +323,8 @@ class SingaporeSenderManager {
                             Buffer.from(transaction.serialize()).toString('base64'),
                             {
                                 encoding: 'base64',
-                                skipPreflight: true,    // Required for Sender
-                                maxRetries: 0           // Implement our own retry logic
+                                skipPreflight: true,    
+                                maxRetries: 0           
                             }
                         ]
                     })
@@ -329,7 +353,7 @@ class SingaporeSenderManager {
         throw new Error('All retry attempts failed');
     }
 
-    // Confirm transaction with timeout
+    // Confirm transaction with timeout and validate success
     async confirmTransaction(signature, timeout = 15000) {
         const startTime = Date.now();
         const interval = 1000; // Check every 1 second
@@ -339,12 +363,38 @@ class SingaporeSenderManager {
         while (Date.now() - startTime < timeout) {
             try {
                 const status = await this.connection.getSignatureStatuses([signature]);
-                const confirmationStatus = status?.value[0]?.confirmationStatus;
+                const signatureStatus = status?.value[0];
+                const confirmationStatus = signatureStatus?.confirmationStatus;
                 
                 if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
                     const confirmationTime = Date.now() - startTime;
-                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed in ${confirmationTime}ms`);
-                    return confirmationTime;
+                    
+                    // ✅ VALIDATE TRANSACTION SUCCESS
+                    if (signatureStatus?.err) {
+                        console.error(`[SINGAPORE-SENDER] ❌ Transaction FAILED: ${JSON.stringify(signatureStatus.err)}`);
+                        console.error(`[SINGAPORE-SENDER] 🔍 Failed signature: ${signature}`);
+                        
+                        // Get detailed transaction info for debugging
+                        try {
+                            const details = await this.getTransactionDetails(signature);
+                            if (details.error) {
+                                console.error(`[SINGAPORE-SENDER] 🔍 Transaction details: ${details.error}`);
+                            } else {
+                                console.error(`[SINGAPORE-SENDER] 🔍 Compute units consumed: ${details.computeUnitsConsumed}`);
+                                console.error(`[SINGAPORE-SENDER] 🔍 Fee paid: ${details.fee} lamports`);
+                                if (details.logMessages && details.logMessages.length > 0) {
+                                    console.error(`[SINGAPORE-SENDER] 🔍 Log messages:`, details.logMessages.slice(0, 3)); // Show first 3 logs
+                                }
+                            }
+                        } catch (detailError) {
+                            console.error(`[SINGAPORE-SENDER] ⚠️ Could not fetch transaction details:`, detailError.message);
+                        }
+                        
+                        throw new Error(`Transaction failed: ${JSON.stringify(signatureStatus.err)}`);
+                    }
+                    
+                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed and SUCCESSFUL in ${confirmationTime}ms`);
+                    return { confirmationTime, success: true };
                 }
                 
                 // Log progress
@@ -360,6 +410,35 @@ class SingaporeSenderManager {
         }
         
         throw new Error(`Transaction confirmation timeout after ${timeout}ms`);
+    }
+
+    // Get detailed transaction information for debugging
+    async getTransactionDetails(signature) {
+        try {
+            const transaction = await this.connection.getTransaction(signature, {
+                encoding: 'json',
+                maxSupportedTransactionVersion: 0
+            });
+            
+            if (!transaction) {
+                return { error: 'Transaction not found' };
+            }
+            
+            return {
+                signature,
+                success: !transaction.meta.err,
+                error: transaction.meta.err,
+                computeUnitsConsumed: transaction.meta.computeUnitsConsumed,
+                fee: transaction.meta.fee,
+                logMessages: transaction.meta.logMessages,
+                preBalances: transaction.meta.preBalances,
+                postBalances: transaction.meta.postBalances,
+                preTokenBalances: transaction.meta.preTokenBalances,
+                postTokenBalances: transaction.meta.postTokenBalances
+            };
+        } catch (error) {
+            return { error: error.message };
+        }
     }
 
     // Update execution statistics
@@ -430,45 +509,8 @@ class SingaporeSenderManager {
         }
     }
 
-    // Simulate transaction to get compute units
-    async simulateTransaction(instructions, keypair, blockhash) {
-        try {
-            console.log(`[SINGAPORE-SENDER] 🔍 Simulating transaction for compute units...`);
-            
-            const testInstructions = [
-                ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
-                ...instructions,
-            ];
-
-            const testTransaction = new VersionedTransaction(
-                new TransactionMessage({
-                    instructions: testInstructions,
-                    payerKey: keypair.publicKey,
-                    recentBlockhash: blockhash,
-                }).compileToV0Message()
-            );
-            testTransaction.sign([keypair]);
-
-            const simulation = await this.connection.simulateTransaction(testTransaction, {
-                replaceRecentBlockhash: true,
-                sigVerify: false,
-            });
-
-            if (!simulation.value.unitsConsumed) {
-                throw new Error('Simulation failed to return compute units');
-            }
-
-            const units = simulation.value.unitsConsumed;
-            const computeUnits = units < 1000 ? 1000 : Math.ceil(units * 1.1); // 10% margin
-            
-            console.log(`[SINGAPORE-SENDER] 🔧 Simulated compute units: ${units}, Using: ${computeUnits}`);
-            return computeUnits;
-            
-        } catch (error) {
-            console.warn('[SINGAPORE-SENDER] ⚠️ Simulation failed, using default compute units:', error.message);
-            return 100_000; // Default compute units
-        }
-    }
+    // REMOVED: simulateTransaction function - unnecessary overhead for copy trading
+    // We now use fixed optimized compute units for speed
 
     // ULTRA-FAST copy trade execution
     async executeCopyTrade(instructions, keypair, options = {}) {
@@ -507,8 +549,8 @@ class SingaporeSenderManager {
             const { value: blockhashInfo } = await this.connection.getLatestBlockhashAndContext('confirmed');
             const { blockhash, lastValidBlockHeight } = blockhashInfo;
             
-            // Get dynamic compute units
-            const computeUnits = await this.simulateTransaction(instructions, keypair, blockhash);
+            // Use much higher compute units for Pump.fun trades (they are very compute-intensive)
+            const computeUnits = 3_000_000; // Significantly increased for Pump.fun operations
             
             // Get dynamic priority fee
             const priorityFee = await this.getDynamicPriorityFee(instructions, keypair.publicKey, blockhash);

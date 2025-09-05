@@ -49,30 +49,30 @@ CacheManager (Quantum Core) initialized.
 [websocket] Initializing worker...
 [DB] Database tables created successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [DB] DatabaseManager initialized successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [DB] DatabaseManager initialized successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [telegram] Initializing worker...
 [DB] Database connected successfully at /home/zapbot/zap-mono/database/zapbot.db 
 [DB] Database tables created successfully 
 [DB] DatabaseManager initialized successfully 
 RPCLoadBalancer initialized with 1 endpoints.
-SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+SolanaManager created. RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [ApiManager] Initialized with Helius-native logic.
 ✅ Worker monitor is ready
 [2025-09-01T18:27:50.791Z] [monitor] [INFO] Trader monitor worker initialized successfully {}
 [monitor] Worker initialized successfully
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
-✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
 [ApiManager] Initialized with Helius-native logic.
 ✅ Worker analyzer is ready
 [2025-09-01T18:27:50.944Z] [analyzer] [INFO] Queue processing started { interval: 1000 }

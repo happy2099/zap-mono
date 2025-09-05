@@ -2734,7 +2734,7 @@
 //       recipientAddress: string
 //     ): Promise<string> {
 //       const connection = new Connection(
-//         'https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY'
+//         'https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY'
 //       );
       
 //       const { value: { blockhash } } = await connection.getLatestBlockhashAndContext('confirmed');
@@ -3037,7 +3037,7 @@
 //   recipientAddress: string
 // ): Promise<string> {
 //   const connection = new Connection(
-//     `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
+//     `https://atlas-mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
 //   );
   
 //   const { value: { blockhash } } = await connection.getLatestBlockhashAndContext('confirmed');
@@ -3171,7 +3171,7 @@
 //   keypair: Keypair, 
 //   instructions: TransactionInstruction[]
 // ): Promise<string> {
-//   const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
+//   const connection = new Connection('https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
   
 //   // Validate user hasn't included compute budget instructions
 //   const hasComputeBudget = instructions.some(ix => 
@@ -3503,7 +3503,7 @@
 //       recipientAddress: string
 //     ): Promise<string> {
 //       const connection = new Connection(
-//         'https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY'
+//         'https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY'
 //       );
       
 //       const { value: { blockhash } } = await connection.getLatestBlockhashAndContext('confirmed');
@@ -3806,7 +3806,7 @@
 //   recipientAddress: string
 // ): Promise<string> {
 //   const connection = new Connection(
-//     `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
+//     `https://atlas-mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`
 //   );
   
 //   const { value: { blockhash } } = await connection.getLatestBlockhashAndContext('confirmed');
@@ -3940,7 +3940,7 @@
 //   keypair: Keypair, 
 //   instructions: TransactionInstruction[]
 // ): Promise<string> {
-//   const connection = new Connection('https://mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
+//   const connection = new Connection('https://atlas-mainnet.helius-rpc.com/?api-key=YOUR_API_KEY');
   
 //   // Validate user hasn't included compute budget instructions
 //   const hasComputeBudget = instructions.some(ix => 

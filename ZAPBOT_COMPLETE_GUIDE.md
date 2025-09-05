@@ -367,7 +367,7 @@ npm start
 ```env
 # Required
 TELEGRAM_BOT_TOKEN=your_bot_token
-RPC_URL=https://mainnet.helius-rpc.com/?api-key=your_key
+RPC_URL=https://atlas-mainnet.helius-rpc.com/?api-key=your_key
 PUBLIC_KEY=your_wallet_public_key
 PRIVATE_KEY=your_wallet_private_key
 
@@ -444,7 +444,7 @@ npm run start:legacy
 # Solution 2: Check RPC connection
 curl -X POST -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","id":1,"method":"getHealth"}' \
-  https://mainnet.helius-rpc.com/?api-key=your_key
+  https://atlas-mainnet.helius-rpc.com/?api-key=your_key
 
 # Solution 3: Check trader monitoring
 # Verify trader wallets are active

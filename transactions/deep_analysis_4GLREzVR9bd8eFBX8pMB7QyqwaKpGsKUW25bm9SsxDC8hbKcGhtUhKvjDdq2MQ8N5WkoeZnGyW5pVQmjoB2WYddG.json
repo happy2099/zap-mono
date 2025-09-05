@@ -1,0 +1,114 @@
+{
+  "timestamp": "2025-09-04T20:26:06.368Z",
+  "signature": "4GLREzVR9bd8eFBX8pMB7QyqwaKpGsKUW25bm9SsxDC8hbKcGhtUhKvjDdq2MQ8N5WkoeZnGyW5pVQmjoB2WYddG",
+  "traderAddress": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+  "analysisType": "comprehensive_transaction_analysis",
+  "summary": {
+    "totalProgramsExecuted": 8,
+    "identifiedPlatforms": 1,
+    "unknownPrograms": 7,
+    "analysisConfidence": "low"
+  },
+  "platformDetection": {
+    "identifiedPlatforms": [
+      {
+        "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+        "platformName": "Pump.fun",
+        "confidence": "high",
+        "detectionMethod": "program_id_match",
+        "description": "Meme token launchpad and trading platform"
+      }
+    ],
+    "unknownPrograms": [
+      {
+        "programId": "SysvarRecentB1ockHashes11111111111111111111",
+        "type": "system_program",
+        "description": "Solana system program for recent block hashes"
+      },
+      {
+        "programId": "jitodontfrontd1111111TradeWithAxiomDotTrade",
+        "type": "unknown_dex",
+        "description": "Unknown DEX or trading program - requires further investigation"
+      },
+      {
+        "programId": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "AVmoTthdrX6tKt4nDjco2D775W2YK3sDhxPcMmzUAmTY",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      },
+      {
+        "programId": "8vFGAKdwpn4hk7kc1cBgfWZzpyW3MEMDATDzVZhddeQb",
+        "type": "unknown",
+        "description": "Unknown program - requires platform identification"
+      }
+    ]
+  },
+  "transactionStructure": {
+    "outerInstructions": 6,
+    "innerInstructions": 1,
+    "loadedAddresses": 2,
+    "programExecutionTraces": 41,
+    "accountKeys": 15,
+    "complexity": "low"
+  },
+  "eventTraces": [
+    {
+      "type": "program_invocation",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "stackHeight": 2,
+      "logIndex": 12,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [2]",
+      "timestamp": 1757017566363
+    },
+    {
+      "type": "program_invocation",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "stackHeight": 3,
+      "logIndex": 30,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [3]",
+      "timestamp": 1757017566366
+    },
+    {
+      "type": "program_completion",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "logIndex": 32,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+      "timestamp": 1757017566366
+    },
+    {
+      "type": "program_completion",
+      "programId": "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
+      "logIndex": 34,
+      "logMessage": "Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P success",
+      "timestamp": 1757017566366
+    }
+  ],
+  "analysisMetadata": {
+    "analysisVersion": "2.0",
+    "eventBasedDetection": true,
+    "logMessageAnalysis": false,
+    "innerInstructionAnalysis": true,
+    "programExecutionTracing": true
+  },
+  "recommendations": [
+    "Primary platform identified: Pump.fun",
+    "7 unknown programs require platform identification",
+    "Transaction shows low complexity with nested instructions",
+    "Event-based detection successfully identified main trading platform"
+  ],
+  "logType": "deep_analysis"
+}

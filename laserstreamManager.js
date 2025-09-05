@@ -35,7 +35,6 @@ class LaserStreamManager extends EventEmitter {
         };
         
         console.log('[LASERSTREAM-ENHANCED] 🚀 Manager initialized with Singapore regional endpoints.');
-        console.log(`[LASERSTREAM-ENHANCED] 🌏 Singapore Endpoints: ${JSON.stringify(this.singaporeEndpoints, null, 2)}`);
     }
 
     async startMonitoring() {

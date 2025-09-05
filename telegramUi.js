@@ -592,7 +592,7 @@ async showTradersList(chatId) {
             };
         });
         
-        console.log(`[Traders List] Processed ${Object.keys(userTraders).length} traders:`, Object.keys(userTraders));
+        // console.log(`[Traders List] Processed ${Object.keys(userTraders).length} traders:`, Object.keys(userTraders));
     } catch (error) {
         console.error('Error loading traders:', error);
         userTraders = {};
@@ -659,7 +659,6 @@ async showTradersMenu(chatId, action) {
                 addedAt: trader.created_at
             };
         });
-        console.log(`[Traders Menu] Processed ${Object.keys(userTraders).length} traders:`, Object.keys(userTraders));
     } catch (error) {
         console.error('Error loading traders for menu:', error);
         userTraders = {};
@@ -1235,10 +1234,13 @@ async showTradersMenu(chatId, action) {
     async sendOrEditMessage(chatId, text, options = {}, messageId = null) {
         messageId = messageId || this.latestMessageIds.get(chatId);
         const finalOptions = { parse_mode: 'MarkdownV2', disable_web_page_preview: true, ...options };
+        
+        // Ensure text is properly escaped for MarkdownV2 if not already escaped
+        const escapedText = text.includes('\\-') ? text : escapeMarkdownV2(text);
 
         try {
             if (messageId) {
-                const editedMessage = await this.bot.editMessageText(text, { ...finalOptions, chat_id: chatId, message_id: messageId });
+                const editedMessage = await this.bot.editMessageText(escapedText, { ...finalOptions, chat_id: chatId, message_id: messageId });
                 this.latestMessageIds.set(chatId, editedMessage.message_id);
                 return editedMessage;
             } else {
@@ -1250,7 +1252,7 @@ async showTradersMenu(chatId, action) {
             }
 
             try {
-                const newMessage = await this.bot.sendMessage(chatId, text, finalOptions);
+                const newMessage = await this.bot.sendMessage(chatId, escapedText, finalOptions);
                 this.latestMessageIds.set(chatId, newMessage.message_id);
                 return newMessage;
             } catch (sendError) {

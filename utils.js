@@ -39,7 +39,8 @@ function formatTokenAmount(amount, decimals) {
 function escapeMarkdownV2(textInput) {
     if (textInput == null) return '';
     const text = String(textInput);
-    const escapeCharsRegex = /[_*[\]()~`>#+-=|{}.!]/g;
+    // Include hyphen (-) at the end to avoid range interpretation in regex
+    const escapeCharsRegex = /[_*[\]()~`>#+=|{}.!-]/g;
     return text
         .replace(/\\/g, '\\\\')
         .replace(escapeCharsRegex, (match) => `\\${match}`);

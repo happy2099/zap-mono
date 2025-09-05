@@ -60,12 +60,18 @@ async initialize() {
         const schemaPath = path.join(__dirname, 'schema.sql');
         const schema = await fs.readFile(schemaPath, 'utf8');
         
-        // Split schema into individual statements
-        const statements = schema.split(';').filter(stmt => stmt.trim());
+        // Split schema into individual statements and filter out comments and empty statements
+        const statements = schema
+            .split(';')
+            .map(stmt => stmt.trim())
+            .filter(stmt => stmt && !stmt.startsWith('--') && stmt.length > 0);
         
         for (const statement of statements) {
-            if (statement.trim()) {
+            try {
                 await this.run(statement);
+            } catch (error) {
+                console.error(`[DB] Error executing statement: ${statement.substring(0, 100)}...`);
+                throw error;
             }
         }
         
@@ -100,72 +106,21 @@ async initialize() {
         });
     }
 
-    // Blackbox logging methods
-    async logBlackbox(component, level, message, data = null) {
-        try {
-            const dataJson = data ? JSON.stringify(data) : null;
-            await this.run(
-                'INSERT INTO blackbox_logs (component, level, message, data) VALUES (?, ?, ?, ?)',
-                [component, level, message, dataJson]
-            );
-        } catch (error) {
-            console.error('Failed to log to blackbox:', error);
-        }
-    }
-
+    // Enhanced logging methods
     async logInfo(component, message, data = null) {
-        await this.logBlackbox(component, 'INFO', message, data);
+        console.log(`[${component}] INFO: ${message}`, data ? JSON.stringify(data, null, 2) : '');
     }
 
     async logError(component, message, data = null) {
-        await this.logBlackbox(component, 'ERROR', message, data);
+        console.error(`[${component}] ERROR: ${message}`, data ? JSON.stringify(data, null, 2) : '');
     }
 
     async logWarning(component, message, data = null) {
-        await this.logBlackbox(component, 'WARNING', message, data);
+        console.warn(`[${component}] WARNING: ${message}`, data ? JSON.stringify(data, null, 2) : '');
     }
 
     async logDebug(component, message, data = null) {
-        await this.logBlackbox(component, 'DEBUG', message, data);
-    }
-
-    // Get blackbox logs
-    async getBlackboxLogs(component = null, level = null, limit = 100) {
-        let sql = 'SELECT * FROM blackbox_logs';
-        const params = [];
-        
-        if (component || level) {
-            sql += ' WHERE';
-            if (component) {
-                sql += ' component = ?';
-                params.push(component);
-            }
-            if (level) {
-                sql += component ? ' AND level = ?' : ' level = ?';
-                params.push(level);
-            }
-        }
-        
-        sql += ' ORDER BY timestamp DESC LIMIT ?';
-        params.push(limit);
-        
-        return await this.all(sql, params);
-    }
-
-    // Clear old blackbox logs (keep last 1000 entries)
-    async clearOldBlackboxLogs() {
-        try {
-            await this.run(`
-                DELETE FROM blackbox_logs 
-                WHERE id NOT IN (
-                    SELECT id FROM blackbox_logs 
-                    ORDER BY timestamp DESC 
-                    LIMIT 1000
-                )
-            `);
-        } catch (error) {
-            console.error('Failed to clear old blackbox logs:', error);
-        }
+        console.debug(`[${component}] DEBUG: ${message}`, data ? JSON.stringify(data, null, 2) : '');
     }
 
     // User management

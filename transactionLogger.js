@@ -109,9 +109,9 @@ class TransactionLogger {
     }
 
     /**
-     * Log deep analysis results to JSON file
+     * Log deep analysis results to JSON file with trader-specific naming
      */
-    logDeepAnalysis(signature, deepAnalysisData) {
+    logDeepAnalysis(signature, deepAnalysisData, traderAddress = null) {
         try {
             const timestamp = new Date().toISOString();
             const filename = `deep_analysis_${signature}.json`;
@@ -120,12 +120,13 @@ class TransactionLogger {
             const logData = {
                 timestamp,
                 signature,
-                deepAnalysis: deepAnalysisData,
+                traderAddress: traderAddress || signature,
+                ...deepAnalysisData, // Spread the analysis data directly
                 logType: 'deep_analysis'
             };
 
             fs.writeFileSync(filepath, JSON.stringify(logData, null, 2));
-            console.log(`[TRANSACTION-LOGGER] 📝 Deep analysis logged to: ${filename}`);
+            console.log(`[TRANSACTION-LOGGER] 📝 Deep analysis logged to: ${filename} for trader: ${traderAddress || signature}`);
             
             return filepath;
         } catch (error) {

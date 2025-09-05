@@ -67,6 +67,11 @@ class TelegramWorker extends BaseWorker {
             } else {
                 this.setupActionHandlers();
                 
+                // Register message handlers with the base class
+                this.registerHandler('SEND_MESSAGE', this.handleSendMessage.bind(this));
+                this.registerHandler('send_message', this.handleSendMessage.bind(this));
+                this.registerHandler('PIN_MESSAGE', this.handlePinMessage.bind(this));
+                
                 // Manually start polling to avoid conflicts
                 const pollingStarted = this.telegramUi.startPolling();
                 if (pollingStarted) {
@@ -115,29 +120,26 @@ class TelegramWorker extends BaseWorker {
         });
     }
 
-    async handleMessage(message) {
-        if (message.type === 'SEND_MESSAGE') {
-            const { chatId, text, options } = message.payload;
-            try {
-                // Use the internal TelegramUI instance to send the message
-                await this.telegramUi.sendOrEditMessage(chatId, text, options);
-                this.logInfo('Sent message via worker', { chatId });
-            } catch (error) {
-                this.logError('Failed to send message via worker', { chatId, error: error.message });
+    async handleSendMessage(message) {
+        const { chatId, text, options } = message.payload;
+        try {
+            // Use the internal TelegramUI instance to send the message
+            await this.telegramUi.sendOrEditMessage(chatId, text, options);
+            this.logInfo('Sent message via worker', { chatId });
+        } catch (error) {
+            this.logError('Failed to send message via worker', { chatId, error: error.message });
+        }
+    }
+
+    async handlePinMessage(message) {
+        const { chatId, messageId, disable_notification } = message.payload;
+        try {
+            if (this.telegramUi && this.telegramUi.bot) {
+                await this.telegramUi.bot.pinChatMessage(chatId, messageId, { disable_notification });
+                this.logInfo('Message pinned via worker', { chatId, messageId });
             }
-        } else if (message.type === 'PIN_MESSAGE') {
-            const { chatId, messageId, disable_notification } = message.payload;
-            try {
-                if (this.telegramUi && this.telegramUi.bot) {
-                    await this.telegramUi.bot.pinChatMessage(chatId, messageId, { disable_notification });
-                    this.logInfo('Message pinned via worker', { chatId, messageId });
-                }
-            } catch (error) {
-                this.logError('Failed to pin message via worker', { chatId, error: error.message });
-            }
-        } else {
-            // This is the existing line, keep it
-            await super.handleMessage(message);
+        } catch (error) {
+            this.logError('Failed to pin message via worker', { chatId, error: error.message });
         }
     }
 
