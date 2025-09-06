@@ -256,16 +256,6 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
         OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'),
         // Router program that wraps Pump.fun instructions
         CUSTOM_ROUTER: new PublicKey('F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq'),
-        
-        // ==========================================
-        // UNKNOWN PROGRAMS - Auto-detected by analyzer
-        // ==========================================
-        // Add unknown program IDs here when detected by the analyzer
-        // The analyzer will log: [UNKNOWN-PROGRAM] 🔍 NEW UNKNOWN PROGRAM DETECTED: <program_id>
-        // Copy the suggested config line from the logs and add it here
-        // Example:
-        // UNKNOWN_DEX_1: new PublicKey('YourUnknownProgramIdHere'),
-        // UNKNOWN_DEX_2: new PublicKey('AnotherUnknownProgramIdHere'),
        
         
     },
@@ -276,8 +266,8 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
         'https://api.pump.fun/coins/',           // Official API  
     ],
     // Note: Primary data fetching now uses Helius RPC for reliability
-    PUMP_FUN_BUY_DISCRIMINATOR: Buffer.from('169168196c813e37', 'hex'), // Correct BUY discriminator (global:buy)
-    PUMP_FUN_SELL_DISCRIMINATOR: Buffer.from('43a0271383796d13', 'hex'), // Correct SELL discriminator (global:sell)
+    PUMP_FUN_BUY_DISCRIMINATOR: Buffer.from('66063d1201daebea', 'hex'), // Correct BUY discriminator (global:buy)
+    PUMP_FUN_SELL_DISCRIMINATOR: Buffer.from('33e685a4017f83ad', 'hex'), // Correct SELL discriminator (global:sell)
     PUMP_AMM_BUY_DISCRIMINATOR: Buffer.from([27, 57, 130, 10, 211, 244, 242, 167]),
     PUMP_AMM_SELL_DISCRIMINATOR: Buffer.from([124, 74, 67, 128, 26, 10, 120, 93]),
     PUMP_FUN_PROGRAM_ID: new PublicKey('6EF8rrecthR5DkVaGFKLkma4YkdrkvPPHoqUPLQkwQjR'),

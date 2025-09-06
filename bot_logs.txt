@@ -1,0 +1,219 @@
+
+> zapbot@1.5.2 start:threaded
+> node start.js --threading
+
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[PERFORMANCE-MONITOR] 🔄 Periodic saving started (every 60s)
+🚀 Starting ZapBot with Helius integration...
+⚡ ULTRA-LOW LATENCY optimizations enabled:
+   - LaserStream: <100ms detection target
+   - Sender: <200ms execution target
+   - Overall: <300ms copy trade cycle target
+📊 Performance monitoring active
+📊 Initializing SQLite database...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+✅ Database initialized successfully
+🔴 Initializing Redis for flight data...
+✅ RedisManager initialized successfully
+🔥 Warming up Redis cache...
+✅ Cache warming completed
+✅ Redis initialized successfully
+🧵 Threaded mode: Skipping legacy DataManager initialization
+🔄 Checking for data migration...
+✅ Database already contains data, skipping migration.
+🤖 Starting main ZapBot application...
+🧵 Starting in THREADED mode...
+🧵 ThreadedZapBot initialized with worker configuration
+🚀 Starting ThreadedZapBot initialization...
+🔧 Initializing worker threads...
+🔧 Created worker: telegram
+🔧 Created worker: monitor
+🔧 Created worker: executor
+🔧 Created worker: data
+🔧 Created worker: websocket
+🔧 Created worker: analyzer
+✅ 6 workers initialized
+💓 Worker monitoring started (interval: 30000ms)
+⏳ Waiting for workers to be ready...
+[data] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+✅ Worker data is ready
+[DB] DatabaseManager initialized successfully 
+[2025-09-06T22:11:22.267Z] [data] [INFO] Database manager worker initialized successfully {}
+[data] Worker initialized successfully
+[analyzer] Initializing worker...
+[executor] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[websocket] Initializing worker...
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[telegram] Initializing worker...
+[2025-09-06T22:11:26.037Z] [telegram] [INFO] ✅ This worker marked as active Telegram instance {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[WM Init] SolanaManager instance set.
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker websocket is ready
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker analyzer is ready
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[TELEGRAM_UI] TelegramUI initialized. 
+[TELEGRAM_UI] BOT_TOKEN: "Set"
+🔍 DEBUG: BOT_TOKEN value: 8334266790...
+🔍 DEBUG: BOT_TOKEN length: 46
+✅ DEBUG: Token validation passed, proceeding with bot initialization
+✅ DEBUG: Using polling mode with WSL stability fixes
+[TELEGRAM_UI] TelegramBot instance created: "Success"
+✅ TelegramUI: Bot ready in polling mode with WSL stability
+[2025-09-06T22:11:27.011Z] [telegram] [INFO] Telegram UI initialized successfully in polling mode {}
+[telegram] Worker initialized successfully
+✅ Worker telegram is ready
+[2025-09-06T22:11:27.008Z] [websocket] [INFO] WebSocket worker initialized successfully {}
+[websocket] Worker initialized successfully
+[2025-09-06T22:11:27.008Z] [analyzer] [INFO] Queue processing started { interval: 1000 }
+[2025-09-06T22:11:27.008Z] [analyzer] [INFO] Transaction analyzer worker initialized successfully {}
+[analyzer] Worker initialized successfully
+[WM Init] SolanaManager instance set.
+[TELEGRAM_UI] Telegram Bot authorized for: @Hydra_zapbot 
+✅ TelegramUI: Bot created in polling mode
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[ApiManager] Initialized with Helius-native logic.
+✅ RedisManager initialized successfully
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[monitor] Initializing worker...
+[2025-09-06T22:11:29.477Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY Trader Monitor with LaserStream... {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+[LASERSTREAM-ENHANCED] 🚀 Manager initialized with Singapore regional endpoints.
+[2025-09-06T22:11:29.542Z] [monitor] [INFO] Starting ULTRA-LOW LATENCY LaserStream monitoring... {}
+[2025-09-06T22:11:29.592Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY LaserStream to monitor 2 specific trader wallets. {}
+[2025-09-06T22:11:29.594Z] [monitor] [INFO] ⚡ Target detection latency: <100ms {}
+[2025-09-06T22:11:29.594Z] [monitor] [INFO] 🔧 Using PROCESSED commitment for fastest possible detection {}
+[2025-09-06T22:11:29.595Z] [monitor] [INFO] 📡 Zstd compression enabled for optimal performance {}
+[LASERSTREAM-ENHANCED] 🎯 Subscribing to 2 master trader wallets...
+[LASERSTREAM-ENHANCED] 📍 Traders: suqh...HQfK, 4BdK...EFUk
+[LASERSTREAM-ENHANCED] 🔧 Using enhanced subscription with data slicing and Singapore endpoint
+[LASERSTREAM-ENHANCED] ✅ Stream connected to Singapore endpoint. ID: a9e63a53-e09e-4357-95eb-4fe467c16df6
+[2025-09-06T22:11:29.782Z] [monitor] [INFO] Starting direct RPC polling as backup... {}
+[2025-09-06T22:11:29.784Z] [monitor] [INFO] 🚀 Starting dynamic direct RPC polling... {}
+✅ Worker monitor is ready
+[2025-09-06T22:11:29.793Z] [monitor] [INFO] 📊 Monitoring 2 wallets via RPC polling {}
+[2025-09-06T22:11:29.794Z] [monitor] [INFO] ✅ Dynamic direct RPC polling started successfully {}
+[2025-09-06T22:11:29.794Z] [monitor] [INFO] Starting periodic subscription refresh... {}
+[2025-09-06T22:11:29.795Z] [monitor] [INFO] ✅ Periodic refresh started (every 5 minutes) {}
+[monitor] Worker initialized successfully
+✅ Worker executor is ready
+[TradeNotificationManager] Initialized in Threaded Dispatch mode.
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[SINGAPORE-SENDER] 🚀 ULTRA-FAST Manager initialized with Singapore regional endpoints
+TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration (ENABLED).
+[2025-09-06T22:11:31.772Z] [executor] [INFO] Trade executor worker initialized successfully {}
+[executor] Worker initialized successfully
+[FAILURE-CLEANUP] 🚀 Initialized with blockhash: 9gj33aks...
+[2025-09-06T22:11:32.127Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 4275PKFQ... {}
+[2025-09-06T22:11:32.239Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 4275PKFQ... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 4275PKFQ...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-06T22:11:32.242Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '4275PKFQ...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 4275...imsV
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 4275...imsV...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 4275...imsV
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -0.106474348 SOL (Raw: -106474348)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -106474348, Token received: H9mJ...pump
+[ANALYZER] ✅ Trade detected! Analyzing platform...
+[ANALYZER] 🔬 Performing deep analysis for platform detection...
+[EVENT-ANALYSIS] 🔍 Analyzing transaction events for platform detection...
+[ROUTER-DETECTION] 🔍 Searching for Router instruction...
+[ROUTER-DETECTION] 🎯 Found Custom Router instruction at index 3
+[ROUTER-DETECTION] ✅ Router instruction confirmed with trader as signer
+[EVENT-ANALYSIS] 🎯 Router detected at instruction 3
+[ANALYZER] 🎯 Deep analysis found platform: Router (F5tf...zvBq)
+[ANALYZER] ✅ Platform detected via deep analysis: Router
+[ANALYZER] ⏭️ Skipping traditional analysis - platform already identified
+[ANALYZER] 🎉 SUCCESS! BUY on Router | 0.1065 SOL → H9mJ...pump | Fee: 0.001005 SOL | Slot: 365121711
+[ANALYZER] 🎯 Added Router cloning data to final details
+[EXECUTE_MASTER] 📊 BUY on Router | 0.1065 SOL → H9mJ...pump | Fee: 0.001005 SOL | Slot: 365121711
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: Router, Type: buy
+[EXECUTE_MASTER] 🎯 Using platform from analysis: Router
+[EXECUTE_MASTER] 🔍 Debug: Analyzer Platform: Router
+[EXECUTE_MASTER] 🔍 Debug: Detected Platform: Router
+[EXECUTE_MASTER] 🔍 Debug: Executor config: { builder: [AsyncFunction: buildRouterInstruction], units: 600000 }
+[EXECUTE_MASTER] 🔍 Debug: Builder function: [AsyncFunction: buildRouterInstruction]
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 5665429224
+[EXECUTE_MASTER] 🚀 Dispatching copy for Router trade to 1 user(s).
+[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'H9mJ6CUU2x8CbE2qa5PcX7d67EbCfL5FnjcZvyWhpump',
+  dexPlatform: 'Router',
+  hasInputMint: true,
+  hasOutputMint: true,
+  inputMintType: 'string',
+  outputMintType: 'string',
+  hasCloningTarget: true
+}
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 5665429224
+[SINGAPORE-SENDER] 🔑 Master signature: 4275PKFQh5ZsA6z9yPheRDqU3MEV87DrVKXxTcLseGB48Wv2LrhULowmzJtQQWvkw78iENP69xCzS9knDPefimsV
+[SINGAPORE-SENDER] 📍 Platform: Router
+[SINGAPORE-SENDER] 🎯 Token: H9mJ...pump
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 5
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 5
+[KeypairProvider] ✅ Resolved wallet "zap" for user 3.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[TRADE-VALIDATION] 🔍 Validating trade for copy...
+[TRADE-VALIDATION] ✅ Trade validation passed! Type: buy
+[2025-09-06T22:11:32.650Z] [monitor] [INFO] 🚀 New transaction detected for wallet 4BdKaxN8... | Sig: 2vVXkABc... {}
+✅ All required workers are ready
+✅ ThreadedZapBot initialization completed successfully
+🎯 Starting trader monitoring...
+✅ Trader monitoring started (auto-run via LaserStream in worker).
+🎉 ThreadedZapBot started successfully with 6 workers
+✅ Threaded application started successfully
+🎉 ZapBot startup completed successfully!
+🏥 Health check server running on port 3001
+[2025-09-06T22:11:32.709Z] [monitor] [INFO] 🎯 Transaction detected for 4BdKaxN8... | Sig: 2vVXkABc... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: 4BdK...EFUk
+   🔑 Signature: 2vVXkABc...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...

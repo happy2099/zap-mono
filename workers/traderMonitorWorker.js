@@ -271,7 +271,10 @@ class TraderMonitorWorker extends BaseWorker {
                                 jsonrpc: '2.0',
                                 id: 1,
                                 method: 'getTransaction',
-                                params: [txInfo.signature, { maxSupportedTransactionVersion: 0 }]
+                                params: [txInfo.signature, { 
+                                    maxSupportedTransactionVersion: 0,
+                                    encoding: 'json'
+                                }]
                             })
                         });
                         

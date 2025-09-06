@@ -72,12 +72,12 @@ class TelegramWorker extends BaseWorker {
                 this.registerHandler('send_message', this.handleSendMessage.bind(this));
                 this.registerHandler('PIN_MESSAGE', this.handlePinMessage.bind(this));
                 
-                // Manually start polling to avoid conflicts
-                const pollingStarted = this.telegramUi.startPolling();
-                if (pollingStarted) {
-                    this.logInfo('Telegram UI initialized successfully with polling started');
+                // Start polling for local development
+                const botReady = this.telegramUi.startPolling();
+                if (botReady) {
+                    this.logInfo('Telegram UI initialized successfully in polling mode');
                 } else {
-                    this.logWarn('Telegram UI initialized but polling failed to start');
+                    this.logWarn('Telegram UI initialization failed');
                 }
             }
 

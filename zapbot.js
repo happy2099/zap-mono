@@ -98,11 +98,19 @@ class ZapBot {
             throw new Error(`Failed to initialize WalletManager: ${e.message}`);
         }
 
-        // 4. TelegramUI and TradeNotificationManager are handled by telegramWorker in threaded mode
-        console.log('4/6: ⚠️ TelegramUI and TradeNotificationManager handled by telegramWorker in threaded mode.');
+        // 4. Initialize TradeNotificationManager for single-threaded mode
+        try {
+            const TradeNotificationManager = require('./tradeNotifications.js');
+            // Pass 'this' (the bot instance) as the first parameter for single-threaded mode
+            this.notificationManager = new TradeNotificationManager(this, this.apiManager, null, this.databaseManager);
+            this.notificationManager.setConnection(this.solanaManager.connection);
+            console.log('4/6: ✅ TradeNotificationManager initialized for single-threaded mode.');
+        } catch (e) {
+            throw new Error(`Failed to initialize TradeNotificationManager: ${e.message}`);
+        }
 
-        // 5. Skip TradeNotificationManager initialization in threaded mode
-        console.log('5/6: ⚠️ TradeNotificationManager handled by telegramWorker in threaded mode.');
+        // 5. TelegramUI is handled by telegramWorker in threaded mode, but not needed in single-threaded mode
+        console.log('5/6: ⚠️ TelegramUI handled by telegramWorker in threaded mode (not needed in single-threaded).');
 
         // 6. Initialize TransactionAnalyzer and TradingEngine
         try {
@@ -115,7 +123,7 @@ class ZapBot {
                 databaseManager: this.databaseManager,
                 walletManager: this.walletManager,
                 transactionAnalyzer: this.transactionAnalyzer,
-                notificationManager: null, // Handled by telegramWorker in threaded mode
+                notificationManager: this.notificationManager, // Now properly initialized for single-threaded mode
                 apiManager: this.apiManager,
                 redisManager: this.redisManager
             });

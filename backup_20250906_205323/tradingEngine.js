@@ -526,7 +526,6 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
             'Pump.fun': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
             'Pump.fun BC': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
             'Pump.fun Router': { builder: platformBuilders.buildPumpFunRouterInstruction, units: 600000 },
-            'Router': { builder: platformBuilders.buildRouterInstruction, units: 600000 },
             'Pump.fun AMM': { builder: platformBuilders.buildPumpFunAmmInstruction, units: 800000 },
             'Raydium Launchpad': { builder: platformBuilders.buildRaydiumLaunchpadInstruction, units: 1400000 },
             'Raydium AMM': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
@@ -541,10 +540,10 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         };
         const executorConfig = platformExecutorMap[detectedPlatform];
         
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Analyzer Platform: ${analysisResult.details.dexPlatform}`);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Detected Platform: ${detectedPlatform}`);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Executor config:`, executorConfig);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Builder function:`, executorConfig?.builder);
+        console.log(`[EXECUTE_MASTER] 🔍 Debug: Analyzer Platform: ${analysisResult.details.dexPlatform}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Debug: Detected Platform: ${detectedPlatform}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Debug: Executor config:`, executorConfig);
+        console.log(`[EXECUTE_MASTER] 🔍 Debug: Builder function:`, executorConfig?.builder);
         
         if (!executorConfig || !executorConfig.builder) {
             console.error(`[EXECUTE_MASTER] ❌ No builder found for platform: ${detectedPlatform}`);
@@ -574,16 +573,6 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         
         console.log(`[EXECUTE_MASTER] 🚀 Dispatching copy for ${detectedPlatform} trade to ${copyJobs.length} user(s).`);
         
-        // Add Router-specific data to analysis result details
-        if (analysisResult.details.dexPlatform === 'Router') {
-            const routerDetection = analysisResult.platformDetection?.identifiedPlatforms?.[0];
-            if (routerDetection?.cloningTarget) {
-                analysisResult.details.cloningTarget = routerDetection.cloningTarget;
-                analysisResult.details.masterTraderWallet = analysisResult.details.traderPubkey;
-                console.log(`[EXECUTE_MASTER] 🎯 Added Router cloning data to analysis result`);
-            }
-        }
-
         // Debug: Log the analysisResult.details before passing to Singapore sender
         console.log(`[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender:`, {
             tradeType: analysisResult.details.tradeType,
@@ -593,8 +582,7 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
             hasInputMint: !!analysisResult.details.inputMint,
             hasOutputMint: !!analysisResult.details.outputMint,
             inputMintType: typeof analysisResult.details.inputMint,
-            outputMintType: typeof analysisResult.details.outputMint,
-            hasCloningTarget: !!analysisResult.details.cloningTarget
+            outputMintType: typeof analysisResult.details.outputMint
         });
 
         await Promise.allSettled(
@@ -669,7 +657,6 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
             'Pump.fun': platformBuilders.buildPumpFunInstruction,
             'Pump.fun BC': platformBuilders.buildPumpFunInstruction, // Added missing entry
             'Pump.fun Router': platformBuilders.buildPumpFunRouterInstruction,
-            'Router': platformBuilders.buildRouterInstruction,
             'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
             'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
             'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
@@ -804,10 +791,7 @@ if (isBuy) {
                 // ======= FEE CAPTURE START =======
         let solFee = 0;
         try {
-            const txDetails = await this.solanaManager.connection.getTransaction(signature, { 
-                maxSupportedTransactionVersion: 0,
-                encoding: 'json'
-            });
+            const txDetails = await this.solanaManager.connection.getTransaction(signature, { maxSupportedTransactionVersion: 0 });
             if (txDetails && txDetails.meta) {
                 solFee = (txDetails.meta.fee || 0) / config.LAMPORTS_PER_SOL_CONST;
             }
@@ -857,10 +841,7 @@ if (isBuy) {
 
 // Helper function extracted for clarity
 async _getAmountReceivedFromBuy(buySignature, walletAddress, tokenMint) {
-    const txInfo = await this.solanaManager.connection.getTransaction(buySignature, { 
-        maxSupportedTransactionVersion: 0,
-        encoding: 'json'
-    });
+    const txInfo = await this.solanaManager.connection.getTransaction(buySignature, { maxSupportedTransactionVersion: 0 });
     if (!txInfo || txInfo.meta.err) throw new Error(`Buy transaction ${buySignature} failed or not found.`);
 
     const postBalance = txInfo.meta.postTokenBalances.find(tb => tb.owner === walletAddress && tb.mint === tokenMint);
@@ -1024,10 +1005,7 @@ async processRaydiumV4PoolCreation(signature) {
         console.log(`[V4-SNIPER] Detected new Raydium V4 pool creation. Sig: ${shortenAddress(signature, 10)}`);
 
         // Use getParsedTransaction, as shown in the QuickNode video.
-        const tx = await this.solanaManager.connection.getParsedTransaction(signature, { 
-            maxSupportedTransactionVersion: 0,
-            encoding: 'json'
-        });
+        const tx = await this.solanaManager.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
         if (!tx || !tx.meta) {
             console.warn('[V4-SNIPER] Failed to fetch or parse the transaction.');
             return;
@@ -1709,7 +1687,6 @@ async checkPumpFunMigration(tokenMint) {
                 'Pump.fun': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
                 'Pump.fun BC': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
                 'Pump.fun Router': { builder: platformBuilders.buildPumpFunRouterInstruction, units: 600000 },
-                'Router': { builder: platformBuilders.buildRouterInstruction, units: 600000 },
                 'Pump.fun AMM': { builder: platformBuilders.buildPumpFunAmmInstruction, units: 800000 },
                 'Raydium Launchpad': { builder: platformBuilders.buildRaydiumLaunchpadInstruction, units: 1400000 },
                 'Raydium AMM': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
@@ -1721,16 +1698,6 @@ async checkPumpFunMigration(tokenMint) {
                 'Meteora CP-AMM': { builder: platformBuilders.buildMeteoraCpAmmInstruction, units: 1000000 },
             };
             const executorConfig = platformExecutorMap[analysisResult.details.dexPlatform];
-
-            // Add Router-specific data to analysis result details
-            if (analysisResult.details.dexPlatform === 'Router') {
-                const routerDetection = analysisResult.platformDetection?.identifiedPlatforms?.[0];
-                if (routerDetection?.cloningTarget) {
-                    analysisResult.details.cloningTarget = routerDetection.cloningTarget;
-                    analysisResult.details.masterTraderWallet = analysisResult.details.traderPubkey;
-                    console.log(`[WEBHOOK-DISPATCH] 🎯 Added Router cloning data to analysis result`);
-                }
-            }
 
             const copyPromises = jobs.map(job => {
                 console.log(`[WEBHOOK-DISPATCH] User ${job.userChatId} copying ${job.traderName}'s TX: ${shortenAddress(job.signature)}`);
@@ -1857,20 +1824,11 @@ async checkPumpFunMigration(tokenMint) {
         
         this.userProcessing.add(userChatId);
         
-        // Set a timeout to automatically clear the user from processing state after 30 seconds
-        const timeoutId = setTimeout(() => {
-            if (this.userProcessing.has(userChatId)) {
-                console.log(`[SINGAPORE-SENDER] ⏰ Timeout reached for user ${userChatId}, clearing processing state`);
-                this.userProcessing.delete(userChatId);
-            }
-        }, 30000); // 30 seconds timeout
-        
         try {
             console.log(`[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
-            console.log(`[SINGAPORE-SENDER] 🚀 COPY TRADE: ${tradeDetails.tradeType.toUpperCase()} ${tradeDetails.dexPlatform} | Token: ${shortenAddress(tradeDetails.outputMint)} | User: ${userChatId}`);
-            // console.log(`[SINGAPORE-SENDER] 🔑 Master signature: ${masterSignature}`);
-            // console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
-            // console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
+            console.log(`[SINGAPORE-SENDER] 🔑 Master signature: ${masterSignature}`);
+            console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
+            console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
 
             // Get user's trading wallet
             const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
@@ -1886,7 +1844,6 @@ async checkPumpFunMigration(tokenMint) {
                 'Pump.fun': platformBuilders.buildPumpFunInstruction,
                 'Pump.fun BC': platformBuilders.buildPumpFunInstruction, 
                 'Pump.fun Router': platformBuilders.buildPumpFunRouterInstruction,
-                'Router': platformBuilders.buildRouterInstruction,
                 'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
                 'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
                 'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
@@ -1921,9 +1878,9 @@ async checkPumpFunMigration(tokenMint) {
             
             const builder = builderMap[tradeDetails.dexPlatform];
             
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Platform: ${tradeDetails.dexPlatform}`);
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder found:`, !!builder);
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder function:`, builder?.name || 'undefined');
+            console.log(`[SINGAPORE-SENDER] 🔍 Debug: Platform: ${tradeDetails.dexPlatform}`);
+            console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder found:`, !!builder);
+            console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder function:`, builder?.name || 'undefined');
             
             // If no specific builder found, throw error - we should have builders for all known platforms
             if (!builder && tradeDetails.dexPlatform !== 'Unknown DEX') {
@@ -2029,9 +1986,6 @@ async checkPumpFunMigration(tokenMint) {
                 apiManager: this.apiManager, // Add apiManager for Pump.fun API calls
                 sdk: new (require('@pump-fun/pump-sdk').PumpSdk)(this.solanaManager.connection), // Add Pump.fun SDK instance
                 originalTransaction: tradeDetails.originalTransaction, // Add original transaction data for pool extraction
-                // Router-specific options
-                cloningTarget: tradeDetails.cloningTarget, // For Router cloning
-                masterTraderWallet: tradeDetails.masterTraderWallet, // For Router cloning
             };
 
             // ✅ HELIUS SENDER HANDLES COMPUTE BUDGET AUTOMATICALLY
@@ -2052,21 +2006,10 @@ async checkPumpFunMigration(tokenMint) {
             }, { status: 'building_instructions' });
             
             // Build platform-specific instructions
-            // console.log(`[SINGAPORE-SENDER] 🔧 Calling builder function: ${builder.name}`);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Builder options keys:`, Object.keys(builderOptions));
+            const instructions = await builder(builderOptions);
             
-            let instructions;
-            try {
-                instructions = await builder(builderOptions);
-            } catch (builderError) {
-                console.error(`[SINGAPORE-SENDER] ❌ Builder function failed:`, builderError.message);
-                console.error(`[SINGAPORE-SENDER] ❌ Builder error stack:`, builderError.stack);
-                throw new Error(`Builder function failed: ${builderError.message}`);
-            }
-            
-            // console.log(`[SINGAPORE-SENDER] 🔧 Builder returned:`, typeof instructions, instructions);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Built ${instructions ? instructions.length : 'undefined'} platform instructions`);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Helius Sender will add compute budget automatically`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Built ${instructions.length} platform instructions`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Helius Sender will add compute budget automatically`);
 
             if (!instructions || instructions.length === 0) {
                 throw new Error(`Failed to build instructions for ${tradeDetails.dexPlatform}`);
@@ -2271,8 +2214,6 @@ async checkPumpFunMigration(tokenMint) {
 
             throw error;
         } finally {
-            // Clear the timeout
-            clearTimeout(timeoutId);
             // Always remove user from processing set to prevent deadlock
             this.userProcessing.delete(userChatId);
         }

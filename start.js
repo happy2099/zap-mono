@@ -184,7 +184,10 @@ class ZapBotStartup {
             // CRITICAL FIX: Instantiate the bot, THEN give it the real managers.
             const bot = new ZapBot();
             bot.setDatabaseManager(this.databaseManager); // Inject the one true DB manager.
-            bot.notificationManager.setDatabaseManager(this.databaseManager); // Also inject it into the notification manager for PnL calcs.
+            // Note: notificationManager is null in single-threaded mode (handled by telegramWorker in threaded mode)
+            if (bot.notificationManager) {
+                bot.notificationManager.setDatabaseManager(this.databaseManager); // Also inject it into the notification manager for PnL calcs.
+            }
             // bot.setRedisManager(this.redisManager); // Optional for future Redis use
 
             // Initialize the bot with the correct context

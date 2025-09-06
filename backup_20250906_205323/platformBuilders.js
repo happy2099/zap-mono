@@ -258,39 +258,124 @@ async function testRouterInstructionClone(builderOptions) {
 
 // Router instruction builder - Perfect cloning of master trader's router instruction
 async function buildRouterInstruction(builderOptions) {
-    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, originalTransaction, cloningTarget, masterTraderWallet } = builderOptions;
+    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, originalTransaction } = builderOptions;
     
     console.log(`[ROUTER-BUILDER] 🔧 Building router instruction for user ${shortenAddress(userPublicKey.toString())}`);
     console.log(`[ROUTER-BUILDER] 💰 Amount: ${amountBN.toString()} lamports`);
     
     try {
-        // Use the RouterCloner for perfect cloning
-        const routerCloner = new RouterCloner(connection);
-        
-        const cloneOptions = {
-            userPublicKey: userPublicKey,
-            cloningTarget: cloningTarget,
-            masterTraderWallet: masterTraderWallet,
-            tradeType: swapDetails.tradeType,
-            inputMint: swapDetails.inputMint,
-            outputMint: swapDetails.outputMint,
-            amountBN: amountBN,
-            slippageBps: slippageBps
-        };
-        
-        const result = await routerCloner.buildClonedRouterInstruction(cloneOptions);
-        
-        console.log(`[ROUTER-BUILDER] ✅ Router cloning successful:`, {
-            instructionCount: result.instructions.length,
-            platform: result.platform,
-            method: result.method
+        // Get the router instruction from the original transaction
+        const routerInstruction = originalTransaction.transaction.message.instructions[4]; // Router is at index 4
+        console.log(`[ROUTER-BUILDER] 🔍 Found router instruction:`, {
+            programId: routerInstruction.programId,
+            accounts: routerInstruction.accounts.length,
+            data: routerInstruction.data.length
         });
         
-        // Return the instructions array directly (not the result object)
-        return result.instructions;
+        // Get ATL data
+        const atlData = originalTransaction.transaction.message.addressTableLookups || [];
+        console.log(`[ROUTER-BUILDER] 🔍 ATL data:`, atlData);
+        
+        // Resolve ATL accounts
+        let atlAccountMap = {};
+        if (atlData.length > 0) {
+            const atlInfo = atlData[0];
+            const atlAccountKey = new PublicKey(atlInfo.accountKey);
+            console.log(`[ROUTER-BUILDER] 🔍 ATL Account Key: ${atlAccountKey.toString()}`);
+            
+            // Fetch the ATL account data
+            const atlAccountInfo = await connection.getAccountInfo(atlAccountKey);
+            if (atlAccountInfo && atlAccountInfo.data) {
+                console.log(`[ROUTER-BUILDER] ✅ Found ATL account data, length: ${atlAccountInfo.data.length}`);
+                
+                // Parse the ATL data
+                const data = atlAccountInfo.data;
+                const count = data.readUInt32LE(0);
+                const deactivationSlot = data.readUInt32LE(4);
+                console.log(`[ROUTER-BUILDER] 📊 ATL contains ${count} addresses, deactivation slot: ${deactivationSlot}`);
+                
+                // Extract addresses from ATL data
+                for (let i = 0; i < count; i++) {
+                    const offset = 8 + (i * 32);
+                    if (offset + 32 <= data.length) {
+                        const addressBytes = data.slice(offset, offset + 32);
+                        const address = new PublicKey(addressBytes);
+                        atlAccountMap[i] = address.toString();
+                        console.log(`[ROUTER-BUILDER] 📍 ATL[${i}]: ${address.toString()}`);
+                    }
+                }
+                
+                console.log(`[ROUTER-BUILDER] ✅ Resolved ${Object.keys(atlAccountMap).length} ATL accounts`);
+            }
+        }
+        
+        // Get main account keys
+        const accountKeys = originalTransaction.transaction.message.accountKeys;
+        console.log(`[ROUTER-BUILDER] 🔍 Main account keys count: ${accountKeys.length}`);
+        
+        // Find the master trader's public key (first account)
+        const masterTraderKey = accountKeys[0];
+        console.log(`[ROUTER-BUILDER] 🔍 Master trader key: ${masterTraderKey}`);
+        
+        // Create the cloned router instruction
+        const clonedInstruction = {
+            programId: new PublicKey(routerInstruction.programId),
+            accounts: routerInstruction.accounts.map((accountIndex, i) => {
+                let accountKey;
+                let isWritable = true;
+                
+                if (accountIndex < accountKeys.length) {
+                    // Use main account keys
+                    if (accountIndex === 0) {
+                        // Replace master trader with user
+                        accountKey = userPublicKey.toString();
+                        console.log(`[ROUTER-BUILDER] 🔄 Replaced master trader with user: ${accountKey}`);
+                    } else {
+                        accountKey = accountKeys[accountIndex];
+                    }
+                } else {
+                    // Use resolved ATL accounts
+                    const atlIndex = accountIndex - accountKeys.length;
+                    if (atlAccountMap[atlIndex]) {
+                        accountKey = atlAccountMap[atlIndex];
+                        console.log(`[ROUTER-BUILDER] 🔄 Using resolved ATL account ${atlIndex}: ${accountKey}`);
+                        
+                        // Check if this ATL account is readonly or writable
+                        const atlInfo = atlData[0];
+                        const isReadonly = atlInfo.readonlyIndexes && atlInfo.readonlyIndexes.includes(atlIndex);
+                        const isWritableATL = atlInfo.writableIndexes && atlInfo.writableIndexes.includes(atlIndex);
+                        isWritable = isWritableATL || !isReadonly;
+                        
+                    } else {
+                        accountKey = '11111111111111111111111111111111';
+                        console.log(`[ROUTER-BUILDER] ⚠️ ATL account ${atlIndex} not found, using placeholder`);
+                    }
+                }
+                
+                return {
+                    pubkey: new PublicKey(accountKey),
+                    isSigner: i === 0, // Only the user should be a signer
+                    isWritable: isWritable
+                };
+            }),
+            data: Buffer.from(routerInstruction.data, 'base64')
+        };
+        
+        console.log(`[ROUTER-BUILDER] ✅ Created cloned router instruction:`, {
+            programId: shortenAddress(clonedInstruction.programId.toString()),
+            accountCount: clonedInstruction.accounts.length,
+            dataLength: clonedInstruction.data.length
+        });
+        
+        return {
+            instructions: [clonedInstruction],
+            success: true,
+            platform: 'Router',
+            method: 'perfect_cloning'
+        };
         
     } catch (error) {
-        console.error(`[ROUTER-BUILDER] ❌ Router instruction building failed:`, error.message);
+        console.error(`[ROUTER-BUILDER] ❌ Error building router instruction:`, error.message);
         throw error;
     }
 }
@@ -526,7 +611,6 @@ const axios = require('axios');
 const BN = require('bn.js');
 const { struct, u64, u8 } = require('@solana/buffer-layout');
 const traceLogger = require('./traceLogger.js');
-const { RouterCloner } = require('./routerCloner.js');
 
 // --- PROTOCOL SDKs ---
 const { PumpSdk, pumpPoolAuthorityPda, canonicalPumpPoolPda, PUMP_AMM_PROGRAM_ID } = require('@pump-fun/pump-sdk');
@@ -1174,7 +1258,7 @@ async function calculateExpectedSolOut(connection, mint, amount) {
 
 /// === Pump.fun AMM ===
 async function buildPumpFunAmmInstruction(builderOptions) {
-    const { connection, keypair, swapDetails, amountBN, slippageBps, nonceInfo = null, masterTraderWallet } = builderOptions;
+    const { connection, keypair, swapDetails, amountBN, slippageBps, nonceInfo = null } = builderOptions;
 
     try {
         const isBuy = swapDetails.tradeType === 'buy';
@@ -1227,45 +1311,33 @@ async function buildPumpFunAmmInstruction(builderOptions) {
         if (txExtraction.success) {
             const txData = txExtraction.data;
             
-            // Method 1: Look for pool in Pump.fun AMM instruction accounts (PRIMARY METHOD)
-            if (!poolKey && txData.programInstructions['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA']) {
-                const ammInstructions = txData.programInstructions['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'];
-                for (const ammIx of ammInstructions) {
-                    const instruction = ammIx.instruction;
-                    // Pool could be at various account indices in AMM instructions
-                    // Check multiple common positions: 0, 1, 2, 3
-                    if (instruction.accounts && instruction.accounts.length > 0) {
-                        for (let i = 0; i < Math.min(4, instruction.accounts.length); i++) {
-                            const poolIndex = instruction.accounts[i];
-                            if (txData.accountKeys[poolIndex]) {
-                                const candidatePoolKey = txData.accountKeys[poolIndex];
-                                // Skip if this is the trader's wallet (not a pool)
-                                if (candidatePoolKey.toString() !== masterTraderWallet) {
-                                    poolKey = candidatePoolKey;
-                                    console.log(`[PUMP_BUILDER_AMM] 🎯 Extracted pool from AMM instruction (index ${i}): ${shortenAddress(poolKey.toString())}`);
-                                    break;
-                                }
-                            }
-                        }
-                        if (poolKey) break; // Exit outer loop if we found a pool
+            // Method 1: Look for pool in token balance changes (but exclude user wallets)
+            for (const balance of txData.tokenBalanceChanges.pre) {
+                if (balance.mint === tokenMint && balance.owner) {
+                    const ownerAddress = balance.owner;
+                    // Skip if this is the trader's wallet (not a pool)
+                    if (ownerAddress !== swapDetails.traderWallet) {
+                        poolKey = new PublicKey(ownerAddress);
+                        console.log(`[PUMP_BUILDER_AMM] 🎯 Extracted pool from token balance: ${shortenAddress(poolKey.toString())}`);
+                        break;
                     }
                 }
             }
             
-            // Method 2: Look for pool in token balance changes (FALLBACK - but be more intelligent)
-            if (!poolKey) {
-                console.log(`[PUMP_BUILDER_AMM] 🔍 Fallback: Looking for pool in token balance changes...`);
-                for (const balance of txData.tokenBalanceChanges.pre) {
-                    if (balance.mint === tokenMint && balance.owner) {
-                        const ownerAddress = balance.owner;
-                        // Skip if this is the trader's wallet (not a pool)
-                        if (ownerAddress !== masterTraderWallet) {
-                            // Additional validation: check if this account has significant token balance
-                            // Pool accounts typically have large token balances
-                            const balanceAmount = balance.uiTokenAmount?.amount || '0';
-                            if (parseInt(balanceAmount) > 1000000) { // Only consider accounts with > 1M tokens
-                                poolKey = new PublicKey(ownerAddress);
-                                console.log(`[PUMP_BUILDER_AMM] 🎯 Extracted pool from token balance (fallback): ${shortenAddress(poolKey.toString())} (balance: ${balanceAmount})`);
+            // Method 2: Look for pool in Pump.fun AMM instruction accounts
+            if (!poolKey && txData.programInstructions['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA']) {
+                const ammInstructions = txData.programInstructions['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'];
+                for (const ammIx of ammInstructions) {
+                    const instruction = ammIx.instruction;
+                    // Pool is typically at account index 2 in AMM instructions
+                    if (instruction.accounts && instruction.accounts.length > 2) {
+                        const poolIndex = instruction.accounts[2];
+                        if (txData.accountKeys[poolIndex]) {
+                            const candidatePoolKey = txData.accountKeys[poolIndex];
+                            // Skip if this is the trader's wallet (not a pool)
+                            if (candidatePoolKey.toString() !== swapDetails.traderWallet) {
+                                poolKey = candidatePoolKey;
+                                console.log(`[PUMP_BUILDER_AMM] 🎯 Extracted pool from AMM instruction: ${shortenAddress(poolKey.toString())}`);
                                 break;
                             }
                         }
@@ -1339,7 +1411,7 @@ async function buildPumpFunAmmInstruction(builderOptions) {
                     const accountStr = account.toString();
                     
                     // Skip known system accounts and user wallets
-                    if (accountStr === masterTraderWallet || 
+                    if (accountStr === swapDetails.traderWallet || 
                         accountStr === '11111111111111111111111111111111' ||
                         accountStr === 'ComputeBudget111111111111111111111111111111' ||
                         accountStr === 'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL' ||
@@ -1383,7 +1455,7 @@ async function buildPumpFunAmmInstruction(builderOptions) {
                             if (txData.accountKeys[poolIndex]) {
                                 const candidatePoolKey = txData.accountKeys[poolIndex];
                                 // Skip if this is the trader's wallet (not a pool)
-                                if (candidatePoolKey.toString() !== masterTraderWallet) {
+                                if (candidatePoolKey.toString() !== swapDetails.traderWallet) {
                                     poolKey = candidatePoolKey;
                                     console.log(`[PUMP_BUILDER_AMM] 🎯 Extracted pool from Raydium AMM instruction (index ${i}): ${shortenAddress(poolKey.toString())}`);
                                     break;
@@ -1436,7 +1508,7 @@ async function buildPumpFunAmmInstruction(builderOptions) {
         console.error(`[PUMP_BUILDER_AMM] ❌ Failed to get swap state: ${swapStateError.message}`);
         console.log(`[PUMP_BUILDER_AMM] 🔧 Pool key that failed: ${shortenAddress(poolKey.toString())}`);
         console.log(`[PUMP_BUILDER_AMM] 🔧 Token mint: ${tokenMint}`);
-        console.log(`[PUMP_BUILDER_AMM] 🔧 Trader wallet: ${masterTraderWallet}`);
+        console.log(`[PUMP_BUILDER_AMM] 🔧 Trader wallet: ${swapDetails.traderWallet}`);
         throw new Error(`Invalid pool key for AMM swap: ${swapStateError.message}`);
     }
     

@@ -7,6 +7,7 @@
 const { Connection, PublicKey, LAMPORTS_PER_SOL, VersionedTransaction, TransactionMessage, MessageV0, Message, CompiledInstruction } = require('@solana/web3.js');
 const { Buffer } = require('buffer'); // Explicitly import Buffer for clarity
 const config = require('./config.js');
+const { RawTransactionFetcher } = require('./rawTransactionFetcher.js');
 const { shortenAddress } = require('./utils.js');
 const bs58 = require('bs58');
 const BN = require('bn.js');
@@ -37,11 +38,23 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     constructor(connection, apiManager = null) {
         this.connection = connection;
         this.apiManager = apiManager; // Optional apiManager for pool lookups (TODO: Initialize if required)
+        this.rawFetcher = new RawTransactionFetcher(connection._rpcEndpoint || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com');
+        
+        // Initialize unknown programs tracking
+        this.unknownPrograms = new Set();
+        
+        // Set up periodic summary of unknown programs (every 5 minutes)
+        this.unknownProgramsSummaryInterval = setInterval(() => {
+            if (this.unknownPrograms && this.unknownPrograms.size > 0) {
+                console.log(`[UNKNOWN-PROGRAM] ⏰ Periodic summary - ${this.unknownPrograms.size} unknown programs detected`);
+                this.getUnknownProgramsSummary();
+            }
+        }, 5 * 60 * 1000); // 5 minutes
 
         // Validate required platform IDs
         const requiredPlatformIds = ['RAYDIUM_V4', 'RAYDIUM_LAUNCHPAD', 'RAYDIUM_CPMM', 'RAYDIUM_CLMM',
             'PUMP_FUN', 'PUMP_FUN_VARIANT', 'PUMP_FUN_AMM', 'PHOTON', 'AXIOM',
-            'METEORA_DBC', 'METEORA_DLMM', 'METEORA_CP_AMM', 'Jupiter Aggregator'];
+            'METEORA_DBC', 'METEORA_DLMM', 'METEORA_CP_AMM', 'Jupiter Aggregator', 'CUSTOM_ROUTER'];
         for (const id of requiredPlatformIds) {
             if (!config.PLATFORM_IDS[id]) {
                 const platformIdVal = config.PLATFORM_IDS[id];
@@ -295,8 +308,30 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             // The fallback if no pre-fetched data is available at all.
             else {
                 console.log(`[ANALYZER] No pre-fetched data, fetching from RPC...`);
-                transactionResponse = await this.connection.getParsedTransaction(signature, { maxSupportedTransactionVersion: 0 });
-                if (!transactionResponse) throw new Error("RPC returned no result for transaction.");
+                
+                try {
+                    transactionResponse = await this.connection.getParsedTransaction(signature, { 
+                        maxSupportedTransactionVersion: 0,
+                        encoding: 'json'
+                    });
+                } catch (rpcError) {
+                    console.log(`[ANALYZER] Regular RPC fetch failed with error: ${rpcError.message}`);
+                    transactionResponse = null;
+                }
+                
+                // If regular RPC fetch fails or returns empty transaction, try raw fetcher
+                if (!transactionResponse || !transactionResponse.transaction || 
+                    !transactionResponse.transaction.message || 
+                    !transactionResponse.transaction.message.instructions ||
+                    transactionResponse.transaction.message.instructions.length === 0) {
+                    
+                    console.log(`[ANALYZER] Regular RPC fetch failed, trying raw fetcher for ATL resolution...`);
+                    transactionResponse = await this.rawFetcher.fetchAndParseTransaction(signature);
+                    
+                    if (!transactionResponse) {
+                        throw new Error("Both regular RPC and raw fetcher failed to get transaction.");
+                    }
+                }
             }
             
             // Extract normalized data
@@ -398,19 +433,49 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         let instructionAnalysis;
         
         if (deepAnalysis.platformDetection && deepAnalysis.platformDetection.identifiedPlatforms.length > 0) {
-            // Deep analysis found platform matches, use those
-            const primaryPlatform = deepAnalysis.platformDetection.identifiedPlatforms[0];
-            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform.platformName} (${shortenAddress(primaryPlatform.programId)})`);
+            // Deep analysis found platform matches, apply priority sorting
+            const platforms = deepAnalysis.platformDetection.identifiedPlatforms;
+            
+            // Define platform priorities (lower number = higher priority)
+            const platformPriorities = {
+                'Router': 0, // Highest priority for Router
+                'Pump.fun': 1,
+                'Pump.fun BC': 1,
+                'Pump.fun AMM': 2,
+                'Raydium V4': 3,
+                'Raydium AMM': 3,
+                'Raydium CLMM': 3,
+                'Raydium CPMM': 3,
+                'Raydium Launchpad': 3,
+                'Meteora DLMM': 3,
+                'Meteora DBC': 3,
+                'Meteora CP-AMM': 3,
+                'Photon': 4,
+                'Jupiter Aggregator': 4
+            };
+            
+            // Sort platforms by priority (lower number = higher priority)
+            const sortedPlatforms = platforms.sort((a, b) => {
+                const priorityA = platformPriorities[a.platform] || 999;
+                const priorityB = platformPriorities[b.platform] || 999;
+                return priorityA - priorityB;
+            });
+            
+            const primaryPlatform = sortedPlatforms[0];
+            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform.platform} (${shortenAddress(primaryPlatform.programId)})`);
+            if (sortedPlatforms.length > 1) {
+                console.log(`[ANALYZER] 📋 Also detected: ${sortedPlatforms.slice(1).map(p => p.platform).join(', ')}`);
+            }
             
             // Create instruction analysis from deep analysis
             instructionAnalysis = {
                 found: true,
-                dexPlatform: primaryPlatform.platformName,
+                dexPlatform: primaryPlatform.platform,
                 platformProgramId: primaryPlatform.programId,
                 platformSpecificData: {},
                 confidence: primaryPlatform.confidence || 'high',
                 source: 'deep-analysis',
-                platformMatches: deepAnalysis.platformDetection.identifiedPlatforms,
+                platformMatches: sortedPlatforms,
                 unknownProgramIds: deepAnalysis.platformDetection.unknownPrograms
             };
             
@@ -443,7 +508,64 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                         let platformSpecificData = {};
                         // Extract crucial data if possible (like Meteora Pool ID)
                         if (platformName === 'Meteora DBC' && ix.accounts.length > 0) {
-                            platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
+                            // For Meteora DBC, the pool is typically the first account in the instruction
+                            // But we need to handle loaded addresses (ATL) properly
+                            let poolAccountIndex = ix.accounts[0];
+                            
+                            // Check if this is a loaded address (ATL)
+                            if (poolAccountIndex >= accountKeys.length) {
+                                // This is a loaded address, we need to get it from the loaded addresses
+                                const loadedAddressIndex = poolAccountIndex - accountKeys.length;
+                                const loadedAddresses = this._getLoadedAddresses(transaction);
+                                
+                                if (loadedAddresses && loadedAddresses.writable && loadedAddresses.writable[loadedAddressIndex]) {
+                                    platformSpecificData.poolId = loadedAddresses.writable[loadedAddressIndex];
+                                    console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from loaded addresses: ${shortenAddress(platformSpecificData.poolId)}`);
+                                } else {
+                                    // Fallback to first account if loaded address extraction fails
+                                    platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
+                                    console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from first account: ${shortenAddress(platformSpecificData.poolId)}`);
+                                }
+                            } else {
+                                // Regular account
+                                platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
+                                console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from first account: ${shortenAddress(platformSpecificData.poolId)}`);
+                            }
+                        }
+                        
+                        // Extract Raydium Launchpad poolId and configId
+                        if (platformName === 'Raydium Launchpad' && ix.accounts.length >= 5) {
+                            // For Raydium Launchpad, based on the instruction structure:
+                            // Index 1: authPda, Index 2: configId, Index 4: poolId, Index 7: vaultA, Index 8: vaultB
+                            const authPda = accountKeys[ix.accounts[1]];
+                            const configId = accountKeys[ix.accounts[2]];
+                            const poolId = accountKeys[ix.accounts[4]];
+                            const vaultA = ix.accounts.length > 7 ? accountKeys[ix.accounts[7]] : null;
+                            const vaultB = ix.accounts.length > 8 ? accountKeys[ix.accounts[8]] : null;
+                            
+                            if (configId && poolId) {
+                                platformSpecificData.configId = configId.toBase58();
+                                platformSpecificData.poolId = poolId.toBase58();
+                                
+                                // Extract additional accounts if available
+                                if (authPda) {
+                                    platformSpecificData.authPda = authPda.toBase58();
+                                }
+                                if (vaultA) {
+                                    platformSpecificData.vaultA = vaultA.toBase58();
+                                }
+                                if (vaultB) {
+                                    platformSpecificData.vaultB = vaultB.toBase58();
+                                }
+                                
+                                console.log(`[ANALYZER] 🔍 Extracted Raydium Launchpad data: poolId=${shortenAddress(platformSpecificData.poolId)}, configId=${shortenAddress(platformSpecificData.configId)}`);
+                                if (platformSpecificData.authPda) console.log(`[ANALYZER] 🔍 Auth PDA: ${shortenAddress(platformSpecificData.authPda)}`);
+                                if (platformSpecificData.vaultA) console.log(`[ANALYZER] 🔍 Vault A: ${shortenAddress(platformSpecificData.vaultA)}`);
+                                if (platformSpecificData.vaultB) console.log(`[ANALYZER] 🔍 Vault B: ${shortenAddress(platformSpecificData.vaultB)}`);
+                                console.log(`[ANALYZER] 🔍 Raydium Launchpad instruction accounts (${ix.accounts.length}):`, ix.accounts.map((accIdx, i) => `${i}: ${shortenAddress(accountKeys[accIdx].toBase58())}`).join(', '));
+                            } else {
+                                console.warn(`[ANALYZER] ⚠️ Failed to extract Raydium Launchpad accounts: configId=${!!configId}, poolId=${!!poolId}`);
+                            }
                         }
                         
                         // We found our match, we can return the result and stop looping.
@@ -504,6 +626,14 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // ===============================================
         
         // STEP 3: Only execute if we have a known platform
+        if (!instructionAnalysis.dexPlatform) {
+            console.log(`[ANALYZER] ❌ Platform is undefined - cannot proceed`);
+            return { 
+                isCopyable: false, 
+                reason: 'Platform detection failed - platform is undefined' 
+            };
+        }
+        
         if (instructionAnalysis.dexPlatform.includes('Unknown DEX')) {
             console.log(`[ANALYZER] 🚫 Unknown platform - transaction will NOT be executed`);
             console.log(`[ANALYZER] 📊 Trade details: ${balanceAnalysis.details.tradeType} ${balanceAnalysis.details.inputMint} → ${balanceAnalysis.details.outputMint}`);
@@ -533,6 +663,16 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         const tradeSummary = this._createTradeSummary(finalDetails, transactionResponse);
         console.log(`[ANALYZER] 🎉 SUCCESS! ${tradeSummary}`);
         
+        // Add Router-specific data if this is a Router trade
+        if (finalDetails.dexPlatform === 'Router') {
+            const routerDetection = instructionAnalysis.platformMatches?.[0];
+            if (routerDetection?.cloningTarget) {
+                finalDetails.cloningTarget = routerDetection.cloningTarget;
+                finalDetails.masterTraderWallet = finalDetails.traderPubkey;
+                console.log(`[ANALYZER] 🎯 Added Router cloning data to final details`);
+            }
+        }
+
         return {
             isCopyable: true,
             reason: `Trade detected on ${finalDetails.dexPlatform}.`,
@@ -601,6 +741,8 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         const knownInnerPrograms = [
             // --- Pump.fun (HIGHEST PRIORITY - BC trades) ---
             { ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT], name: 'Pump.fun', priority: 1 },
+            // --- Pump.fun Router (HIGH PRIORITY - Router that calls Pump.fun) ---
+            { ids: [this.platformIds.PUMP_FUN_ROUTER], name: 'Pump.fun Router', priority: 1 },
             // --- Pump.fun AMM (LOWER PRIORITY - only if no BC detected) ---
             { ids: [this.platformIds.PUMP_FUN_AMM], name: 'Pump.fun AMM', priority: 2 },
             // --- Raydium ---
@@ -676,6 +818,16 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                 dexPlatform: bestPlatform.name,
                 platformProgramId: bestPlatform.programId
             };
+
+            // Add Router-specific data if this is a Router trade
+            if (finalDetails.dexPlatform === 'Router') {
+                const routerDetection = bestPlatform;
+                if (routerDetection?.cloningTarget) {
+                    finalDetails.cloningTarget = routerDetection.cloningTarget;
+                    finalDetails.masterTraderWallet = finalDetails.traderPubkey;
+                    console.log(`[ANALYZER] 🎯 Added Router cloning data to final details (router case)`);
+                }
+            }
 
             return {
                 isCopyable: true,
@@ -1007,9 +1159,113 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         if (key.includes('AXIOM')) return 'Axiom';
         if (key.includes('OPENBOOK')) return 'Openbook';
         if (key.includes('UNKNOWN_DEX_1')) return 'Unknown DEX 1';
+        if (key.includes('UNKNOWN_DEX_2')) return 'Unknown DEX 2';
+        if (key.includes('UNKNOWN_DEX_3')) return 'Unknown DEX 3';
+        if (key.includes('UNKNOWN_DEX_4')) return 'Unknown DEX 4';
+        if (key.includes('UNKNOWN_DEX_5')) return 'Unknown DEX 5';
         if (key.includes('CUSTOM_DEX_BUY')) return 'Custom DEX Buy'; // New platform for BUY trades
         
         return 'Unknown DEX';
+    }
+
+    /**
+     * Extract loaded addresses from transaction for ATL (Address Table Lookup) support
+     */
+    _getLoadedAddresses(transaction) {
+        try {
+            if (!transaction || !transaction.meta || !transaction.meta.loadedAddresses) {
+                return null;
+            }
+            
+            return transaction.meta.loadedAddresses;
+        } catch (error) {
+            console.error(`[ANALYZER] ❌ Error extracting loaded addresses:`, error.message);
+            return null;
+        }
+    }
+
+    /**
+     * Track unknown program IDs for investigation and potential addition to config
+     */
+    _trackUnknownProgram(programId) {
+        try {
+            // Skip system programs - these are not DEX programs
+            const systemPrograms = [
+                '11111111111111111111111111111111', // System Program
+                'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+                'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+                'SysvarRecentB1ockHashes11111111111111111111', // Recent Blockhashes Sysvar
+                'SysvarRent111111111111111111111111111111111', // Rent Sysvar
+                'SysvarC1ock11111111111111111111111111111111', // Clock Sysvar
+                'ComputeBudget111111111111111111111111111111', // Compute Budget Program
+                'jitodontfrontd1111111TradeWithAxiomDotTrade', // Jito Program
+            ];
+
+            if (systemPrograms.includes(programId)) {
+                return; // Skip system programs
+            }
+
+            // Initialize unknown programs tracking if not exists
+            if (!this.unknownPrograms) {
+                this.unknownPrograms = new Set();
+            }
+
+            // Add to tracking set (Set automatically handles duplicates)
+            this.unknownPrograms.add(programId);
+
+            // Log for investigation
+            console.log(`[UNKNOWN-PROGRAM] 🔍 NEW UNKNOWN PROGRAM DETECTED: ${shortenAddress(programId)}`);
+            console.log(`[UNKNOWN-PROGRAM] 📋 Add this to config.js as UNKNOWN_DEX_${this.unknownPrograms.size}:`);
+            console.log(`[UNKNOWN-PROGRAM] 📋 UNKNOWN_DEX_${this.unknownPrograms.size}: new PublicKey('${programId}'),`);
+            console.log(`[UNKNOWN-PROGRAM] 📋 Total unknown programs tracked: ${this.unknownPrograms.size}`);
+
+            // Also log all currently tracked unknown programs for reference
+            if (this.unknownPrograms.size > 0) {
+                console.log(`[UNKNOWN-PROGRAM] 📊 All tracked unknown programs:`);
+                Array.from(this.unknownPrograms).forEach((pid, index) => {
+                    console.log(`[UNKNOWN-PROGRAM] 📊 ${index + 1}. ${shortenAddress(pid)} → UNKNOWN_DEX_${index + 1}`);
+                });
+            }
+
+        } catch (error) {
+            console.error(`[UNKNOWN-PROGRAM] ❌ Error tracking unknown program:`, error.message);
+        }
+    }
+
+    /**
+     * Get summary of all tracked unknown programs for easy config addition
+     */
+    getUnknownProgramsSummary() {
+        if (!this.unknownPrograms || this.unknownPrograms.size === 0) {
+            console.log(`[UNKNOWN-PROGRAM] 📊 No unknown programs tracked yet.`);
+            return [];
+        }
+
+        console.log(`[UNKNOWN-PROGRAM] 📊 SUMMARY: ${this.unknownPrograms.size} unknown programs detected`);
+        console.log(`[UNKNOWN-PROGRAM] 📋 Add these to config.js:`);
+        
+        const summary = [];
+        Array.from(this.unknownPrograms).forEach((pid, index) => {
+            const configLine = `UNKNOWN_DEX_${index + 1}: new PublicKey('${pid}'),`;
+            console.log(`[UNKNOWN-PROGRAM] 📋 ${configLine}`);
+            summary.push({
+                programId: pid,
+                configKey: `UNKNOWN_DEX_${index + 1}`,
+                configLine: configLine
+            });
+        });
+
+        return summary;
+    }
+
+    /**
+     * Cleanup method to clear intervals and resources
+     */
+    destroy() {
+        if (this.unknownProgramsSummaryInterval) {
+            clearInterval(this.unknownProgramsSummaryInterval);
+            this.unknownProgramsSummaryInterval = null;
+        }
     }
 
     async _checkTokenMigrationStatus(tokenMint) {
@@ -1148,6 +1404,26 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         try {
             console.log(`[EVENT-ANALYSIS] 🔍 Analyzing transaction events for platform detection...`);
             
+            // 🎯 PRIORITY 1: Router Detection (F5tfvb...)
+            const routerDetection = this._detectRouterInstruction(transactionResponse, traderAddress);
+            if (routerDetection.found) {
+                console.log(`[EVENT-ANALYSIS] 🎯 Router detected at instruction ${routerDetection.instructionIndex}`);
+                return {
+                    platformDetection: {
+                        identifiedPlatforms: [{
+                            platform: 'Router',
+                            programId: routerDetection.programId,
+                            confidence: 'high',
+                            source: 'outer_instruction',
+                            instructionIndex: routerDetection.instructionIndex,
+                            cloningTarget: routerDetection.cloningTarget
+                        }],
+                        primaryPlatform: 'Router',
+                        analysisMethod: 'router_detection'
+                    }
+                };
+            }
+            
             const allProgramIds = new Set();
             const platformMatches = new Map();
             const eventTraces = [];
@@ -1194,7 +1470,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                         };
                         eventTraces.push(executionEvent);
                         
-                        console.log(`[EVENT-ANALYSIS] 🔬 Execution Event: ${shortenAddress(programId)} (stack: ${ix.stackHeight || 0})`);
+                        // console.log(`[EVENT-ANALYSIS] 🔬 Execution Event: ${shortenAddress(programId)} (stack: ${ix.stackHeight || 0})`);
                     }
                 });
             }
@@ -1245,9 +1521,10 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                             };
                             eventTraces.push(invocationEvent);
                             
-                            console.log(`[EVENT-ANALYSIS] 📝 Invocation Event: ${shortenAddress(programId)} (stack: ${stackHeight})`);
+                            // console.log(`[EVENT-ANALYSIS] 📝 Invocation Event: ${shortenAddress(programId)} (stack: ${stackHeight})`);
                         } else {
-                            console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                            // Skip invalid program IDs silently to reduce noise
+                            // console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
                         }
                     }
                     
@@ -1270,9 +1547,10 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                             };
                             eventTraces.push(completionEvent);
                             
-                            console.log(`[EVENT-ANALYSIS] ✅ Completion Event: ${shortenAddress(programId)}`);
+                            // console.log(`[EVENT-ANALYSIS] ✅ Completion Event: ${shortenAddress(programId)}`);
                         } else {
-                            console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
+                            // Skip invalid program IDs silently to reduce noise
+                            // console.log(`[EVENT-ANALYSIS] ⚠️ Skipping invalid program ID: ${shortenAddress(programId)}`);
                         }
                     }
                 });
@@ -1281,7 +1559,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             // Account keys (from outer transaction)
             if (transactionResponse.transaction?.message?.accountKeys) {
                 sources.accountKeys = transactionResponse.transaction.message.accountKeys;
-                console.log(`[DEEP-ANALYSIS] 🔑 Found ${sources.accountKeys.length} account keys`);
+                // console.log(`[DEEP-ANALYSIS] 🔑 Found ${sources.accountKeys.length} account keys`);
             }
 
             // 2️⃣ Check each program ID against our known platforms
@@ -1311,14 +1589,16 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                     platformMatches.set(programId, platformName);
                     console.log(`[DEEP-ANALYSIS] ✅ PLATFORM MATCH: ${shortenAddress(programId)} → ${platformName} (via ${matchedConfigKey})`);
                 } else {
-                    console.log(`[DEEP-ANALYSIS] ❓ Unknown Program: ${shortenAddress(programId)}`);
+                    // Unknown program detected - add to tracking and log for investigation
+                    this._trackUnknownProgram(programId);
                 }
             });
 
             // 3️⃣ Return comprehensive event-based analysis with enhanced structure
             const identifiedPlatforms = Array.from(platformMatches.entries()).map(([programId, platformName]) => ({
                 programId,
-                platformName,
+                platform: platformName, // Use 'platform' to match Router detection format
+                platformName, // Keep for backward compatibility
                 confidence: 'high',
                 detectionMethod: 'program_id_match',
                 description: this._getPlatformDescription(platformName)
@@ -1827,6 +2107,71 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             }
         } catch (error) {
             return 'N/A';
+        }
+    }
+
+    /**
+     * 🎯 Router Detection - Priority detection for Router program (F5tfvb...)
+     */
+    _detectRouterInstruction(transactionResponse, traderAddress) {
+        try {
+            console.log(`[ROUTER-DETECTION] 🔍 Searching for Router instruction...`);
+            
+            const instructions = transactionResponse.transaction?.message?.instructions || [];
+            const accountKeys = transactionResponse.transaction?.message?.accountKeys || [];
+            
+            // Look for Router programs (F5tfvb... and Photon Router)
+            const routerProgramIds = [
+                'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq', // Custom Router
+                'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW'  // Photon Router
+            ];
+            
+            for (let i = 0; i < instructions.length; i++) {
+                const instruction = instructions[i];
+                const programId = accountKeys[instruction.programIdIndex];
+                
+                if (routerProgramIds.includes(programId)) {
+                    const routerType = programId === 'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq' ? 'Custom Router' : 'Photon Router';
+                    console.log(`[ROUTER-DETECTION] 🎯 Found ${routerType} instruction at index ${i}`);
+                    
+                    // Verify trader is a signer
+                    const isSigner = instruction.accounts.some(accountIndex => {
+                        const account = accountKeys[accountIndex];
+                        return account === traderAddress;
+                    });
+                    
+                    if (isSigner) {
+                        console.log(`[ROUTER-DETECTION] ✅ Router instruction confirmed with trader as signer`);
+                        
+                        // Create cloning target
+                        const cloningTarget = {
+                            programId: programId,
+                            accounts: instruction.accounts.map(accountIndex => ({
+                                pubkey: accountKeys[accountIndex],
+                                isSigner: accountIndex === 0,
+                                isWritable: true
+                            })),
+                            data: instruction.data,
+                            isSigner: true,
+                            isWritable: true,
+                            instructionIndex: i
+                        };
+                        
+                        return {
+                            found: true,
+                            programId: programId,
+                            instructionIndex: i,
+                            cloningTarget: cloningTarget
+                        };
+                    }
+                }
+            }
+            
+            return { found: false };
+            
+        } catch (error) {
+            console.error(`[ROUTER-DETECTION] ❌ Router detection failed:`, error.message);
+            return { found: false };
         }
     }
 

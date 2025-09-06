@@ -51,35 +51,108 @@ class TelegramUI {
 
     initialize() {
         this.logger.info("BOT_TOKEN:", BOT_TOKEN ? "Set" : "Missing");
-        if (!BOT_TOKEN || BOT_TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN_HERE') {
+        console.log("🔍 DEBUG: BOT_TOKEN value:", BOT_TOKEN ? `${BOT_TOKEN.substring(0, 10)}...` : "undefined");
+        console.log("🔍 DEBUG: BOT_TOKEN length:", BOT_TOKEN ? BOT_TOKEN.length : 0);
+        
+        // Check for invalid/placeholder tokens
+        if (!BOT_TOKEN || 
+            BOT_TOKEN === 'YOUR_TELEGRAM_BOT_TOKEN_HERE' ||
+            BOT_TOKEN === '7874427872:AAGxpy0tNV11RjVPszQWRdcqlwDae2lbFoU' ||
+            BOT_TOKEN.length < 20) {
             console.warn("⚠️ TelegramUI: No valid bot token found, running in headless mode.");
+            console.warn("⚠️ To enable Telegram features, set a valid TELEGRAM_BOT_TOKEN in your .env file");
             return { success: true, mode: 'headless' };
         }
-        this.bot = new TelegramBot(BOT_TOKEN, { polling: { interval: 300, autoStart: false, params: { timeout: 10 } } });
-        this.logger.info("TelegramBot instance created:", this.bot ? "Success" : "Failed");
-        this.bot.getMe().then(me => this.logger.info(`Telegram Bot authorized for: @${me.username}`)).catch(err => {
-            console.error("Telegram Bot authorization failed:", err);
-            this.bot = null;
-        });
-        this.setupEventListeners();
         
-        // Don't start polling automatically - let the worker control it
-        console.log("⚠️ TelegramUI: Bot created but polling NOT started automatically");
+        console.log("✅ DEBUG: Token validation passed, proceeding with bot initialization");
+        
+        try {
+            // Check if webhook mode is enabled
+            const useWebhook = process.env.USE_WEBHOOK === 'true';
+            
+            if (useWebhook) {
+                // Use webhook mode
+                this.bot = new TelegramBot(BOT_TOKEN, { polling: false });
+                console.log("✅ DEBUG: Using webhook mode");
+            } else {
+                // Use polling mode for local development with WSL fixes
+                this.bot = new TelegramBot(BOT_TOKEN, { 
+                    polling: { 
+                        interval: 2000, // Slower polling for WSL stability
+                        autoStart: false, 
+                        params: { 
+                            timeout: 60, // Longer timeout for WSL
+                            allowed_updates: ['message', 'callback_query']
+                        }
+                    },
+                    request: {
+                        agentOptions: {
+                            keepAlive: false, // Disable keepAlive for WSL
+                            family: 4 // Force IPv4
+                        }
+                    }
+                });
+                console.log("✅ DEBUG: Using polling mode with WSL stability fixes");
+            }
+            this.logger.info("TelegramBot instance created:", this.bot ? "Success" : "Failed");
+            
+            // Test the bot token with a timeout
+            const authPromise = this.bot.getMe();
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Authorization timeout')), 5000)
+            );
+            
+            Promise.race([authPromise, timeoutPromise])
+                .then(me => {
+                    this.logger.info(`Telegram Bot authorized for: @${me.username}`);
+                    console.log("✅ TelegramUI: Bot created in polling mode");
+                })
+                .catch(err => {
+                    console.warn("⚠️ Telegram Bot authorization failed:", err.message);
+                    console.warn("⚠️ Bot token may be invalid or network unavailable");
+                    console.warn("⚠️ Running in headless mode - Telegram features disabled");
+                    this.bot = null;
+                    return { success: true, mode: 'headless' };
+                });
+                
+            this.setupEventListeners();
+            
+        } catch (error) {
+            console.error("❌ Failed to create Telegram bot:", error.message);
+            console.warn("⚠️ Running in headless mode - Telegram features disabled");
+            this.bot = null;
+            return { success: true, mode: 'headless' };
+        }
     }
 
-    // Add method to manually start polling
+    // Start polling or setup webhook
     startPolling() {
         if (!this.bot) {
-            console.error("❌ Cannot start polling: Bot not initialized");
+            console.warn("⚠️ Telegram bot not available - running in headless mode");
             return false;
         }
         
         try {
-            this.bot.startPolling({ interval: 300, params: { timeout: 10 } });
-            console.log("✅ TelegramUI: Polling started manually");
-            return true;
+            const useWebhook = process.env.USE_WEBHOOK === 'true';
+            
+            if (useWebhook) {
+                // Webhook mode - just confirm bot is ready
+                console.log("✅ TelegramUI: Bot ready in webhook mode");
+                return true;
+            } else {
+                // Start polling for local development with WSL stability
+                this.bot.startPolling({ 
+                    interval: 2000, // Slower polling for WSL stability
+                    params: { 
+                        timeout: 60, // Longer timeout for WSL
+                        allowed_updates: ['message', 'callback_query']
+                    }
+                });
+                console.log("✅ TelegramUI: Bot ready in polling mode with WSL stability");
+                return true;
+            }
         } catch (error) {
-            console.error("❌ Failed to start polling:", error.message);
+            console.error("❌ Failed to start bot:", error.message);
             return false;
         }
     }

@@ -406,7 +406,7 @@ async initialize() {
             SELECT u.chat_id, t.name, t.wallet, t.active
             FROM users u
             JOIN traders t ON u.id = t.user_id
-            WHERE t.active = 1
+            WHERE t.active = 1 AND u.is_active = 1
         `);
         
         const grouped = {};
@@ -428,6 +428,7 @@ async initialize() {
             SELECT u.chat_id, t.name, t.wallet, t.active
             FROM users u
             JOIN traders t ON u.id = t.user_id
+            WHERE u.is_active = 1
         `);
         
         const result = { user_traders: {} };
@@ -484,6 +485,7 @@ async initialize() {
             SELECT u.chat_id, uts.sol_amount_per_trade
             FROM users u
             LEFT JOIN user_trading_settings uts ON u.id = uts.user_id
+            WHERE u.is_active = 1
         `);
         
         const result = {};
@@ -569,7 +571,7 @@ async initialize() {
             SELECT u.chat_id, up.token_mint, up.amount_raw, up.sol_spent
             FROM users u
             JOIN user_positions up ON u.id = up.user_id
-            WHERE up.amount_raw > 0
+            WHERE up.amount_raw > 0 AND u.is_active = 1
         `);
         
         const result = { user_positions: {} };

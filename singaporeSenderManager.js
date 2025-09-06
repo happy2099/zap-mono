@@ -12,7 +12,7 @@ class SingaporeSenderManager {
         this.singaporeEndpoints = {
             rpc: 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
             sender: 'https://sender.helius-rpc.com/fast', // ULTRA-FAST global sender
-            laserstream: 'wss://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
+            laserstream: 'wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
         };
 
         // Jito tip accounts for maximum MEV protection
@@ -118,7 +118,7 @@ class SingaporeSenderManager {
                 const tip75th = data[0].landed_tips_75th_percentile;
                 // Use 75th percentile but minimum 0.001 SOL for maximum MEV protection
                 const dynamicTip = Math.max(tip75th, 0.001);
-                console.log(`[SINGAPORE-SENDER] 💰 Dynamic tip calculated: ${dynamicTip} SOL (75th percentile)`);
+                // console.log(`[SINGAPORE-SENDER] 💰 Dynamic tip calculated: ${dynamicTip} SOL (75th percentile)`);
                 return dynamicTip;
             }
             
@@ -179,9 +179,9 @@ class SingaporeSenderManager {
                 console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
             } else {
                 console.log(`[SINGAPORE-SENDER] ❌ ULTRA-FAST execution FAILED in ${executionTime}ms!`);
-                console.log(`[SINGAPORE-SENDER] 📝 Failed signature: ${signature}`);
-                console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
-                console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
+                // console.log(`[SINGAPORE-SENDER] 📝 Failed signature: ${signature}`);
+                // console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
+                // console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
             }
             
             // Check if execution meets ultra-fast targets
@@ -267,7 +267,7 @@ class SingaporeSenderManager {
                 })
             );
             
-            console.log(`[SINGAPORE-SENDER] 🔧 Total instructions after optimization: ${allInstructions.length}`);
+            // console.log(`[SINGAPORE-SENDER] 🔧 Total instructions after optimization: ${allInstructions.length}`);
             
             // BUILD FINAL TRANSACTION
             const optimizedTransaction = new VersionedTransaction(
@@ -372,13 +372,13 @@ class SingaporeSenderManager {
                     // ✅ VALIDATE TRANSACTION SUCCESS
                     if (signatureStatus?.err) {
                         console.error(`[SINGAPORE-SENDER] ❌ Transaction FAILED: ${JSON.stringify(signatureStatus.err)}`);
-                        console.error(`[SINGAPORE-SENDER] 🔍 Failed signature: ${signature}`);
+                        // console.error(`[SINGAPORE-SENDER] 🔍 Failed signature: ${signature}`);
                         
                         // Get detailed transaction info for debugging
                         try {
                             const details = await this.getTransactionDetails(signature);
                             if (details.error) {
-                                console.error(`[SINGAPORE-SENDER] 🔍 Transaction details: ${details.error}`);
+                                // console.error(`[SINGAPORE-SENDER] 🔍 Transaction details: ${details.error}`);
                             } else {
                                 console.error(`[SINGAPORE-SENDER] 🔍 Compute units consumed: ${details.computeUnitsConsumed}`);
                                 console.error(`[SINGAPORE-SENDER] 🔍 Fee paid: ${details.fee} lamports`);
@@ -387,7 +387,7 @@ class SingaporeSenderManager {
                                 }
                             }
                         } catch (detailError) {
-                            console.error(`[SINGAPORE-SENDER] ⚠️ Could not fetch transaction details:`, detailError.message);
+                            // console.error(`[SINGAPORE-SENDER] ⚠️ Could not fetch transaction details:`, detailError.message);
                         }
                         
                         throw new Error(`Transaction failed: ${JSON.stringify(signatureStatus.err)}`);
@@ -471,7 +471,7 @@ class SingaporeSenderManager {
     // Get dynamic priority fee from Helius API
     async getDynamicPriorityFee(instructions, payerKey, blockhash) {
         try {
-            console.log(`[SINGAPORE-SENDER] 🔍 Fetching dynamic priority fee...`);
+            // console.log(`[SINGAPORE-SENDER] 🔍 Fetching dynamic priority fee...`);
             
             // Create temporary transaction for fee estimation
             const tempTx = new VersionedTransaction(
@@ -500,7 +500,7 @@ class SingaporeSenderManager {
             const priorityFee = data.result?.priorityFeeEstimate ? 
                 Math.ceil(data.result.priorityFeeEstimate * 1.2) : 50_000; // 20% buffer
             
-            console.log(`[SINGAPORE-SENDER] 💰 Dynamic priority fee: ${priorityFee} microLamports`);
+            // console.log(`[SINGAPORE-SENDER] 💰 Dynamic priority fee: ${priorityFee} microLamports`);
             return priorityFee;
             
         } catch (error) {
@@ -518,10 +518,10 @@ class SingaporeSenderManager {
             console.log(`[SINGAPORE-SENDER] 🚀 Starting ULTRA-FAST copy trade execution...`);
             
             // Debug: Log instruction structure
-            console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length);
+            // console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length);
             if (instructions.length > 0) {
-                console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0]));
-                console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId);
+                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0]));
+                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId);
                 
                 // Validate instruction structure
                 for (let i = 0; i < instructions.length; i++) {
