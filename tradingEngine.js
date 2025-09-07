@@ -10,6 +10,7 @@ const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentIns
 const { Buffer } = require('buffer');
 
 const platformBuilders = require('./platformBuilders.js');
+const { UniversalCloner } = require('./universalCloner.js');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 const traceLogger = require('./traceLogger.js');
@@ -58,6 +59,9 @@ class TradingEngine {
         
         // Initialize Singapore Sender Manager for ultra-fast execution
         this.singaporeSenderManager = new SingaporeSenderManager();
+        
+        // Initialize Universal Cloner for platform-agnostic copy trading
+        this.universalCloner = new UniversalCloner(this.solanaManager.connection);
         
         // Initialize current blockhash
         this.initializeCurrentBlockhash();
@@ -473,6 +477,12 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         return;
     }
     
+    // ✅ ADDITIONAL TIME-BASED FILTERING: Final check before processing
+    if (!this.isTransactionRecentForCopyTrading(preFetchedTxData, signature)) {
+        console.log(`[EXECUTE_MASTER] ⏰ Skipping old transaction ${shortenAddress(signature)} - too old for copy trading`);
+        return;
+    }
+    
     this.isProcessing.add(signature);
 
     try {
@@ -521,36 +531,21 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         const detectedPlatform = analysisResult.details.dexPlatform;
         console.log(`[EXECUTE_MASTER] 🎯 Using platform from analysis: ${detectedPlatform}`);
 
-        // ✅ ARCHITECTURE WIN: Platform is analyzed ONCE per trader event.
-        const platformExecutorMap = {
-            'Pump.fun': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
-            'Pump.fun BC': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
-            'Pump.fun Router': { builder: platformBuilders.buildPumpFunRouterInstruction, units: 600000 },
-            'Router': { builder: platformBuilders.buildRouterInstruction, units: 600000 },
-            'Pump.fun AMM': { builder: platformBuilders.buildPumpFunAmmInstruction, units: 800000 },
-            'Raydium Launchpad': { builder: platformBuilders.buildRaydiumLaunchpadInstruction, units: 1400000 },
-            'Raydium AMM': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
-            'Raydium V4': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
-            'Raydium CLMM': { builder: platformBuilders.buildRaydiumClmmInstruction, units: 1400000 },
-            'Raydium CPMM': { builder: platformBuilders.buildRaydiumCpmmInstruction, units: 1000000 },
-            'Meteora DLMM': { builder: platformBuilders.buildMeteoraDLMMInstruction, units: 1000000 },
-            'Meteora DBC': { builder: platformBuilders.buildMeteoraDBCInstruction, units: 1000000 },
-            'Meteora CP-AMM': { builder: platformBuilders.buildMeteoraCpAmmInstruction, units: 1000000 },
-            'Photon': { builder: null, units: 1400000 }, // Use Jupiter API fallback
-            'Unknown DEX 1': { builder: platformBuilders.buildJupiterInstruction, units: 1400000 }, // Use Jupiter for unknown platform
+        // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
+        console.log(`[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms`);
+        
+        // Platform-specific compute unit configurations (for optimization)
+        const platformConfigs = {
+            'UniversalCloner': { units: 800000 }, // Default compute units
+            'Photon': { units: 1000000 },          // A known router that might need more gas
+            'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq': { units: 1200000 } // Custom router by address
         };
-        const executorConfig = platformExecutorMap[detectedPlatform];
         
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Analyzer Platform: ${analysisResult.details.dexPlatform}`);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Detected Platform: ${detectedPlatform}`);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Executor config:`, executorConfig);
-        // console.log(`[EXECUTE_MASTER] 🔍 Debug: Builder function:`, executorConfig?.builder);
+        const platformId = analysisResult.details.platformProgramId;
+        const platformConfig = platformConfigs[platformId] || platformConfigs['UniversalCloner'];
+        const computeUnits = platformConfig.units;
         
-        if (!executorConfig || !executorConfig.builder) {
-            console.error(`[EXECUTE_MASTER] ❌ No builder found for platform: ${detectedPlatform}`);
-            console.error(`[EXECUTE_MASTER] ❌ Available platforms:`, Object.keys(platformExecutorMap));
-            throw new Error(`No builder function available for platform: ${detectedPlatform}`);
-        }
+        console.log(`[EXECUTE_MASTER] 🔧 Platform: ${detectedPlatform} | Program ID: ${shortenAddress(platformId)} | Compute Units: ${computeUnits}`);
 
         console.log(`[EXECUTE_MASTER] 🔍 Loading traders from database...`);
         const syndicateData = await this.databaseManager.loadTraders();
@@ -596,6 +591,11 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
             outputMintType: typeof analysisResult.details.outputMint,
             hasCloningTarget: !!analysisResult.details.cloningTarget
         });
+        
+        // Debug: Log cloning target accounts structure
+        if (analysisResult.details.cloningTarget?.accounts) {
+            console.log(`[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts:`, JSON.stringify(analysisResult.details.cloningTarget.accounts.slice(0, 3), null, 2));
+        }
 
         await Promise.allSettled(
             copyJobs.map(job => 
@@ -604,7 +604,7 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
                     job.traderName, 
                     job.userChatId, 
                     signature,
-                    executorConfig
+                    { computeUnits } // Pass compute units instead of executor config
                 )
             )
         );
@@ -664,40 +664,46 @@ async _precacheSellInstruction(buySignature, tradeDetails, strategy = 'preSign')
             return;
         }
 
-        // === 3️⃣ DYNAMIC PLATFORM BUILDER MAP ===
-        const builderMap = {
-            'Pump.fun': platformBuilders.buildPumpFunInstruction,
-            'Pump.fun BC': platformBuilders.buildPumpFunInstruction, // Added missing entry
-            'Pump.fun Router': platformBuilders.buildPumpFunRouterInstruction,
-            'Router': platformBuilders.buildRouterInstruction,
-            'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
-            'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
-            'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
-            'Raydium CLMM': platformBuilders.buildRaydiumClmmInstruction,
-            'Raydium CPMM': platformBuilders.buildRaydiumCpmmInstruction,
-            'Meteora DLMM': platformBuilders.buildMeteoraDLMMInstruction,
-            'Meteora DBC': platformBuilders.buildMeteoraDBCInstruction,
-            'Meteora CP-AMM': platformBuilders.buildMeteoraCpAmmInstruction,
-        };
+        // ✅ UNIVERSAL CLONING ENGINE: No need for platform-specific builders
+        console.log(`[PRE-SELL-${userChatId}] 🎯 Using Universal Cloning Engine for all platforms`);
+        console.log(`[PRE-SELL-${userChatId}] 📍 Universal Cloner handles all platforms without platform-specific builders`);
 
-        const builder = builderMap[sellTradeDetails.dexPlatform];
-        if (!builder) {
-            console.log(`[PRE-SELL-${userChatId}] ⚠️ No direct SDK builder for selling on ${sellTradeDetails.dexPlatform}. Sell will default to Jupiter API when triggered.`);
-            return; // No pre-sign if builder unsupported
+        // Get nonce info for durable transactions (eliminates old hash errors)
+        let nonceInfo = null;
+        if (wallet.nonceAccountPubkey) {
+            try {
+                const { nonce, nonceAuthority } = await this.solanaManager.getLatestNonce(wallet.nonceAccountPubkey);
+                nonceInfo = {
+                    noncePubkey: wallet.nonceAccountPubkey,
+                    authorizedPubkey: nonceAuthority,
+                    nonce: nonce
+                };
+                console.log(`[PRE-SELL-${userChatId}] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
+            } catch (nonceError) {
+                console.warn(`[PRE-SELL-${userChatId}] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
+            }
         }
 
+        // ✅ UNIVERSAL CLONING ENGINE: Use Universal Cloner for pre-cached sells too
         const builderOptions = {
-            connection: this.solanaManager.connection,
-            keypair,
             userPublicKey: keypair.publicKey,
-            swapDetails: sellTradeDetails,
+            masterTraderWallet: sellTradeDetails.traderPubkey,
+            cloningTarget: sellTradeDetails.cloningTarget,
+            tradeType: sellTradeDetails.tradeType,
+            inputMint: sellTradeDetails.inputMint,
+            outputMint: sellTradeDetails.outputMint,
             amountBN: amountReceivedBN, // Use the precise amount we received
             slippageBps: 9000, // High slippage for "get me out" sells
-            cacheManager: this.redisManager,
-            originalTransaction: sellTradeDetails.originalTransaction, // Add original transaction data for pool extraction
+            userChatId: userChatId,
+            userSolAmount: new (require('bn.js'))(Math.floor(0.01 * 1e9)), // Default for sells
+            userTokenBalance: amountReceivedBN,
+            userRiskSettings: { slippageTolerance: 9000, maxTradesPerDay: 10 },
+            // NEW: Durable nonce support
+            nonceInfo: nonceInfo
         };
 
-        const sellInstructions = await builder(builderOptions);
+        const cloneResult = await this.universalCloner.buildClonedInstruction(builderOptions);
+        const sellInstructions = cloneResult.instructions;
         if (!sellInstructions?.length) {
             throw new Error(`Sell builder for ${sellTradeDetails.dexPlatform} returned no instructions.`);
         }
@@ -753,12 +759,10 @@ if (isBuy) {
 // ===========================================
 
     try {
-        if (!executorConfig || !executorConfig.builder) {
-            console.log(`[PIVOT-EXEC] No direct builder for "${tradeDetails.dexPlatform}". Defaulting to Jupiter for user ${userChatId}.`);
-            return await this.executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacket, masterTxSignature);
-        }
-
-        const { builder, units: computeUnits } = executorConfig;
+        // ✅ UNIVERSAL CLONING ENGINE: All platforms use Universal Cloner now
+        console.log(`[PIVOT-EXEC] Using Universal Cloning Engine for "${tradeDetails.dexPlatform}" for user ${userChatId}.`);
+        
+        const computeUnits = 800000; // Default compute units for Universal Cloner
         const isBuy = tradeDetails.tradeType === 'buy';
         let amountBN, solAmountForNotification = 0;
         let preInstructions = [];
@@ -776,19 +780,43 @@ if (isBuy) {
             tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
         }
 
-        const buildOptions = { 
-            connection: this.solanaManager.connection, 
-            keypair, 
-            swapDetails: tradeDetails, 
-            amountBN, 
+        // Get nonce info for durable transactions (eliminates old hash errors)
+        let nonceInfo = null;
+        if (wallet.nonceAccountPubkey) {
+            try {
+                const { nonce, nonceAuthority } = await this.solanaManager.getLatestNonce(wallet.nonceAccountPubkey);
+                nonceInfo = {
+                    noncePubkey: wallet.nonceAccountPubkey,
+                    authorizedPubkey: nonceAuthority,
+                    nonce: nonce
+                };
+                console.log(`[PIVOT-EXEC] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
+            } catch (nonceError) {
+                console.warn(`[PIVOT-EXEC] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
+            }
+        }
+
+        // ✅ UNIVERSAL CLONING ENGINE: Use Universal Cloner instead of old builders
+        const buildOptions = {
+            userPublicKey: keypair.publicKey,
+            masterTraderWallet: tradeDetails.traderPubkey,
+            cloningTarget: tradeDetails.cloningTarget,
+            tradeType: tradeDetails.tradeType,
+            inputMint: tradeDetails.inputMint,
+            outputMint: tradeDetails.outputMint,
+            amountBN: amountBN,
             slippageBps: isBuy ? 5000 : 9000, // 50% for buys, 90% for sells 
-            cacheManager: this.redisManager,
-            apiManager: this.apiManager,
-            sdk: this.sdk,
-            originalTransaction: tradeDetails.originalTransaction, // Add original transaction data for pool extraction
+            userChatId: userChatId,
+            userSolAmount: isBuy ? amountBN : new (require('bn.js'))(Math.floor(0.01 * 1e9)),
+            userTokenBalance: isBuy ? null : amountBN,
+            userRiskSettings: { slippageTolerance: isBuy ? 5000 : 9000, maxTradesPerDay: 10 },
+            // NEW: Durable nonce support
+            nonceInfo: nonceInfo
         };
+        
         const preSellBalance = await this.solanaManager.connection.getBalance(keypair.publicKey);
-        const instructions = await builder(buildOptions);
+        const cloneResult = await this.universalCloner.buildClonedInstruction(buildOptions);
+        const instructions = cloneResult.instructions;
         if (!instructions || !instructions.length) throw new Error("Platform builder returned no instructions.");
         
         // ✅ HELIUS SENDER HANDLES COMPUTE BUDGET AUTOMATICALLY
@@ -1644,6 +1672,51 @@ async checkPumpFunMigration(tokenMint) {
 
 
 
+    // ===============================================
+    // ========== TRANSACTION FILTERING METHODS ===========
+    // ===============================================
+    
+    /**
+     * Check if transaction is recent enough for copy trading
+     * @param {Object} preFetchedTxData - The pre-fetched transaction data
+     * @param {string} signature - Transaction signature for logging
+     * @returns {boolean} - True if transaction is recent enough
+     */
+    isTransactionRecentForCopyTrading(preFetchedTxData, signature) {
+        try {
+            const config = require('./config.js');
+            if (!config.TRANSACTION_FILTERING.ENABLED) {
+                return true; // Filtering disabled
+            }
+            
+            const currentTime = Date.now();
+            const maxAge = config.TRANSACTION_FILTERING.MAX_AGE_SECONDS * 1000; // Convert to milliseconds
+            
+            // Check blockTime if available (most reliable)
+            if (preFetchedTxData?.transaction?.blockTime) {
+                const transactionTime = preFetchedTxData.transaction.blockTime * 1000; // Convert to milliseconds
+                const age = currentTime - transactionTime;
+                
+                if (age > maxAge) {
+                    console.log(`[FILTER] ⏰ Transaction ${shortenAddress(signature)} is too old (age: ${Math.round(age/1000)}s) - skipping copy trade`);
+                    return false;
+                }
+                
+                console.log(`[FILTER] ✅ Transaction age: ${Math.round(age/1000)}s - proceeding with copy trade`);
+                return true;
+            }
+            
+            // If no blockTime, assume it's recent (should have been filtered earlier)
+            console.log(`[FILTER] ⚠️ No blockTime available for ${shortenAddress(signature)} - allowing through`);
+            return true;
+            
+        } catch (error) {
+            console.error(`[FILTER] ❌ Error checking transaction age for ${shortenAddress(signature)}:`, error.message);
+            // On error, allow the transaction through to avoid missing trades
+            return true;
+        }
+    }
+
     // ==========================================================
     // =========== [START] HELIUS WEBHOOK PROCESSOR ===========
     // ==========================================================
@@ -1704,23 +1777,8 @@ async checkPumpFunMigration(tokenMint) {
                 return;
             }
             
-            // --- Execute the copy trade for ALL subscribed users in parallel ---
-            const platformExecutorMap = {
-                'Pump.fun': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
-                'Pump.fun BC': { builder: platformBuilders.buildPumpFunInstruction, units: 400000 },
-                'Pump.fun Router': { builder: platformBuilders.buildPumpFunRouterInstruction, units: 600000 },
-                'Router': { builder: platformBuilders.buildRouterInstruction, units: 600000 },
-                'Pump.fun AMM': { builder: platformBuilders.buildPumpFunAmmInstruction, units: 800000 },
-                'Raydium Launchpad': { builder: platformBuilders.buildRaydiumLaunchpadInstruction, units: 1400000 },
-                'Raydium AMM': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
-                'Raydium V4': { builder: platformBuilders.buildRaydiumV4Instruction, units: 800000 },
-                'Raydium CLMM': { builder: platformBuilders.buildRaydiumClmmInstruction, units: 1400000 },
-                'Raydium CPMM': { builder: platformBuilders.buildRaydiumCpmmInstruction, units: 1000000 },
-                'Meteora DLMM': { builder: platformBuilders.buildMeteoraDLMMInstruction, units: 1000000 },
-                'Meteora DBC': { builder: platformBuilders.buildMeteoraDBCInstruction, units: 1000000 },
-                'Meteora CP-AMM': { builder: platformBuilders.buildMeteoraCpAmmInstruction, units: 1000000 },
-            };
-            const executorConfig = platformExecutorMap[analysisResult.details.dexPlatform];
+            // ✅ REMOVED: Old platform-specific builders - now using Universal Cloning Engine
+            // All platforms are handled by the Universal Cloner via _executeCopyTradeWithSingaporeSender
 
             // Add Router-specific data to analysis result details
             if (analysisResult.details.dexPlatform === 'Router') {
@@ -1735,13 +1793,13 @@ async checkPumpFunMigration(tokenMint) {
             const copyPromises = jobs.map(job => {
                 console.log(`[WEBHOOK-DISPATCH] User ${job.userChatId} copying ${job.traderName}'s TX: ${shortenAddress(job.signature)}`);
                 
-                // CRITICAL FIX: We call the CORRECT function, _sendTradeForUser, with the already-analyzed details.
-                return this._sendTradeForUser(
+                // ✅ UNIVERSAL CLONING ENGINE: Use Singapore Sender for all webhook trades too
+                return this._executeCopyTradeWithSingaporeSender(
                     analysisResult.details, 
                     job.traderName, 
                     job.userChatId, 
                     job.signature, 
-                    executorConfig
+                    { computeUnits: 800000 } // Default compute units for Universal Cloner
                 );
             });
 
@@ -1848,7 +1906,7 @@ async checkPumpFunMigration(tokenMint) {
     }
 
 
-    async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, executorConfig) {
+    async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, config) {
         // Prevent race conditions by checking if user is already being processed
         if (this.userProcessing.has(userChatId)) {
             console.log(`[SINGAPORE-SENDER] ⚠️ User ${userChatId} is already being processed, skipping to prevent race condition`);
@@ -1881,25 +1939,8 @@ async checkPumpFunMigration(tokenMint) {
             const { keypair, wallet } = walletPacket;
             console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
 
-            // Build trade instructions using platform builders
-            const builderMap = {
-                'Pump.fun': platformBuilders.buildPumpFunInstruction,
-                'Pump.fun BC': platformBuilders.buildPumpFunInstruction, 
-                'Pump.fun Router': platformBuilders.buildPumpFunRouterInstruction,
-                'Router': platformBuilders.buildRouterInstruction,
-                'Pump.fun AMM': platformBuilders.buildPumpFunAmmInstruction,
-                'Raydium V4': platformBuilders.buildRaydiumV4Instruction,
-                'Raydium AMM': platformBuilders.buildRaydiumV4Instruction,
-                'Raydium CLMM': platformBuilders.buildRaydiumClmmInstruction,
-                'Raydium CPMM': platformBuilders.buildRaydiumCpmmInstruction,
-                'Meteora DLMM': platformBuilders.buildMeteoraDLMMInstruction,
-                'Meteora DBC': platformBuilders.buildMeteoraDBCInstruction,
-                'Meteora CP-AMM': platformBuilders.buildMeteoraCpAmmInstruction,
-                'Photon': platformBuilders.buildJupiterInstruction, // Use Jupiter API for Photon
-                'Unknown DEX': platformBuilders.buildJupiterInstruction, // Jupiter fallback for unknown platforms
-                'Custom DEX Buy': platformBuilders.buildCustomDexBuyInstruction, // Use specific Custom DEX Buy builder
-                'Custom DEX (Pattern Detected)': platformBuilders.buildJupiterInstruction, // Use Jupiter for pattern-detected DEX
-            };
+            // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
+            console.log(`[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
 
             // Validate trade before processing
             try {
@@ -1919,26 +1960,9 @@ async checkPumpFunMigration(tokenMint) {
                 return; // Exit gracefully without throwing error
             }
             
-            const builder = builderMap[tradeDetails.dexPlatform];
-            
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Platform: ${tradeDetails.dexPlatform}`);
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder found:`, !!builder);
-            // console.log(`[SINGAPORE-SENDER] 🔍 Debug: Builder function:`, builder?.name || 'undefined');
-            
-            // If no specific builder found, throw error - we should have builders for all known platforms
-            if (!builder && tradeDetails.dexPlatform !== 'Unknown DEX') {
-                throw new Error(`No builder available for platform: ${tradeDetails.dexPlatform}. This should not happen - all known platforms should have dedicated builders.`);
-            }
-
-            if (!builder && tradeDetails.dexPlatform === 'Unknown DEX') {
-                throw new Error(`No builder available for platform: ${tradeDetails.dexPlatform}`);
-            }
-
-            // Log when using Jupiter fallback
-            if (tradeDetails.dexPlatform === 'Unknown DEX') {
-                console.log(`[SINGAPORE-SENDER] 🔄 Using Jupiter fallback for Unknown DEX platform`);
-                console.log(`[SINGAPORE-SENDER] 📍 This ensures ALL trades are copyable regardless of platform`);
-            }
+            // ✅ UNIVERSAL CLONING ENGINE: No need for platform-specific builders
+            console.log(`[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
+            console.log(`[SINGAPORE-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders`);
 
             // For SELL trades, check if user has position before proceeding
             if (tradeDetails.tradeType === 'sell') {
@@ -1961,10 +1985,9 @@ async checkPumpFunMigration(tokenMint) {
 
                         // userAmountBN is already calculated above
 
-            // For Unknown DEX, use Jupiter fallback
-            if (tradeDetails.dexPlatform === 'Unknown DEX') {
-                console.log(`[SINGAPORE-SENDER] 🔄 Using Jupiter fallback for Unknown DEX platform`);
-                console.log(`[SINGAPORE-SENDER] 📍 This ensures ALL trades are copyable regardless of platform`);
+            // Validate cloning target exists
+            if (!tradeDetails.cloningTarget) {
+                throw new Error("Analysis failed to provide a cloningTarget. Cannot proceed with Universal Cloning.");
             }
             
             // Enhanced validation and logging for tradeDetails
@@ -1975,70 +1998,74 @@ async checkPumpFunMigration(tokenMint) {
                 dexPlatform: tradeDetails.dexPlatform,
                 hasInputMint: !!tradeDetails.inputMint,
                 hasOutputMint: !!tradeDetails.outputMint,
-                inputMintType: typeof tradeDetails.inputMint,
-                outputMintType: typeof tradeDetails.outputMint,
+                hasCloningTarget: !!tradeDetails.cloningTarget,
                 traderPubkey: tradeDetails.traderPubkey,
                 platformProgramId: tradeDetails.platformProgramId
             });
             
-            // Validate required mint fields before building instructions
+            // Validate required fields before building instructions
             if (!tradeDetails.inputMint || !tradeDetails.outputMint) {
                 console.error(`[SINGAPORE-SENDER] ❌ Missing required mint fields:`, {
                     inputMint: tradeDetails.inputMint,
                     outputMint: tradeDetails.outputMint,
                     tradeType: tradeDetails.tradeType,
-                    dexPlatform: tradeDetails.dexPlatform,
-                    fullTradeDetails: JSON.stringify(tradeDetails, null, 2)
+                    dexPlatform: tradeDetails.dexPlatform
                 });
                 throw new Error(`Cannot execute ${tradeDetails.dexPlatform} trade: missing inputMint or outputMint fields`);
             }
 
-            // Build instructions with enhanced options
-            console.log(`[SINGAPORE-SENDER] 🔍 Before constructing swapDetails - Original tradeDetails:`, {
+            // Get user-specific configuration
+            const userSolAmounts = await this.databaseManager.loadSolAmounts();
+            const userSolAmount = userSolAmounts[String(userChatId)] || 0.01; // Default 0.01 SOL
+            
+            // Get user positions for SELL trades
+            let userTokenBalance = null;
+            if (tradeDetails.tradeType === 'sell') {
+                const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                userTokenBalance = userPositions.get(tradeDetails.inputMint);
+            }
+
+            // Get nonce info for durable transactions (eliminates old hash errors)
+            let nonceInfo = null;
+            if (wallet.nonceAccountPubkey) {
+                try {
+                    const { nonce, nonceAuthority } = await this.solanaManager.getLatestNonce(wallet.nonceAccountPubkey);
+                    nonceInfo = {
+                        noncePubkey: wallet.nonceAccountPubkey,
+                        authorizedPubkey: nonceAuthority,
+                        nonce: nonce
+                    };
+                    console.log(`[SINGAPORE-SENDER] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
+                } catch (nonceError) {
+                    console.warn(`[SINGAPORE-SENDER] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
+                }
+            } else {
+                console.log(`[SINGAPORE-SENDER] ⚠️ No nonce account found for wallet. Using regular blockhash (may cause old hash errors).`);
+            }
+
+            // Build Universal Cloner options with USER-SPECIFIC parameters
+            const builderOptions = {
+                userPublicKey: keypair.publicKey,
+                masterTraderWallet: tradeDetails.traderPubkey,
+                cloningTarget: tradeDetails.cloningTarget,
                 tradeType: tradeDetails.tradeType,
                 inputMint: tradeDetails.inputMint,
                 outputMint: tradeDetails.outputMint,
-                dexPlatform: tradeDetails.dexPlatform,
-                inputAmountRaw: tradeDetails.inputAmountRaw,
-                outputAmountRaw: tradeDetails.outputAmountRaw
-            });
-            
-            const swapDetails = {
-                ...tradeDetails,
-                inputAmountRaw: userAmountBN.toString(), // Use user's calculated amount
-                outputAmountRaw: '0' // Will be calculated by SDK
-            };
-            
-            console.log(`[SINGAPORE-SENDER] 🔍 After constructing swapDetails:`, {
-                tradeType: swapDetails.tradeType,
-                inputMint: swapDetails.inputMint,
-                outputMint: swapDetails.outputMint,
-                dexPlatform: swapDetails.dexPlatform,
-                inputAmountRaw: swapDetails.inputAmountRaw,
-                outputAmountRaw: swapDetails.outputAmountRaw
-            });
-            
-            const builderOptions = {
-                connection: this.solanaManager.connection,
-                keypair,
-                userPublicKey: keypair.publicKey,
-                swapDetails: swapDetails,
-                amountBN: userAmountBN,
-                slippageBps: tradeDetails.slippageBps || 5000, // Use master trader's slippage or 50% for Pump.fun
-                cacheManager: this.redisManager,
-                apiManager: this.apiManager, // Add apiManager for Pump.fun API calls
-                sdk: new (require('@pump-fun/pump-sdk').PumpSdk)(this.solanaManager.connection), // Add Pump.fun SDK instance
-                originalTransaction: tradeDetails.originalTransaction, // Add original transaction data for pool extraction
-                // Router-specific options
-                cloningTarget: tradeDetails.cloningTarget, // For Router cloning
-                masterTraderWallet: tradeDetails.masterTraderWallet, // For Router cloning
+                amountBN: userAmountBN, // Keep for backward compatibility
+                slippageBps: tradeDetails.slippageBps || 5000,
+                // NEW: User-specific parameters
+                userChatId: userChatId,
+                userSolAmount: new (require('bn.js'))(Math.floor(userSolAmount * 1e9)), // Convert to lamports
+                userTokenBalance: userTokenBalance ? new (require('bn.js'))(userTokenBalance.amountRaw.toString()) : null,
+                userRiskSettings: {
+                    slippageTolerance: tradeDetails.slippageBps || 5000,
+                    maxTradesPerDay: 10 // Could be loaded from database
+                },
+                // NEW: Durable nonce support
+                nonceInfo: nonceInfo
             };
 
-            // ✅ HELIUS SENDER HANDLES COMPUTE BUDGET AUTOMATICALLY
-            // No need to add compute budget instructions - Helius Sender will add them
-            console.log(`[SINGAPORE-SENDER] 🎯 Letting Helius Sender handle compute budget automatically`);
-
-            console.log(`[SINGAPORE-SENDER] 🔧 Building instructions for ${tradeDetails.dexPlatform}...`);
+            console.log(`[SINGAPORE-SENDER] 🔧 Building Universal Cloned instructions...`);
             console.log(`[SINGAPORE-SENDER] 🔑 Transaction signature: ${masterSignature}`);
             console.log(`[SINGAPORE-SENDER] 💰 Master trader amount: ${tradeDetails.inputAmountRaw} raw units`);
             console.log(`[SINGAPORE-SENDER] 💰 User copy trade amount: ${userAmountBN.toString()} raw units`);
@@ -2049,30 +2076,24 @@ async checkPumpFunMigration(tokenMint) {
                 builderOptions: builderOptions,
                 userAmount: userAmountBN.toString(),
                 masterAmount: tradeDetails.inputAmountRaw
-            }, { status: 'building_instructions' });
+            }, { status: 'building_universal_instructions' });
             
-            // Build platform-specific instructions
-            // console.log(`[SINGAPORE-SENDER] 🔧 Calling builder function: ${builder.name}`);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Builder options keys:`, Object.keys(builderOptions));
-            
+            // Build Universal Cloned instructions
             let instructions;
             try {
-                instructions = await builder(builderOptions);
-            } catch (builderError) {
-                console.error(`[SINGAPORE-SENDER] ❌ Builder function failed:`, builderError.message);
-                console.error(`[SINGAPORE-SENDER] ❌ Builder error stack:`, builderError.stack);
-                throw new Error(`Builder function failed: ${builderError.message}`);
+                const cloneResult = await this.universalCloner.buildClonedInstruction(builderOptions);
+                instructions = cloneResult.instructions;
+            } catch (cloneError) {
+                console.error(`[SINGAPORE-SENDER] ❌ Universal Cloner failed:`, cloneError.message);
+                console.error(`[SINGAPORE-SENDER] ❌ Clone error stack:`, cloneError.stack);
+                throw new Error(`Universal Cloner failed: ${cloneError.message}`);
             }
-            
-            // console.log(`[SINGAPORE-SENDER] 🔧 Builder returned:`, typeof instructions, instructions);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Built ${instructions ? instructions.length : 'undefined'} platform instructions`);
-            // console.log(`[SINGAPORE-SENDER] 🔧 Helius Sender will add compute budget automatically`);
 
             if (!instructions || instructions.length === 0) {
-                throw new Error(`Failed to build instructions for ${tradeDetails.dexPlatform}`);
+                throw new Error(`Universal Cloner failed to produce any instructions`);
             }
 
-            console.log(`[SINGAPORE-SENDER] ✅ Built ${instructions.length} instructions`);
+            console.log(`[SINGAPORE-SENDER] ✅ Universal Cloner built ${instructions.length} instructions`);
 
             // Prepare trade details for Singapore Sender with user's amounts
             const enhancedTradeDetails = {
@@ -2086,6 +2107,32 @@ async checkPumpFunMigration(tokenMint) {
                 inputAmountRaw: userAmountBN.toString(),
                 userAmountBN: userAmountBN.toString()
             };
+
+            // ✅ PRE-FLIGHT SIMULATION: Test the transaction before sending
+            console.log(`[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...`);
+            try {
+                // Create a test transaction for simulation
+                const { Transaction } = require('@solana/web3.js');
+                const testTransaction = new Transaction();
+                testTransaction.add(...instructions);
+                
+                // Simulate the transaction
+                const simulationResult = await this.solanaManager.connection.simulateTransaction(testTransaction, {
+                    commitment: 'processed',
+                    sigVerify: false
+                });
+                
+                if (simulationResult.value.err) {
+                    console.error(`[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!`, simulationResult.value.err);
+                    console.error(`[SINGAPORE-SENDER] 📋 Simulation logs:`, simulationResult.value.logs);
+                    throw new Error(`Transaction failed pre-flight simulation: ${JSON.stringify(simulationResult.value.err)}`);
+                }
+                
+                console.log(`[SINGAPORE-SENDER] ✅ Pre-flight simulation passed! Units consumed: ${simulationResult.value.unitsConsumed}`);
+            } catch (simulationError) {
+                console.error(`[SINGAPORE-SENDER] ❌ Pre-flight simulation error:`, simulationError.message);
+                throw new Error(`Pre-flight simulation failed: ${simulationError.message}`);
+            }
 
             // Execute via Singapore Sender (ULTRA-FAST EXECUTION)
             console.log(`[SINGAPORE-SENDER] 🚀 Executing ULTRA-FAST copy trade...`);

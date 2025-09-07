@@ -423,261 +423,210 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             return { isCopyable: false, reason: "No swap detected in balance changes.", rawTransaction: transactionResponse };
         }
 
-        console.log(`[ANALYZER] ✅ Trade detected! Analyzing platform...`);
+        console.log(`[ANALYZER] ✅ Trade detected! Using Universal Cloning Engine...`);
 
-        // 🔬 NEW: DEEP ANALYSIS - Dive into inner instructions, loadedAddresses, and logMessages
-        console.log(`[ANALYZER] 🔬 Performing deep analysis for platform detection...`);
-        const deepAnalysis = this._deepAnalyzeTransactionForPlatforms(transactionResponse, traderPublicKey);
+        // --- NEW STAGE 3: UNIVERSAL CLONING ANALYSIS ---
         
-        // Determine instruction analysis based on deep analysis results
-        let instructionAnalysis;
-        
-        if (deepAnalysis.platformDetection && deepAnalysis.platformDetection.identifiedPlatforms.length > 0) {
-            // Deep analysis found platform matches, apply priority sorting
-            const platforms = deepAnalysis.platformDetection.identifiedPlatforms;
-            
-            // Define platform priorities (lower number = higher priority)
-            const platformPriorities = {
-                'Router': 0, // Highest priority for Router
-                'Pump.fun': 1,
-                'Pump.fun BC': 1,
-                'Pump.fun AMM': 2,
-                'Raydium V4': 3,
-                'Raydium AMM': 3,
-                'Raydium CLMM': 3,
-                'Raydium CPMM': 3,
-                'Raydium Launchpad': 3,
-                'Meteora DLMM': 3,
-                'Meteora DBC': 3,
-                'Meteora CP-AMM': 3,
-                'Photon': 4,
-                'Jupiter Aggregator': 4
-            };
-            
-            // Sort platforms by priority (lower number = higher priority)
-            const sortedPlatforms = platforms.sort((a, b) => {
-                const priorityA = platformPriorities[a.platform] || 999;
-                const priorityB = platformPriorities[b.platform] || 999;
-                return priorityA - priorityB;
-            });
-            
-            const primaryPlatform = sortedPlatforms[0];
-            console.log(`[ANALYZER] 🎯 Deep analysis found platform: ${primaryPlatform.platform} (${shortenAddress(primaryPlatform.programId)})`);
-            if (sortedPlatforms.length > 1) {
-                console.log(`[ANALYZER] 📋 Also detected: ${sortedPlatforms.slice(1).map(p => p.platform).join(', ')}`);
-            }
-            
-            // Create instruction analysis from deep analysis
-            instructionAnalysis = {
-                found: true,
-                dexPlatform: primaryPlatform.platform,
-                platformProgramId: primaryPlatform.programId,
-                platformSpecificData: {},
-                confidence: primaryPlatform.confidence || 'high',
-                source: 'deep-analysis',
-                platformMatches: sortedPlatforms,
-                unknownProgramIds: deepAnalysis.platformDetection.unknownPrograms
-            };
-            
-            console.log(`[ANALYZER] ✅ Platform detected via deep analysis: ${instructionAnalysis.dexPlatform}`);
-            console.log(`[ANALYZER] ⏭️ Skipping traditional analysis - platform already identified`);
-        } else {
-            // Deep analysis found no platforms, fall back to traditional analysis
-            console.log(`[ANALYZER] 🔄 Deep analysis found no platforms, falling back to traditional analysis...`);
-            
-            instructionAnalysis = (() => {
-                // This is our universal "Dive Deep" loop.
-                // It will check every single instruction against our entire platform library.
-                console.log(`[ANALYZER] 🔍 Analyzing ${instructions.length} instructions for platform detection...`);
-                console.log(`[ANALYZER] 📝 Transaction Signature: ${signature}`);
-                    
-                for (const ix of instructions) {
-                    const programId = this._resolveProgramId(ix, accountKeys);
-                    if (!programId) continue;
-                    
-                    // Find a match in our entire DEX library (from config.js)
-                    const platformMatch = Object.entries(this.platformIds).find(([key, pId]) => {
-                        if (Array.isArray(pId)) return pId.some(id => id.equals(programId));
-                        return pId instanceof PublicKey && pId.equals(programId);
-                    });
-                
-                    if (platformMatch) {
-                        const platformName = this._mapConfigKeyToPlatformName(platformMatch[0]);
-                        console.log(`[ANALYZER] ✅ Platform detected: ${platformName} (${shortenAddress(programId.toBase58())})`);
-                        
-                        let platformSpecificData = {};
-                        // Extract crucial data if possible (like Meteora Pool ID)
-                        if (platformName === 'Meteora DBC' && ix.accounts.length > 0) {
-                            // For Meteora DBC, the pool is typically the first account in the instruction
-                            // But we need to handle loaded addresses (ATL) properly
-                            let poolAccountIndex = ix.accounts[0];
-                            
-                            // Check if this is a loaded address (ATL)
-                            if (poolAccountIndex >= accountKeys.length) {
-                                // This is a loaded address, we need to get it from the loaded addresses
-                                const loadedAddressIndex = poolAccountIndex - accountKeys.length;
-                                const loadedAddresses = this._getLoadedAddresses(transaction);
-                                
-                                if (loadedAddresses && loadedAddresses.writable && loadedAddresses.writable[loadedAddressIndex]) {
-                                    platformSpecificData.poolId = loadedAddresses.writable[loadedAddressIndex];
-                                    console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from loaded addresses: ${shortenAddress(platformSpecificData.poolId)}`);
-                                } else {
-                                    // Fallback to first account if loaded address extraction fails
-                                    platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
-                                    console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from first account: ${shortenAddress(platformSpecificData.poolId)}`);
-                                }
-                            } else {
-                                // Regular account
-                                platformSpecificData.poolId = accountKeys[ix.accounts[0]].toBase58();
-                                console.log(`[ANALYZER] 🔍 Extracted Meteora DBC pool from first account: ${shortenAddress(platformSpecificData.poolId)}`);
-                            }
-                        }
-                        
-                        // Extract Raydium Launchpad poolId and configId
-                        if (platformName === 'Raydium Launchpad' && ix.accounts.length >= 5) {
-                            // For Raydium Launchpad, based on the instruction structure:
-                            // Index 1: authPda, Index 2: configId, Index 4: poolId, Index 7: vaultA, Index 8: vaultB
-                            const authPda = accountKeys[ix.accounts[1]];
-                            const configId = accountKeys[ix.accounts[2]];
-                            const poolId = accountKeys[ix.accounts[4]];
-                            const vaultA = ix.accounts.length > 7 ? accountKeys[ix.accounts[7]] : null;
-                            const vaultB = ix.accounts.length > 8 ? accountKeys[ix.accounts[8]] : null;
-                            
-                            if (configId && poolId) {
-                                platformSpecificData.configId = configId.toBase58();
-                                platformSpecificData.poolId = poolId.toBase58();
-                                
-                                // Extract additional accounts if available
-                                if (authPda) {
-                                    platformSpecificData.authPda = authPda.toBase58();
-                                }
-                                if (vaultA) {
-                                    platformSpecificData.vaultA = vaultA.toBase58();
-                                }
-                                if (vaultB) {
-                                    platformSpecificData.vaultB = vaultB.toBase58();
-                                }
-                                
-                                console.log(`[ANALYZER] 🔍 Extracted Raydium Launchpad data: poolId=${shortenAddress(platformSpecificData.poolId)}, configId=${shortenAddress(platformSpecificData.configId)}`);
-                                if (platformSpecificData.authPda) console.log(`[ANALYZER] 🔍 Auth PDA: ${shortenAddress(platformSpecificData.authPda)}`);
-                                if (platformSpecificData.vaultA) console.log(`[ANALYZER] 🔍 Vault A: ${shortenAddress(platformSpecificData.vaultA)}`);
-                                if (platformSpecificData.vaultB) console.log(`[ANALYZER] 🔍 Vault B: ${shortenAddress(platformSpecificData.vaultB)}`);
-                                console.log(`[ANALYZER] 🔍 Raydium Launchpad instruction accounts (${ix.accounts.length}):`, ix.accounts.map((accIdx, i) => `${i}: ${shortenAddress(accountKeys[accIdx].toBase58())}`).join(', '));
-                            } else {
-                                console.warn(`[ANALYZER] ⚠️ Failed to extract Raydium Launchpad accounts: configId=${!!configId}, poolId=${!!poolId}`);
-                            }
-                        }
-                        
-                        // We found our match, we can return the result and stop looping.
-                        return {
-                            found: true,
-                            dexPlatform: platformName,
-                            platformProgramId: programId.toBase58(),
-                            platformSpecificData: platformSpecificData
-                        };
-                    }
-                }
-                
-                // If the loop finishes without finding any known DEX program ID.
-                console.log(`[ANALYZER] ❌ No known platform detected in any instruction`);
-                
-                // Show unique program IDs found for debugging
-                const foundProgramIds = new Set();
-                for (const ix of instructions) {
-                    const programId = this._resolveProgramId(ix, accountKeys);
-                    if (programId) {
-                        foundProgramIds.add(programId.toBase58());
-                    }
-                }
-                
-                if (foundProgramIds.size > 0) {
-                    console.log(`[ANALYZER] 🔍 Program IDs found (SHORTENED): ${Array.from(foundProgramIds).map(id => shortenAddress(id)).join(', ')}`);
-                    console.log(`[ANALYZER] 🔍 Program IDs found (COMPLETE): ${Array.from(foundProgramIds).join(', ')}`);
-                }
-                
-                // Fallback: Try to detect Pump.fun by transaction pattern
-                const pumpFunDetected = this._detectPumpFunByPattern(instructions, accountKeys);
-                if (pumpFunDetected) {
-                    console.log(`[ANALYZER] 🔍 Fallback detection: Pump.fun detected by transaction pattern`);
-                    return {
-                        found: true,
-                        dexPlatform: 'Pump.fun',
-                        platformProgramId: 'Pump.fun (pattern detected)',
-                        platformSpecificData: {}
-                    };
-                }
+        // 1. Check for a valid swap
+        console.log(`[ANALYZER] ✅ Swap confirmed via balance changes. Type: ${balanceAnalysis.details.tradeType}`);
 
-                // STEP 2: For unknown platforms, just log them (don't try to execute)
-                console.log(`[ANALYZER] 🔍 Unknown platform detected - logging for investigation`);
-                console.log(`[ANALYZER] 📝 Transaction signature: ${signature}`);
-                console.log(`[ANALYZER] 🔍 All program IDs found: ${Array.from(foundProgramIds).join(', ')}`);
-                console.log(`[ANALYZER] ⚠️ This transaction will NOT be executed - platform unknown`);
-                
-                return { 
-                    found: false, 
-                    dexPlatform: 'Unknown DEX (Logged for Investigation)',
-                    reason: 'Platform not recognized - needs investigation'
-                };
-            })();
+        // 2. Detective Work: Find the instruction to clone
+        const coreInstruction = this._findCoreSwapInstruction(transactionResponse, traderPublicKey);
+
+        if (!coreInstruction) {
+            return { isCopyable: false, reason: "Could not identify core swap instruction to clone." };
         }
-        
-        // ===============================================
-        // =========== STAGE 4: FINAL DECISION ===========
-        // ===============================================
-        
-        // STEP 3: Only execute if we have a known platform
-        if (!instructionAnalysis.dexPlatform) {
-            console.log(`[ANALYZER] ❌ Platform is undefined - cannot proceed`);
-            return { 
-                isCopyable: false, 
-                reason: 'Platform detection failed - platform is undefined' 
-            };
-        }
-        
-        if (instructionAnalysis.dexPlatform.includes('Unknown DEX')) {
-            console.log(`[ANALYZER] 🚫 Unknown platform - transaction will NOT be executed`);
-            console.log(`[ANALYZER] 📊 Trade details: ${balanceAnalysis.details.tradeType} ${balanceAnalysis.details.inputMint} → ${balanceAnalysis.details.outputMint}`);
-            console.log(`[ANALYZER] 🔍 Platform: ${instructionAnalysis.dexPlatform}`);
-            console.log(`[ANALYZER] ⚠️ Add this platform to config.js to enable copy trading`);
-            
-            return { 
-                isCopyable: false, 
-                reason: `Platform not recognized: ${instructionAnalysis.reason || 'Unknown DEX'}`,
-                rawTransaction: transactionResponse,
-                tradeDetails: balanceAnalysis.details,
-                platformInfo: instructionAnalysis
-            };
-        }
-        
-        // We have a confirmed swap with a KNOWN platform. We will execute it.
+
+        // 3. Success: Package the result for the engine.
+        // Note: We convert PublicKeys to strings for safe message passing between workers.
         const finalDetails = {
-            ...balanceAnalysis.details, // The definitive amounts and mints
-            dexPlatform: instructionAnalysis.dexPlatform, // Known platform
-            platformProgramId: instructionAnalysis.platformProgramId,
-            platformSpecificData: instructionAnalysis.platformSpecificData,
+            ...balanceAnalysis.details,
+            dexPlatform: 'UniversalCloner', // A generic name, as we no longer care about the specific platform.
+            platformProgramId: coreInstruction.programId.toBase58(),
             traderPubkey: finalTraderPk.toBase58(),
-            // NEW: Pass original transaction data for universal instruction building
-            originalTransaction: transactionResponse
+            originalTransaction: transactionResponse,
+            
+            // This is the critical blueprint for the forger.
+            cloningTarget: {
+                programId: coreInstruction.programId.toBase58(),
+                accounts: coreInstruction.accounts.map(acc => ({
+                    pubkey: acc.pubkey.toBase58(),
+                    isSigner: acc.isSigner,
+                    isWritable: acc.isWritable
+                })),
+                data: typeof coreInstruction.data === 'string' ? coreInstruction.data : bs58.encode(coreInstruction.data), // CRITICAL FIX: Handle both string and Uint8Array data
+            },
         };
         
         const tradeSummary = this._createTradeSummary(finalDetails, transactionResponse);
         console.log(`[ANALYZER] 🎉 SUCCESS! ${tradeSummary}`);
-        
-        // Add Router-specific data if this is a Router trade
-        if (finalDetails.dexPlatform === 'Router') {
-            const routerDetection = instructionAnalysis.platformMatches?.[0];
-            if (routerDetection?.cloningTarget) {
-                finalDetails.cloningTarget = routerDetection.cloningTarget;
-                finalDetails.masterTraderWallet = finalDetails.traderPubkey;
-                console.log(`[ANALYZER] 🎯 Added Router cloning data to final details`);
+
+                        return {
+            isCopyable: true,
+            reason: `Trade detected and ready for Universal Cloning.`,
+            details: finalDetails,
+            summary: tradeSummary
+        };
+    }
+    
+    /**
+     * Find the core swap instruction signed by the trader - the heart of the Universal Cloning Engine
+     * This method implements the "Detective" logic to identify the exact instruction to clone
+     */
+    _findCoreSwapInstruction(transactionResponse, traderPublicKey) {
+        console.log(`[ANALYZER] 🔍 Searching for core swap instruction signed by trader...`);
+        const { transaction, meta } = transactionResponse;
+        const traderPk = new PublicKey(traderPublicKey);
+
+        // Get all account keys from the transaction message - handle both legacy and versioned transactions
+        let accountKeysFromMessage;
+        if (transaction.message.accountKeys) {
+            // Legacy transaction
+            accountKeysFromMessage = transaction.message.accountKeys.map(k => new PublicKey(k));
+        } else if (transaction.message.staticAccountKeys) {
+            // Versioned transaction
+            accountKeysFromMessage = transaction.message.staticAccountKeys.map(k => new PublicKey(k));
+        } else {
+            // Try to get account keys using the getAccountKeys method
+            try {
+                const accountKeys = transaction.message.getAccountKeys();
+                accountKeysFromMessage = [];
+                for (let i = 0; i < accountKeys.length; i++) {
+                    accountKeysFromMessage.push(accountKeys.get(i));
+                }
+            } catch (error) {
+                console.error('[ANALYZER] ❌ Could not extract account keys from transaction:', error.message);
+                return null;
             }
         }
 
+        // Address Lookup Tables (ATL) are critical for complex transactions
+        // We need to resolve all possible accounts - create a simple account resolver
+        const allAccountKeys = [...accountKeysFromMessage];
+        
+        // Add loaded addresses from ATL if available
+        if (meta && meta.loadedAddresses) {
+            if (meta.loadedAddresses.writable) {
+                allAccountKeys.push(...meta.loadedAddresses.writable.map(k => new PublicKey(k)));
+            }
+            if (meta.loadedAddresses.readonly) {
+                allAccountKeys.push(...meta.loadedAddresses.readonly.map(k => new PublicKey(k)));
+            }
+        }
+        
+        // Create a simple account resolver that mimics getAccountKeys behavior
+        const accountMeta = {
+            get: (index) => {
+                if (index >= 0 && index < allAccountKeys.length) {
+                    return allAccountKeys[index];
+                }
+                return null;
+            }
+        };
+
+        // --- IMPROVED HEURISTIC: Find the best swap instruction signed by trader ---
+        const candidateInstructions = [];
+        
+        // System and utility programs to deprioritize
+        const systemPrograms = new Set([
+            '11111111111111111111111111111111', // System Program
+            'ComputeBudget111111111111111111111111111111', // Compute Budget
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' // Token Program
+        ]);
+
+        for (const instruction of transaction.message.instructions) {
+            // Find which account pubkey corresponds to the trader in this instruction
+            const isSignerPresent = instruction.accounts.some(accountIndex => {
+                const accountPubkey = accountMeta.get(accountIndex);
+                return accountPubkey && accountPubkey.equals(traderPk);
+            });
+
+            // The instruction must actually have the trader's key AND that key must be a signer in the transaction header
+            const traderIndexInHeader = accountKeysFromMessage.findIndex(pk => pk.equals(traderPk));
+            const isTraderSignerInHeader = traderIndexInHeader >= 0 && traderIndexInHeader < transaction.message.header.numRequiredSignatures;
+
+            if (isSignerPresent && isTraderSignerInHeader) {
+                const programId = accountKeysFromMessage[instruction.programIdIndex];
+                const programIdStr = programId.toBase58();
+                
+                // Create candidate instruction
+                const candidate = {
+                    programId: programId,
+                    programIdStr: programIdStr,
+                    accounts: instruction.accounts.map(accIdx => {
+                        const pubkey = accountMeta.get(accIdx);
+                        const header = transaction.message.header;
+                        
+                        // Determine if account is signer
+                        const isSigner = accIdx < header.numRequiredSignatures;
+                        
+                        // Determine if account is writable
+                        const numSigners = header.numRequiredSignatures;
+                        const numReadonlySigners = header.numReadonlySignedAccounts;
+                        const numWritableSigners = numSigners - numReadonlySigners;
+                        
+                        let isWritable;
+                        if (accIdx < numWritableSigners) {
+                            // Writable signer
+                            isWritable = true;
+                        } else if (accIdx < numSigners) {
+                            // Readonly signer
+                            isWritable = false;
+                        } else {
+                            // Unsigned account
+                            const totalAccounts = allAccountKeys.length;
+                            const numReadonlyUnsigned = header.numReadonlyUnsignedAccounts;
+                            const numWritableUnsigned = totalAccounts - numSigners - numReadonlyUnsigned;
+                            isWritable = (accIdx - numSigners) < numWritableUnsigned;
+                        }
+            
+            return { 
+                            pubkey: pubkey,
+                            isSigner: isSigner,
+                            isWritable: isWritable
+                        };
+                    }),
+                    data: typeof instruction.data === 'string' ? instruction.data : bs58.encode(instruction.data), // CRITICAL FIX: Handle both string and Uint8Array data
+                    instructionIndex: transaction.message.instructions.indexOf(instruction),
+                    isSystemProgram: systemPrograms.has(programIdStr),
+                    accountCount: instruction.accounts.length
+                };
+                
+                candidateInstructions.push(candidate);
+            }
+        }
+
+        if (candidateInstructions.length === 0) {
+            console.warn(`[ANALYZER] ⚠️ Could not find any outer instruction signed by the trader.`);
+            return null;
+        }
+
+        // Sort candidates by priority:
+        // 1. Non-system programs first
+        // 2. More accounts (swap instructions typically have more accounts)
+        // 3. Later in transaction (main swap usually comes after setup)
+        candidateInstructions.sort((a, b) => {
+            if (a.isSystemProgram !== b.isSystemProgram) {
+                return a.isSystemProgram ? 1 : -1; // Non-system programs first
+            }
+            if (a.accountCount !== b.accountCount) {
+                return b.accountCount - a.accountCount; // More accounts first
+            }
+            return b.instructionIndex - a.instructionIndex; // Later instructions first
+        });
+
+        const bestCandidate = candidateInstructions[0];
+        console.log(`[ANALYZER] ✅ SUCCESS: Found instruction signed by trader.`);
+        console.log(`[ANALYZER]   -> Platform/Router Program ID: ${bestCandidate.programIdStr}`);
+        console.log(`[ANALYZER]   -> Instruction Index: ${bestCandidate.instructionIndex} (outer)`);
+        console.log(`[ANALYZER]   -> Account Count: ${bestCandidate.accountCount}`);
+        console.log(`[ANALYZER]   -> Candidates Found: ${candidateInstructions.length}`);
+
         return {
-            isCopyable: true,
-            reason: `Trade detected on ${finalDetails.dexPlatform}.`,
-            details: finalDetails,
-            summary: tradeSummary
+            programId: bestCandidate.programId,
+            accounts: bestCandidate.accounts,
+            data: bestCandidate.data,
         };
     }
     
@@ -2143,15 +2092,49 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                     if (isSigner) {
                         console.log(`[ROUTER-DETECTION] ✅ Router instruction confirmed with trader as signer`);
                         
-                        // Create cloning target
+                        // Create cloning target with proper account structure
+                        const message = transactionResponse.transaction.message;
+                        const allAccountKeys = message.accountKeys || [];
+                        
+                        // Build properly structured accounts array
+                        const accountsForCloning = instruction.accounts.map(accountIndex => {
+                            const pubkey = allAccountKeys[accountIndex];
+                            const header = message.header;
+                            
+                            // Determine if account is signer
+                            const isSigner = accountIndex < header.numRequiredSignatures;
+                            
+                            // Determine if account is writable
+                            const numSigners = header.numRequiredSignatures;
+                            const numReadonlySigners = header.numReadonlySignedAccounts;
+                            const numWritableSigners = numSigners - numReadonlySigners;
+                            
+                            let isWritable;
+                            if (accountIndex < numWritableSigners) {
+                                // Writable signer
+                                isWritable = true;
+                            } else if (accountIndex < numSigners) {
+                                // Readonly signer
+                                isWritable = false;
+                            } else {
+                                // Unsigned account
+                                const totalAccounts = allAccountKeys.length;
+                                const numReadonlyUnsigned = header.numReadonlyUnsignedAccounts;
+                                const numWritableUnsigned = totalAccounts - numSigners - numReadonlyUnsigned;
+                                isWritable = (accountIndex - numSigners) < numWritableUnsigned;
+                            }
+                            
+                            return {
+                                pubkey: pubkey,
+                                isSigner: isSigner,
+                                isWritable: isWritable
+                            };
+                        });
+                        
                         const cloningTarget = {
                             programId: programId,
-                            accounts: instruction.accounts.map(accountIndex => ({
-                                pubkey: accountKeys[accountIndex],
-                                isSigner: accountIndex === 0,
-                                isWritable: true
-                            })),
-                            data: instruction.data,
+                            accounts: accountsForCloning,
+                            data: typeof instruction.data === 'string' ? instruction.data : bs58.encode(instruction.data), // CRITICAL FIX: Handle both string and Uint8Array data
                             isSigner: true,
                             isWritable: true,
                             instructionIndex: i

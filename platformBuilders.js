@@ -415,23 +415,47 @@ function extractTransactionData(originalTransaction, targetProgramId = null) {
         }
 
         // Find target instruction if program ID specified
+        // Search both outer instructions and inner instructions (CPIs)
         let targetInstruction = null;
         if (targetProgramId) {
+            // First, search outer instructions
             targetInstruction = instructions.find(ix => {
                 const programId = accountKeys[ix.programIdIndex];
                 return programId && programId.toString() === targetProgramId;
             });
+            
+            // If not found in outer instructions, search inner instructions
+            if (!targetInstruction && meta?.innerInstructions) {
+                console.log(`[TX-EXTRACTOR] 🔍 Target not found in outer instructions, searching ${meta.innerInstructions.length} inner instruction groups...`);
+                
+                for (const innerGroup of meta.innerInstructions) {
+                    for (const innerIx of innerGroup.instructions) {
+                        const programId = accountKeys[innerIx.programIdIndex];
+                        if (programId && programId.toString() === targetProgramId) {
+                            targetInstruction = innerIx;
+                            console.log(`[TX-EXTRACTOR] ✅ Found target instruction in inner instructions at group ${innerGroup.index}`);
+                            break;
+                        }
+                    }
+                    if (targetInstruction) break;
+                }
+            }
             
             if (targetInstruction) {
                 targetInstruction = {
                     instruction: targetInstruction,
                     programId: accountKeys[targetInstruction.programIdIndex]
                 };
+                console.log(`[TX-EXTRACTOR] ✅ Target instruction found for program: ${targetProgramId}`);
+            } else {
+                console.log(`[TX-EXTRACTOR] ❌ Target instruction not found for program: ${targetProgramId}`);
             }
         }
 
-        // Extract all program IDs and their instructions
+        // Extract all program IDs and their instructions (outer + inner)
         const programInstructions = {};
+        
+        // Process outer instructions
         instructions.forEach((ix, index) => {
             const programId = accountKeys[ix.programIdIndex];
             if (programId) {
@@ -442,10 +466,33 @@ function extractTransactionData(originalTransaction, targetProgramId = null) {
                 programInstructions[programIdStr].push({
                     index,
                     instruction: ix,
-                    programId: programId
+                    programId: programId,
+                    isInner: false
                 });
             }
         });
+        
+        // Process inner instructions (CPIs)
+        if (meta?.innerInstructions) {
+            meta.innerInstructions.forEach((innerGroup, groupIndex) => {
+                innerGroup.instructions.forEach((innerIx, innerIndex) => {
+                    const programId = accountKeys[innerIx.programIdIndex];
+                    if (programId) {
+                        const programIdStr = programId.toString();
+                        if (!programInstructions[programIdStr]) {
+                            programInstructions[programIdStr] = [];
+                        }
+                        programInstructions[programIdStr].push({
+                            index: `inner-${groupIndex}-${innerIndex}`,
+                            instruction: innerIx,
+                            programId: programId,
+                            isInner: true,
+                            outerIndex: innerGroup.index
+                        });
+                    }
+                });
+            });
+        }
 
         // Extract account data
         const accountData = accountKeys.map((account, index) => ({

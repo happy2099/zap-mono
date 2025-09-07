@@ -32,6 +32,21 @@ class RouterCloner {
         console.log(`[ROUTER-CLONER] 🔧 Building Router instruction: ${tradeType.toUpperCase()} | User: ${shortenAddress(userPublicKey.toString())} | Amount: ${(amountBN.toNumber() / 1e9).toFixed(4)} SOL`);
         console.log(`[ROUTER-CLONER] 🎯 KEY FIX: Using Router instruction data (not inner Pump.fun data)`);
         console.log(`[ROUTER-CLONER] 📊 Original accounts count: ${cloningTarget.accounts.length}`);
+        
+        // Debug: Log first few accounts to see their structure
+        if (cloningTarget.accounts.length > 0) {
+            console.log(`[ROUTER-CLONER] 🔍 Sample account structures:`);
+            for (let i = 0; i < Math.min(3, cloningTarget.accounts.length); i++) {
+                const acc = cloningTarget.accounts[i];
+                console.log(`[ROUTER-CLONER] 🔍 Account ${i}:`, {
+                    hasPubkey: !!acc.pubkey,
+                    hasIsSigner: 'isSigner' in acc,
+                    hasIsWritable: 'isWritable' in acc,
+                    type: typeof acc,
+                    keys: Object.keys(acc)
+                });
+            }
+        }
 
         try {
             // Step 1: Apply the three swap rules to clone accounts
@@ -126,30 +141,35 @@ class RouterCloner {
                 continue;
             }
             
-            // Handle different account structures
+            // Handle different account structures and ensure proper account format
             let originalPubkey;
+            let clonedAccount;
+            
             if (originalAccount.pubkey) {
+                // Standard account structure
                 originalPubkey = originalAccount.pubkey.toString();
+                clonedAccount = {
+                    pubkey: originalAccount.pubkey,
+                    isSigner: originalAccount.isSigner || false,
+                    isWritable: originalAccount.isWritable || false
+                };
             } else if (originalAccount.toString) {
+                // Account is just a PublicKey
                 originalPubkey = originalAccount.toString();
+                clonedAccount = {
+                    pubkey: originalAccount,
+                    isSigner: false,
+                    isWritable: true
+                };
             } else {
+                // Skip invalid accounts
                 continue;
             }
 
-            let clonedAccount = { ...originalAccount };
-
             // Rule 1: User Swap - Replace master trader wallet with user wallet
             if (originalPubkey === masterTraderWallet) {
-                if (clonedAccount.pubkey) {
-                    clonedAccount.pubkey = userPublicKey;
-                } else {
-                    // Handle case where account is just a PublicKey - create proper account structure
-                    clonedAccount = {
-                        pubkey: userPublicKey,
-                        isSigner: true,
-                        isWritable: true
-                    };
-                }
+                clonedAccount.pubkey = userPublicKey;
+                clonedAccount.isSigner = true; // User is always a signer
                 // console.log(`[ROUTER-CLONER] 🔄 Rule 1 (User Swap): ${shortenAddress(originalPubkey)} → ${shortenAddress(userPublicKey.toString())}`);
             }
             // Rule 2: Token Account Swap - Replace master trader's ATA with user's ATA

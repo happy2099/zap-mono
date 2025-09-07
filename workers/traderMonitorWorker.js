@@ -245,6 +245,11 @@ class TraderMonitorWorker extends BaseWorker {
                         break; // We've reached a transaction we've already processed
                     }
                     
+                    // ✅ TIME-BASED FILTERING: Check if transaction is recent enough
+                    if (!this.isTransactionRecent(txInfo, wallet)) {
+                        continue; // Skip old transactions
+                    }
+                    
                     // Skip failed transactions
                     if (txInfo.err) {
                         // Filter out common "noise" errors that don't need logging
@@ -330,6 +335,47 @@ class TraderMonitorWorker extends BaseWorker {
             '96sErVjEN7LNJ6Uvj63bdRWZxNuBngj56fnT9biHLKBf': 'orange'
         };
         return traderNames[wallet] || 'Unknown';
+    }
+    
+    /**
+     * Check if transaction is recent enough for copy trading
+     * @param {Object} txInfo - The transaction info object
+     * @param {string} wallet - Wallet address for logging
+     * @returns {boolean} - True if transaction is recent enough
+     */
+    isTransactionRecent(txInfo, wallet) {
+        try {
+            const config = require('../config.js');
+            if (!config.TRANSACTION_FILTERING.ENABLED) {
+                return true; // Filtering disabled
+            }
+            
+            const currentTime = Date.now();
+            const maxAge = config.TRANSACTION_FILTERING.MAX_AGE_SECONDS * 1000; // Convert to milliseconds
+            
+            // Check blockTime if available (most reliable)
+            if (txInfo.blockTime) {
+                const transactionTime = txInfo.blockTime * 1000; // Convert to milliseconds
+                const age = currentTime - transactionTime;
+                
+                if (age > maxAge) {
+                    this.logInfo(`[FILTER] ⏰ Skipping old transaction for ${wallet.substring(0, 8)}... | Sig: ${txInfo.signature.substring(0, 8)}... (age: ${Math.round(age/1000)}s)`);
+                    return false;
+                }
+                
+                this.logInfo(`[FILTER] ✅ Transaction age: ${Math.round(age/1000)}s - within acceptable range`);
+                return true;
+            }
+            
+            // If no blockTime, assume it's recent (RPC polling typically gets recent transactions)
+            this.logInfo(`[FILTER] ⚠️ No blockTime available for ${txInfo.signature.substring(0, 8)}... - assuming recent`);
+            return true;
+            
+        } catch (error) {
+            this.logError(`[FILTER] ❌ Error checking transaction age for ${txInfo.signature.substring(0, 8)}...:`, { error: error.message });
+            // On error, allow the transaction through to avoid missing trades
+            return true;
+        }
     }
     
     async customCleanup() {

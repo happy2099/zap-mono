@@ -126,6 +126,15 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     // --- ULTRA-LOW LATENCY LASERSTREAM OPTIMIZATIONS ---
     LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-mainnet-sgp.helius-rpc.com',
     
+    // --- TRANSACTION FILTERING CONFIGURATION ---
+    TRANSACTION_FILTERING: {
+        ENABLED: process.env.TRANSACTION_FILTERING_ENABLED !== 'false', // Default: enabled
+        MAX_AGE_SECONDS: parseInt(process.env.TRANSACTION_MAX_AGE_SECONDS) || 30, // Default: 30 seconds
+        BLOCKHASH_VALIDATION: process.env.BLOCKHASH_VALIDATION_ENABLED !== 'false', // Default: enabled
+        MAX_BLOCKHASH_AGE_SLOTS: parseInt(process.env.MAX_BLOCKHASH_AGE_SLOTS) || 150, // Default: ~1 minute
+        LOG_FILTERED_TRANSACTIONS: process.env.LOG_FILTERED_TRANSACTIONS === 'true' // Default: disabled
+    },
+    
     // Regional endpoints for optimal performance (choose closest to your location)
     LASERSTREAM_REGIONAL_ENDPOINTS: {
         singapore: 'https://laserstream-mainnet-sgp.helius-rpc.com',    // Asia-Pacific (Recommended)
