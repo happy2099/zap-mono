@@ -257,7 +257,7 @@ async initialize() {
     }
 
     // Wallet management methods
-    async createWallet(userId, label, publicKey, privateKeyEncrypted) {
+    async createWallet(userId, label, publicKey, privateKeyEncrypted, nonceAccountPubkey = null, encryptedNoncePrivateKey = null) {
         // Check if wallet with this label already exists for this user
         const existingWallet = await this.get('SELECT id FROM user_wallets WHERE user_id = ? AND label = ?', [userId, label]);
         if (existingWallet) {
@@ -265,8 +265,8 @@ async initialize() {
         }
         
         return await this.run(
-            'INSERT INTO user_wallets (user_id, label, public_key, private_key_encrypted) VALUES (?, ?, ?, ?)',
-            [userId, label, publicKey, privateKeyEncrypted]
+            'INSERT INTO user_wallets (user_id, label, public_key, private_key_encrypted, nonce_account_pubkey, encrypted_nonce_private_key) VALUES (?, ?, ?, ?, ?, ?)',
+            [userId, label, publicKey, privateKeyEncrypted, nonceAccountPubkey, encryptedNoncePrivateKey]
         );
     }
 
@@ -493,6 +493,49 @@ async initialize() {
             result[setting.chat_id] = setting.sol_amount_per_trade || 0.01;
         }
         return result;
+    }
+
+    /**
+     * Get comprehensive user settings including SOL amount and slippage
+     */
+    async getUserSettings(chatId) {
+        const user = await this.get(`
+            SELECT u.id, u.chat_id, uts.sol_amount_per_trade, uts.slippage_bps
+            FROM users u
+            LEFT JOIN user_trading_settings uts ON u.id = uts.user_id
+            WHERE u.chat_id = ? AND u.is_active = 1
+        `, [chatId]);
+        
+        if (!user) {
+            throw new Error(`User with chat_id ${chatId} not found or inactive`);
+        }
+        
+        return {
+            userId: user.id,
+            chatId: user.chat_id,
+            solAmount: user.sol_amount_per_trade || 0.01, // Default 0.01 SOL
+            slippageBps: user.slippage_bps || 5000 // Default 50% slippage
+        };
+    }
+
+    /**
+     * Update user's slippage settings
+     */
+    async updateUserSlippage(chatId, slippageBps) {
+        const user = await this.get('SELECT id FROM users WHERE chat_id = ?', [chatId]);
+        if (!user) {
+            throw new Error(`User with chat_id ${chatId} not found`);
+        }
+        
+        await this.run(`
+            INSERT INTO user_trading_settings (user_id, slippage_bps)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                slippage_bps = excluded.slippage_bps,
+                updated_at = CURRENT_TIMESTAMP
+        `, [user.id, slippageBps]);
+        
+        console.log(`[DB] Updated slippage for user ${chatId}: ${slippageBps} BPS`);
     }
 
     async saveSolAmounts(amounts) {

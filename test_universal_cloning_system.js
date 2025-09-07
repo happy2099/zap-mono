@@ -147,7 +147,7 @@ class UniversalCloningTestSuite {
                 return;
             }
             
-            console.log(`✅ Detective SUCCESS: Found instruction for ${shortenAddress(coreInstructionResult.programId.toString())}`);
+            console.log(`✅ Detective SUCCESS: Found instruction for ${shortenAddress(coreInstructionResult.programId)}`);
             console.log(`📊 Instruction has ${coreInstructionResult.accounts.length} accounts`);
             console.log(`📝 Data length: ${coreInstructionResult.data.length} bytes`);
             
@@ -156,9 +156,9 @@ class UniversalCloningTestSuite {
             
             // Build cloning target from live data
             const cloningTarget = {
-                programId: coreInstructionResult.programId.toString(),
+                programId: coreInstructionResult.programId, // Already a string from new analyzer
                 accounts: coreInstructionResult.accounts.map(acc => ({
-                    pubkey: acc.pubkey.toString(),
+                    pubkey: acc.pubkey, // Already a string from new analyzer
                     isSigner: acc.isSigner,
                     isWritable: acc.isWritable
                 })),
@@ -370,7 +370,7 @@ class UniversalCloningTestSuite {
                         if (result && result.programId) {
                             successfulAnalyses++;
                             console.log(`✅ Found core instruction for ${copyTradeData.masterSignature.substring(0, 8)}...`);
-                            console.log(`   Platform: ${result.programId.toBase58()}`);
+                            console.log(`   Platform: ${result.programId}`); // Already a string from new analyzer
                             console.log(`   Accounts: ${result.accounts.length}`);
                         } else {
                             console.log(`⚠️ No core instruction found for ${copyTradeData.masterSignature.substring(0, 8)}...`);
@@ -638,9 +638,9 @@ class UniversalCloningTestSuite {
                     
                     // Step 2: Create cloning target
                     const cloningTarget = {
-                        programId: analysisResult.programId.toBase58(),
+                        programId: analysisResult.programId, // Already a string from new analyzer
                         accounts: analysisResult.accounts.map(acc => ({
-                            pubkey: acc.pubkey.toBase58(),
+                            pubkey: acc.pubkey, // Already a string from new analyzer
                             isSigner: acc.isSigner,
                             isWritable: acc.isWritable
                         })),
@@ -1143,13 +1143,13 @@ class UniversalCloningTestSuite {
                 return null;
             }
 
-            console.log(`✅ Detective found core instruction: ${shortenAddress(coreInstructionResult.programId.toBase58())}`);
+            console.log(`✅ Detective found core instruction: ${shortenAddress(coreInstructionResult.programId)}`);
 
             // Now build the cloningTarget from the result of the detective work
             const cloningTarget = {
-                programId: coreInstructionResult.programId.toBase58(),
+                programId: coreInstructionResult.programId, // Already a string from the new analyzer
                 accounts: coreInstructionResult.accounts.map(acc => ({
-                    pubkey: acc.pubkey.toBase58(),
+                    pubkey: acc.pubkey, // Already a string from the new analyzer
                     isSigner: acc.isSigner,
                     isWritable: acc.isWritable
                 })),

@@ -1,0 +1,1357 @@
+
+> zapbot@1.5.2 start:threaded
+> node start.js --threading
+
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[PERFORMANCE-MONITOR] 🔄 Periodic saving started (every 60s)
+🚀 Starting ZapBot with Helius integration...
+⚡ ULTRA-LOW LATENCY optimizations enabled:
+   - LaserStream: <100ms detection target
+   - Sender: <200ms execution target
+   - Overall: <300ms copy trade cycle target
+📊 Performance monitoring active
+📊 Initializing SQLite database...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+✅ Database initialized successfully
+🔴 Initializing Redis for flight data...
+✅ RedisManager initialized successfully
+🔥 Warming up Redis cache...
+✅ Cache warming completed
+✅ Redis initialized successfully
+🧵 Threaded mode: Skipping legacy DataManager initialization
+🔄 Checking for data migration...
+✅ Database already contains data, skipping migration.
+🤖 Starting main ZapBot application...
+🧵 Starting in THREADED mode...
+🧵 ThreadedZapBot initialized with worker configuration
+🚀 Starting ThreadedZapBot initialization...
+🔧 Initializing worker threads...
+🔧 Created worker: telegram
+🔧 Created worker: monitor
+🔧 Created worker: executor
+🔧 Created worker: data
+🔧 Created worker: websocket
+🔧 Created worker: analyzer
+✅ 6 workers initialized
+💓 Worker monitoring started (interval: 30000ms)
+⏳ Waiting for workers to be ready...
+[data] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+✅ Worker data is ready
+[DB] DatabaseManager initialized successfully 
+[2025-09-07T18:11:36.795Z] [data] [INFO] Database manager worker initialized successfully {}
+[data] Worker initialized successfully
+[executor] Initializing worker...
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[analyzer] Initializing worker...
+[websocket] Initializing worker...
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker analyzer is ready
+[2025-09-07T18:11:39.973Z] [analyzer] [INFO] Queue processing started { interval: 1000 }
+[2025-09-07T18:11:39.973Z] [analyzer] [INFO] Transaction analyzer worker initialized successfully {}
+[analyzer] Worker initialized successfully
+[WM Init] SolanaManager instance set.
+[ApiManager] Initialized with Helius-native logic.
+✅ Worker websocket is ready
+[2025-09-07T18:11:40.119Z] [websocket] [INFO] WebSocket worker initialized successfully {}
+[websocket] Worker initialized successfully
+[telegram] Initializing worker...
+[2025-09-07T18:11:40.479Z] [telegram] [INFO] ✅ This worker marked as active Telegram instance {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+RPCLoadBalancer initialized with 1 endpoints.
+SolanaManager created. RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+✅ Connection established with RPC: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[WM Init] SolanaManager instance set.
+✅ Worker telegram is ready
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[TELEGRAM_UI] TelegramUI initialized. 
+[TELEGRAM_UI] BOT_TOKEN: "Set"
+🔍 DEBUG: BOT_TOKEN value: 8334266790...
+🔍 DEBUG: BOT_TOKEN length: 46
+✅ DEBUG: Token validation passed, proceeding with bot initialization
+✅ DEBUG: Using polling mode with WSL stability fixes
+[TELEGRAM_UI] TelegramBot instance created: "Success"
+✅ TelegramUI: Bot ready in polling mode with WSL stability
+[2025-09-07T18:11:41.860Z] [telegram] [INFO] Telegram UI initialized successfully in polling mode {}
+[telegram] Worker initialized successfully
+[WM Init] Initializing WalletManager in DATABASE-ONLY mode...
+[WM Init] ✅ Successfully initialized in DATABASE-ONLY mode.
+[ApiManager] Initialized with Helius-native logic.
+✅ RedisManager initialized successfully
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[monitor] Initializing worker...
+[2025-09-07T18:11:42.847Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY Trader Monitor with LaserStream... {}
+[DB] Database connected successfully at /home/sunny/zap-mono-grk1522/database/zapbot.db 
+[DB] Database tables created successfully 
+[DB] DatabaseManager initialized successfully 
+[LASERSTREAM-ENHANCED] 🚀 Manager initialized with Singapore regional endpoints.
+[2025-09-07T18:11:42.867Z] [monitor] [INFO] Starting ULTRA-LOW LATENCY LaserStream monitoring... {}
+[2025-09-07T18:11:42.869Z] [monitor] [INFO] Initializing ULTRA-LOW LATENCY LaserStream to monitor 2 specific trader wallets. {}
+[2025-09-07T18:11:42.870Z] [monitor] [INFO] ⚡ Target detection latency: <100ms {}
+[2025-09-07T18:11:42.871Z] [monitor] [INFO] 🔧 Using PROCESSED commitment for fastest possible detection {}
+[2025-09-07T18:11:42.871Z] [monitor] [INFO] 📡 Zstd compression enabled for optimal performance {}
+[LASERSTREAM-ENHANCED] 🎯 Subscribing to 2 master trader wallets...
+[LASERSTREAM-ENHANCED] 📍 Traders: suqh...HQfK, 4BdK...EFUk
+[LASERSTREAM-ENHANCED] 🔧 Using enhanced subscription with data slicing and Singapore endpoint
+[LASERSTREAM-ENHANCED] ✅ Stream connected to Singapore endpoint. ID: d2bafca6-4c4e-4981-9525-f9dadefbd88a
+[2025-09-07T18:11:42.941Z] [monitor] [INFO] Starting direct RPC polling as backup... {}
+[2025-09-07T18:11:42.941Z] [monitor] [INFO] 🚀 Starting dynamic direct RPC polling... {}
+✅ Worker monitor is ready
+[2025-09-07T18:11:42.942Z] [monitor] [INFO] 📊 Monitoring 2 wallets via RPC polling {}
+[2025-09-07T18:11:42.944Z] [monitor] [INFO] ✅ Dynamic direct RPC polling started successfully {}
+[2025-09-07T18:11:42.944Z] [monitor] [INFO] Starting periodic subscription refresh... {}
+[2025-09-07T18:11:42.945Z] [monitor] [INFO] ✅ Periodic refresh started (every 5 minutes) {}
+[monitor] Worker initialized successfully
+✅ Worker executor is ready
+[TradeNotificationManager] Initialized in Threaded Dispatch mode.
+[PERFORMANCE-MONITOR] 🚀 ULTRA-LOW LATENCY performance monitor initialized
+[SINGAPORE-SENDER] 🚀 ULTRA-FAST Manager initialized with Singapore regional endpoints
+TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration (ENABLED).
+[2025-09-07T18:11:43.209Z] [executor] [INFO] Trade executor worker initialized successfully {}
+[executor] Worker initialized successfully
+[FAILURE-CLEANUP] 🚀 Initialized with blockhash: AYxcx8QJ...
+[TELEGRAM_UI] Telegram Bot authorized for: @Hydra_zapbot 
+✅ TelegramUI: Bot created in polling mode
+✅ All required workers are ready
+✅ ThreadedZapBot initialization completed successfully
+🎯 Starting trader monitoring...
+✅ Trader monitoring started (auto-run via LaserStream in worker).
+🎉 ThreadedZapBot started successfully with 6 workers
+✅ Threaded application started successfully
+🎉 ZapBot startup completed successfully!
+🏥 Health check server running on port 3002
+[2025-09-07T18:11:45.211Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for suqh5sHt... | Sig: 5VuMsuE9... (age: 69s) {}
+[2025-09-07T18:11:45.211Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for suqh5sHt... | Sig: 4DqiU89P... (age: 77s) {}
+[2025-09-07T18:11:45.211Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for suqh5sHt... | Sig: rr33doPX... (age: 77s) {}
+[2025-09-07T18:11:45.211Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for suqh5sHt... | Sig: 5xH7YN2Y... (age: 79s) {}
+[2025-09-07T18:11:45.211Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for suqh5sHt... | Sig: 3G7itxK9... (age: 84s) {}
+[2025-09-07T18:11:45.294Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for 4BdKaxN8... | Sig: 5YnJNmpg... (age: 2036s) {}
+[2025-09-07T18:11:45.294Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for 4BdKaxN8... | Sig: R2vrq8CD... (age: 5062s) {}
+[2025-09-07T18:11:45.294Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for 4BdKaxN8... | Sig: 2k6zDwcs... (age: 5695s) {}
+[2025-09-07T18:11:45.294Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for 4BdKaxN8... | Sig: QTgKQr5A... (age: 6403s) {}
+[2025-09-07T18:11:45.294Z] [monitor] [INFO] [FILTER] ⏰ Skipping old transaction for 4BdKaxN8... | Sig: 3eomhEGS... (age: 8713s) {}
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[2025-09-07T18:13:54.633Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:13:54.633Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 325swbiw... {}
+[2025-09-07T18:13:54.723Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 325swbiw... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 325swbiw...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:13:54.726Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '325swbiw...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 325s...ZbQb
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 325s...ZbQb - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 325s...ZbQb...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 325s...ZbQb
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[2025-09-07T18:14:16.661Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 17s - within acceptable range {}
+[2025-09-07T18:14:16.661Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 3mRB6Rmk... {}
+[2025-09-07T18:14:16.756Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 3mRB6Rmk... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 3mRB6Rmk...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:14:16.760Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '3mRB6Rmk...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 3mRB...uW5p
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 3mRB...uW5p - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 3mRB...uW5p...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 3mRB...uW5p
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+[2025-09-07T18:14:24.607Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:14:24.608Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 2svuyM6z... {}
+[2025-09-07T18:14:24.910Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 2svuyM6z... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 2svuyM6z...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:14:24.914Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '2svuyM6z...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 2svu...uU88
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 2svu...uU88 - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 2svu...uU88...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 2svu...uU88
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -0.092344652 SOL (Raw: -92344652)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -92344652, Token received: Hc2G...pump
+[ANALYZER] ✅ Trade detected! Using Universal Cloning Engine...
+[ANALYZER] ✅ Swap confirmed via balance changes. Type: buy
+[BLUEPRINT-CREATOR] 🔍 Creating detailed blueprint for transaction...
+[ANALYZER-V2] 🔍 Searching for core swap instruction using advanced CPI detection...
+[ANALYZER-V2] 📊 Transaction has 23 accounts and 6 instructions
+[ANALYZER-V2] 👤 Trader found at account index: 0
+[ANALYZER-V2] 🎯 Strategy 1: Checking for direct calls signed by the trader...
+[ANALYZER-V2] 🔄 Strategy 2: Checking for Router CPI patterns...
+[ANALYZER-V2] 🔍 Outer instruction 3 signed by trader: F5tfvbLo...
+[ANALYZER-V2] 🔍 Found 8 inner instructions for outer 3
+[ANALYZER-V2] ✅ SUCCESS (Router CPI): Found inner instruction 1 for 6EF8rrec... triggered by trader's signed call.
+[ANALYZER-V2] ✅ SUCCESS: Packaged instruction for cloning.
+[ANALYZER-V2]   -> Platform/Router Program ID: 6EF8rrec...5uBEwF6P (Pump.fun)
+[ANALYZER-V2]   -> Accounts: 16
+[ANALYZER-V2]   -> Data length: 33 chars
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -0.092344652 SOL (Raw: -92344652)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -92344652, Token received: Hc2G...pump
+[BLUEPRINT-CREATOR] 🏷️ Annotating account roles for context preservation...
+[BLUEPRINT-CREATOR] ✅ Blueprint created with 16 annotated accounts
+[BLUEPRINT-CREATOR] 📋 Account roles: PLATFORM_OR_PDA(0), PLATFORM_OR_PDA(1), OUTPUT_MINT(2), PLATFORM_OR_PDA(3), PLATFORM_OR_PDA(4), OUTPUT_ATA(5), TRADER_WALLET(6), SYSTEM_PROGRAM(7), TOKEN_PROGRAM(8), PLATFORM_OR_PDA(9), PLATFORM_OR_PDA(10), PLATFORM_OR_PDA(11), PLATFORM_OR_PDA(12), PLATFORM_OR_PDA(13), PLATFORM_OR_PDA(14), PLATFORM_OR_PDA(15)
+[ANALYZER] 🎉 SUCCESS! BUY on UniversalCloner | 0.0923 SOL → Hc2G...pump | Fee: 0.000105 SOL | Slot: 365301354
+[EXECUTE_MASTER] 📊 BUY on UniversalCloner | 0.0923 SOL → Hc2G...pump | Fee: 0.000105 SOL | Slot: 365301354
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: UniversalCloner, Type: buy
+[EXECUTE_MASTER] 🎯 Using platform from analysis: UniversalCloner
+[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms
+[EXECUTE_MASTER] 🔧 Platform: UniversalCloner | Program ID: 6EF8...wF6P | Compute Units: 800000
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 5665429224
+[EXECUTE_MASTER] 🚀 Dispatching copy for UniversalCloner trade to 1 user(s).
+[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  inputMintType: 'string',
+  outputMintType: 'string',
+  hasCloningTarget: true
+}
+[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts: [
+  {
+    "pubkey": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": false,
+    "index": 0
+  },
+  {
+    "pubkey": "7VtfL8fvgNfhz17qKRMjzQEXgbdpnHHHQRh54R9jP2RJ",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 1
+  },
+  {
+    "pubkey": "Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump",
+    "role": "OUTPUT_MINT",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 2
+  }
+]
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 5665429224
+[SINGAPORE-SENDER] 🚀 COPY TRADE: BUY UniversalCloner | Token: Hc2G...pump | User: 5665429224
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 5
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 5
+[KeypairProvider] ✅ Resolved wallet "zap" for user 3.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[TRADE-VALIDATION] 🔍 Validating trade for copy...
+[TRADE-VALIDATION] ✅ Trade validation passed! Type: buy
+[SINGAPORE-SENDER] 💰 User 5665429224 SOL amount per trade: 0.001 SOL (1000000 lamports)
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[SINGAPORE-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders
+[SINGAPORE-SENDER] 🔍 TradeDetails validation: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  hasCloningTarget: true,
+  traderPubkey: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK',
+  platformProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
+}
+[NONCE] ❌ Failed to get latest nonce for FeDt...pGCn: Nonce account FeDt...pGCn is not initialized.
+[SINGAPORE-SENDER] 🔧 Building Universal Cloned instructions...
+[SINGAPORE-SENDER] ⚠️ Failed to get nonce info: Nonce account FeDt...pGCn is not initialized.. Using regular blockhash.
+[SINGAPORE-SENDER] 🔑 Transaction signature: 2svuyM6zaXXGjn3B7W7nE9Dwvb7eR2r4xw5anJrpUsMm31TyfmKWf47h2qXs2PTvNPy471YENmGpEqNgiyA7uU88
+[SINGAPORE-SENDER] 💰 Master trader amount: undefined raw units
+[SINGAPORE-SENDER] 💰 User copy trade amount: 1000000 raw units
+[TRANSACTION-LOGGER] 📝 Copy trade logged to: copy_trade_2svuyM6zaXXGjn3B7W7nE9Dwvb7eR2r4xw5anJrpUsMm31TyfmKWf47h2qXs2PTvNPy471YENmGpEqNgiyA7uU88.json
+[BLUEPRINT-FORGER] 🔧 Building cloned instruction for user HyF8...EACS
+[BLUEPRINT-FORGER] 🎯 Target program: 6EF8...wF6P
+[BLUEPRINT-FORGER] 💰 Trade type: buy
+[BLUEPRINT-FORGER] 📊 Blueprint accounts: 16
+[FORGER] 🗺️ Creating forging map for account swaps...
+[FORGER] 📝 Map: TRADER_WALLET suqh...HQfK → HyF8...EACS
+[FORGER] 📝 Map: OUTPUT_ATA 9KDo...Krvr → 8kE3...n3E9
+[FORGER] ✅ Forging map created with 2 account swaps
+[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint...
+[BLUEPRINT-FORGER] ✅ Forged 16 accounts using blueprint
+[BLUEPRINT-FORGER] 📋 BLUEPRINT vs FORGED COMPARISON:
+┌─────────┬───────┬───────────────────┬─────────────────┬───────────────┬───────────┬─────────────┬───────────┐
+│ (index) │ index │ role              │ original_pubkey │ forged_pubkey │ is_signer │ is_writable │ status    │
+├─────────┼───────┼───────────────────┼─────────────────┼───────────────┼───────────┼─────────────┼───────────┤
+│ 0       │ 0     │ 'PLATFORM_OR_PDA' │ '4wTV...xnjf'   │ '4wTV...xnjf' │ false     │ false       │ 'COPIED'  │
+│ 1       │ 1     │ 'PLATFORM_OR_PDA' │ '7Vtf...P2RJ'   │ '7Vtf...P2RJ' │ false     │ true        │ 'COPIED'  │
+│ 2       │ 2     │ 'OUTPUT_MINT'     │ 'Hc2G...pump'   │ 'Hc2G...pump' │ false     │ true        │ 'COPIED'  │
+│ 3       │ 3     │ 'PLATFORM_OR_PDA' │ 'CZDm...zRcF'   │ 'CZDm...zRcF' │ false     │ true        │ 'COPIED'  │
+│ 4       │ 4     │ 'PLATFORM_OR_PDA' │ 'A9gk...ZxDy'   │ 'A9gk...ZxDy' │ false     │ true        │ 'COPIED'  │
+│ 5       │ 5     │ 'OUTPUT_ATA'      │ '9KDo...Krvr'   │ '8kE3...n3E9' │ false     │ true        │ 'SWAPPED' │
+│ 6       │ 6     │ 'TRADER_WALLET'   │ 'suqh...HQfK'   │ 'HyF8...EACS' │ true      │ true        │ 'SWAPPED' │
+│ 7       │ 7     │ 'SYSTEM_PROGRAM'  │ '1111...1111'   │ '1111...1111' │ false     │ true        │ 'COPIED'  │
+│ 8       │ 8     │ 'TOKEN_PROGRAM'   │ 'Toke...Q5DA'   │ 'Toke...Q5DA' │ false     │ false       │ 'COPIED'  │
+│ 9       │ 9     │ 'PLATFORM_OR_PDA' │ '6Kfm...AoFg'   │ '6Kfm...AoFg' │ false     │ true        │ 'COPIED'  │
+│ 10      │ 10    │ 'PLATFORM_OR_PDA' │ 'Ce6T...p9F1'   │ 'Ce6T...p9F1' │ false     │ false       │ 'COPIED'  │
+│ 11      │ 11    │ 'PLATFORM_OR_PDA' │ '6EF8...wF6P'   │ '6EF8...wF6P' │ false     │ false       │ 'COPIED'  │
+│ 12      │ 12    │ 'PLATFORM_OR_PDA' │ 'Hq2w...wn2Y'   │ 'Hq2w...wn2Y' │ false     │ true        │ 'COPIED'  │
+│ 13      │ 13    │ 'PLATFORM_OR_PDA' │ '8kZY...YSGn'   │ '8kZY...YSGn' │ false     │ true        │ 'COPIED'  │
+│ 14      │ 14    │ 'PLATFORM_OR_PDA' │ '8Wf5...VwTt'   │ '8Wf5...VwTt' │ false     │ true        │ 'COPIED'  │
+│ 15      │ 15    │ 'PLATFORM_OR_PDA' │ 'pfee...ojVZ'   │ 'pfee...ojVZ' │ false     │ true        │ 'COPIED'  │
+└─────────┴───────┴───────────────────┴─────────────────┴───────────────┴───────────┴─────────────┴───────────┘
+[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: Hc2G...pump
+[UNIVERSAL-CLONER] 🔧 Creating ATA for user: HyF8...EACS
+[UNIVERSAL-CLONER] 🔍 Mint Hc2G...pump uses Standard SPL Token program
+[UNIVERSAL-CLONER] 🎯 Using Token Program: Toke...Q5DA for mint Hc2G...pump
+[UNIVERSAL-CLONER] ✅ ATA creation instruction added with Standard SPL Token program
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBxCjDH89w6ngC85DesGvDaX
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBxCjDH89w6ngC85DesGvDaX
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data length: 33
+[UNIVERSAL-CLONER] 🔍 Decoded buffer length: 24 bytes
+[UNIVERSAL-CLONER] 🔍 Decoded buffer (hex): 66063d1201daebea9a5d4b4f6600000061b0540500000000
+[UNIVERSAL-CLONER] 🔒 Non-Photon platform (6EF8rrec...). Preserving original instruction data for safety.
+[UNIVERSAL-CLONER] 💰 Using user's SOL amount for BUY: 1000000 lamports
+[UNIVERSAL-CLONER] 🔒 Using original instruction data - surgical overrides will apply platform-specific fixes
+[UNIVERSAL-CLONER] 💡 Platform-specific data modifications handled by Smart Cloner overrides
+[UNIVERSAL-CLONER] ✅ Created cloned instruction: { programId: '6EF8...wF6P', accountCount: 16, dataLength: 24 }
+[UNIVERSAL-CLONER] 🧠 Applying Smart Cloner surgical overrides...
+[FORGER] 🔍 Applying surgical overrides for program: 6EF8...wF6P
+[FORGER] 🎯 Detected Pump.fun. Fixing user_volume_accumulator PDA...
+[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA:
+[FORGER]   Old: 8kZY...YSGn
+[FORGER]   New: GMQh...CBsZ
+[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Building fresh Pump.fun instruction data with correct discriminator...
+[FORGER] ✅ RECONSTRUCTION COMPLETE:
+[FORGER]   - Discriminator: 169168196c813e37
+[FORGER]   - Token amount out: 0
+[FORGER]   - Max SOL cost: 1500000 lamports
+[FORGER]   - Old corrupted data replaced with fresh, correct data
+[FORGER] 🔍 VERIFICATION: Final instruction data: 169168196c813e37000000000000000060e3160000000000
+[UNIVERSAL-CLONER] ✅ Smart Cloner overrides completed
+[SINGAPORE-SENDER] ✅ Universal Cloner built 2 instructions
+[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...
+[SINGAPORE-SENDER] 📊 Simulation details:
+[SINGAPORE-SENDER]   - Instructions: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8...EACS
+[SINGAPORE-SENDER]   - Nonce info: NO
+[SINGAPORE-SENDER]   Instruction 0:
+[SINGAPORE-SENDER]     - Program: ATok...8knL
+[SINGAPORE-SENDER]     - Accounts: 6
+[SINGAPORE-SENDER]     - Data length: 0 bytes
+[SINGAPORE-SENDER]       Account 0: HyF8...EACS (signer: true, writable: true)
+[SINGAPORE-SENDER]       Account 1: 8kE3...n3E9 (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: HyF8...EACS (signer: false, writable: false)
+[SINGAPORE-SENDER]   Instruction 1:
+[SINGAPORE-SENDER]     - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]     - Accounts: 16
+[SINGAPORE-SENDER]     - Data length: 24 bytes
+[SINGAPORE-SENDER]       Account 0: 4wTV...xnjf (signer: false, writable: false)
+[SINGAPORE-SENDER]       Account 1: 7Vtf...P2RJ (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: Hc2G...pump (signer: false, writable: true)
+[SINGAPORE-SENDER] 🔧 Total instructions for simulation: 4 (2 compute + 2 trade)
+[SINGAPORE-SENDER] ⏰ Using fresh blockhash: 2K9E...PnAe
+[SINGAPORE-SENDER] ✍️ Transaction signed for simulation
+[SINGAPORE-SENDER] 🧪 Running Solana simulation...
+[SINGAPORE-SENDER] 📊 Simulation completed
+[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!
+[SINGAPORE-SENDER] 🚫 Marked transaction 2svu...uU88 as failed - will not retry
+[SINGAPORE-SENDER] 🔍 Error details: {
+  "InstructionError": [
+    3,
+    {
+      "Custom": 101
+    }
+  ]
+}
+[SINGAPORE-SENDER] 📋 Full simulation logs:
+[SINGAPORE-SENDER]   1. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   2. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   3. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   4. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   5. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]
+[SINGAPORE-SENDER]   6. Program log: Create
+[SINGAPORE-SENDER]   7. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   8. Program log: Instruction: GetAccountDataSize
+[SINGAPORE-SENDER]   9. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1569 of 789835 compute units
+[SINGAPORE-SENDER]   10. Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=
+[SINGAPORE-SENDER]   11. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   12. Program 11111111111111111111111111111111 invoke [2]
+[SINGAPORE-SENDER]   13. Program 11111111111111111111111111111111 success
+[SINGAPORE-SENDER]   14. Program log: Initialize the associated token account
+[SINGAPORE-SENDER]   15. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   16. Program log: Instruction: InitializeImmutableOwner
+[SINGAPORE-SENDER]   17. Program log: Please upgrade to SPL Token 2022 for immutable owner support
+[SINGAPORE-SENDER]   18. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1405 of 783248 compute units
+[SINGAPORE-SENDER]   19. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   20. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   21. Program log: Instruction: InitializeAccount3
+[SINGAPORE-SENDER]   22. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4188 of 779367 compute units
+[SINGAPORE-SENDER]   23. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   24. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 24804 of 799700 compute units
+[SINGAPORE-SENDER]   25. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success
+[SINGAPORE-SENDER]   26. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]
+[SINGAPORE-SENDER]   27. Program log: AnchorError occurred. Error Code: InstructionFallbackNotFound. Error Number: 101. Error Message: Fallback functions are not supported.
+[SINGAPORE-SENDER]   28. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 5802 of 774896 compute units
+[SINGAPORE-SENDER]   29. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x65
+[SINGAPORE-SENDER] 🎯 Error type: InstructionError
+[SINGAPORE-SENDER] 📍 Failed at instruction 3:
+[SINGAPORE-SENDER]   - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]   - Accounts: 16
+[SINGAPORE-SENDER]   - Data: 24 bytes
+[SINGAPORE-SENDER] 🔍 Instruction error: {
+  "Custom": 101
+}
+[SINGAPORE-SENDER] ❌ Pre-flight simulation error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+[SINGAPORE-SENDER] 🔍 Error stack: Error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2210:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[SINGAPORE-SENDER] 🔧 Debug info:
+[SINGAPORE-SENDER]   - Instructions count: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS
+[SINGAPORE-SENDER]   - Connection endpoint: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[SINGAPORE-SENDER] ❌ Copy trade execution failed for user 5665429224: Error: Pre-flight simulation failed: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2234:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[ROUTER] Forwarding notification from executor to telegram worker.
+[TraceLogger] Cannot append trace. File not found for signature: 2svuyM6zaXXGjn3B7W7nE9Dwvb7eR2r4xw5anJrpUsMm31TyfmKWf47h2qXs2PTvNPy471YENmGpEqNgiyA7uU88
+[2025-09-07T18:14:26.671Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:14:26.672Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 3SEEmb7f... {}
+[2025-09-07T18:14:26.786Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 3SEEmb7f... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 3SEEmb7f...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:14:26.791Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '3SEEmb7f...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 3SEE...nvcf
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 3SEE...nvcf - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 3SEE...nvcf...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 3SEE...nvcf
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -0.109498894 SOL (Raw: -109498894)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -109498894, Token received: Hc2G...pump
+[ANALYZER] ✅ Trade detected! Using Universal Cloning Engine...
+[ANALYZER] ✅ Swap confirmed via balance changes. Type: buy
+[BLUEPRINT-CREATOR] 🔍 Creating detailed blueprint for transaction...
+[ANALYZER-V2] 🔍 Searching for core swap instruction using advanced CPI detection...
+[ANALYZER-V2] 📊 Transaction has 23 accounts and 6 instructions
+[ANALYZER-V2] 👤 Trader found at account index: 0
+[ANALYZER-V2] 🎯 Strategy 1: Checking for direct calls signed by the trader...
+[ANALYZER-V2] 🔄 Strategy 2: Checking for Router CPI patterns...
+[ANALYZER-V2] 🔍 Outer instruction 3 signed by trader: F5tfvbLo...
+[ANALYZER-V2] 🔍 Found 8 inner instructions for outer 3
+[ANALYZER-V2] ✅ SUCCESS (Router CPI): Found inner instruction 1 for 6EF8rrec... triggered by trader's signed call.
+[ANALYZER-V2] ✅ SUCCESS: Packaged instruction for cloning.
+[ANALYZER-V2]   -> Platform/Router Program ID: 6EF8rrec...5uBEwF6P (Pump.fun)
+[ANALYZER-V2]   -> Accounts: 16
+[ANALYZER-V2]   -> Data length: 33 chars
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -0.109498894 SOL (Raw: -109498894)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -109498894, Token received: Hc2G...pump
+[BLUEPRINT-CREATOR] 🏷️ Annotating account roles for context preservation...
+[BLUEPRINT-CREATOR] ✅ Blueprint created with 16 annotated accounts
+[BLUEPRINT-CREATOR] 📋 Account roles: PLATFORM_OR_PDA(0), PLATFORM_OR_PDA(1), OUTPUT_MINT(2), PLATFORM_OR_PDA(3), PLATFORM_OR_PDA(4), OUTPUT_ATA(5), TRADER_WALLET(6), SYSTEM_PROGRAM(7), TOKEN_PROGRAM(8), PLATFORM_OR_PDA(9), PLATFORM_OR_PDA(10), PLATFORM_OR_PDA(11), PLATFORM_OR_PDA(12), PLATFORM_OR_PDA(13), PLATFORM_OR_PDA(14), PLATFORM_OR_PDA(15)
+[ANALYZER] 🎉 SUCCESS! BUY on UniversalCloner | 0.1095 SOL → Hc2G...pump | Fee: 0.001005 SOL | Slot: 365301360
+[EXECUTE_MASTER] 📊 BUY on UniversalCloner | 0.1095 SOL → Hc2G...pump | Fee: 0.001005 SOL | Slot: 365301360
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: UniversalCloner, Type: buy
+[EXECUTE_MASTER] 🎯 Using platform from analysis: UniversalCloner
+[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms
+[EXECUTE_MASTER] 🔧 Platform: UniversalCloner | Program ID: 6EF8...wF6P | Compute Units: 800000
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 5665429224
+[EXECUTE_MASTER] 🚀 Dispatching copy for UniversalCloner trade to 1 user(s).
+[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  inputMintType: 'string',
+  outputMintType: 'string',
+  hasCloningTarget: true
+}
+[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts: [
+  {
+    "pubkey": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": false,
+    "index": 0
+  },
+  {
+    "pubkey": "7hTckgnGnLQR6sdH7YkqFTAA7VwTfYFaZ6EhEsU3saCX",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 1
+  },
+  {
+    "pubkey": "Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump",
+    "role": "OUTPUT_MINT",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 2
+  }
+]
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 5665429224
+[SINGAPORE-SENDER] 🚀 COPY TRADE: BUY UniversalCloner | Token: Hc2G...pump | User: 5665429224
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 5
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 5
+[KeypairProvider] ✅ Resolved wallet "zap" for user 3.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[TRADE-VALIDATION] 🔍 Validating trade for copy...
+[TRADE-VALIDATION] ✅ Trade validation passed! Type: buy
+[SINGAPORE-SENDER] 💰 User 5665429224 SOL amount per trade: 0.001 SOL (1000000 lamports)
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[SINGAPORE-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders
+[SINGAPORE-SENDER] 🔍 TradeDetails validation: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'Hc2Giw2Pua7hPUd75ajWJ3Vo8wB3YgHLwVJu83Rtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  hasCloningTarget: true,
+  traderPubkey: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK',
+  platformProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
+}
+[2025-09-07T18:14:27.097Z] [telegram] [INFO] Sent message via worker { chatId: 5665429224 }
+[NONCE] ❌ Failed to get latest nonce for FeDt...pGCn: Nonce account FeDt...pGCn is not initialized.
+[SINGAPORE-SENDER] 🔧 Building Universal Cloned instructions...
+[SINGAPORE-SENDER] ⚠️ Failed to get nonce info: Nonce account FeDt...pGCn is not initialized.. Using regular blockhash.
+[SINGAPORE-SENDER] 🔑 Transaction signature: 3SEEmb7fipzCPCSosBUHToipLUizxpSZkMpCxCzisbKgWiqYV91u6X6wAKw6gTxC6NQBjXJ3iMcnfPQfpZGSnvcf
+[SINGAPORE-SENDER] 💰 Master trader amount: undefined raw units
+[SINGAPORE-SENDER] 💰 User copy trade amount: 1000000 raw units
+[TRANSACTION-LOGGER] 📝 Copy trade logged to: copy_trade_3SEEmb7fipzCPCSosBUHToipLUizxpSZkMpCxCzisbKgWiqYV91u6X6wAKw6gTxC6NQBjXJ3iMcnfPQfpZGSnvcf.json
+[BLUEPRINT-FORGER] 🔧 Building cloned instruction for user HyF8...EACS
+[BLUEPRINT-FORGER] 🎯 Target program: 6EF8...wF6P
+[BLUEPRINT-FORGER] 💰 Trade type: buy
+[BLUEPRINT-FORGER] 📊 Blueprint accounts: 16
+[FORGER] 🗺️ Creating forging map for account swaps...
+[FORGER] 📝 Map: TRADER_WALLET suqh...HQfK → HyF8...EACS
+[FORGER] 📝 Map: OUTPUT_ATA 9KDo...Krvr → 8kE3...n3E9
+[FORGER] ✅ Forging map created with 2 account swaps
+[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint...
+[BLUEPRINT-FORGER] ✅ Forged 16 accounts using blueprint
+[BLUEPRINT-FORGER] 📋 BLUEPRINT vs FORGED COMPARISON:
+┌─────────┬───────┬───────────────────┬─────────────────┬───────────────┬───────────┬─────────────┬───────────┐
+│ (index) │ index │ role              │ original_pubkey │ forged_pubkey │ is_signer │ is_writable │ status    │
+├─────────┼───────┼───────────────────┼─────────────────┼───────────────┼───────────┼─────────────┼───────────┤
+│ 0       │ 0     │ 'PLATFORM_OR_PDA' │ '4wTV...xnjf'   │ '4wTV...xnjf' │ false     │ false       │ 'COPIED'  │
+│ 1       │ 1     │ 'PLATFORM_OR_PDA' │ '7hTc...saCX'   │ '7hTc...saCX' │ false     │ true        │ 'COPIED'  │
+│ 2       │ 2     │ 'OUTPUT_MINT'     │ 'Hc2G...pump'   │ 'Hc2G...pump' │ false     │ true        │ 'COPIED'  │
+│ 3       │ 3     │ 'PLATFORM_OR_PDA' │ 'CZDm...zRcF'   │ 'CZDm...zRcF' │ false     │ true        │ 'COPIED'  │
+│ 4       │ 4     │ 'PLATFORM_OR_PDA' │ 'A9gk...ZxDy'   │ 'A9gk...ZxDy' │ false     │ true        │ 'COPIED'  │
+│ 5       │ 5     │ 'OUTPUT_ATA'      │ '9KDo...Krvr'   │ '8kE3...n3E9' │ false     │ true        │ 'SWAPPED' │
+│ 6       │ 6     │ 'TRADER_WALLET'   │ 'suqh...HQfK'   │ 'HyF8...EACS' │ true      │ true        │ 'SWAPPED' │
+│ 7       │ 7     │ 'SYSTEM_PROGRAM'  │ '1111...1111'   │ '1111...1111' │ false     │ true        │ 'COPIED'  │
+│ 8       │ 8     │ 'TOKEN_PROGRAM'   │ 'Toke...Q5DA'   │ 'Toke...Q5DA' │ false     │ false       │ 'COPIED'  │
+│ 9       │ 9     │ 'PLATFORM_OR_PDA' │ '6Kfm...AoFg'   │ '6Kfm...AoFg' │ false     │ true        │ 'COPIED'  │
+│ 10      │ 10    │ 'PLATFORM_OR_PDA' │ 'Ce6T...p9F1'   │ 'Ce6T...p9F1' │ false     │ false       │ 'COPIED'  │
+│ 11      │ 11    │ 'PLATFORM_OR_PDA' │ '6EF8...wF6P'   │ '6EF8...wF6P' │ false     │ false       │ 'COPIED'  │
+│ 12      │ 12    │ 'PLATFORM_OR_PDA' │ 'Hq2w...wn2Y'   │ 'Hq2w...wn2Y' │ false     │ true        │ 'COPIED'  │
+│ 13      │ 13    │ 'PLATFORM_OR_PDA' │ '8kZY...YSGn'   │ '8kZY...YSGn' │ false     │ true        │ 'COPIED'  │
+│ 14      │ 14    │ 'PLATFORM_OR_PDA' │ '8Wf5...VwTt'   │ '8Wf5...VwTt' │ false     │ true        │ 'COPIED'  │
+│ 15      │ 15    │ 'PLATFORM_OR_PDA' │ 'pfee...ojVZ'   │ 'pfee...ojVZ' │ false     │ true        │ 'COPIED'  │
+└─────────┴───────┴───────────────────┴─────────────────┴───────────────┴───────────┴─────────────┴───────────┘
+[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: Hc2G...pump
+[UNIVERSAL-CLONER] 🔧 Creating ATA for user: HyF8...EACS
+[UNIVERSAL-CLONER] 🔍 Mint Hc2G...pump uses Standard SPL Token program
+[UNIVERSAL-CLONER] 🎯 Using Token Program: Toke...Q5DA for mint Hc2G...pump
+[UNIVERSAL-CLONER] ✅ ATA creation instruction added with Standard SPL Token program
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBeQbwTNNM6uYAFJH5bmxmYs
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBeQbwTNNM6uYAFJH5bmxmYs
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data length: 33
+[UNIVERSAL-CLONER] 🔍 Decoded buffer length: 24 bytes
+[UNIVERSAL-CLONER] 🔍 Decoded buffer (hex): 66063d1201daebea0a413dd3780000000dd3570600000000
+[UNIVERSAL-CLONER] 🔒 Non-Photon platform (6EF8rrec...). Preserving original instruction data for safety.
+[UNIVERSAL-CLONER] 💰 Using user's SOL amount for BUY: 1000000 lamports
+[UNIVERSAL-CLONER] 🔒 Using original instruction data - surgical overrides will apply platform-specific fixes
+[UNIVERSAL-CLONER] 💡 Platform-specific data modifications handled by Smart Cloner overrides
+[UNIVERSAL-CLONER] ✅ Created cloned instruction: { programId: '6EF8...wF6P', accountCount: 16, dataLength: 24 }
+[UNIVERSAL-CLONER] 🧠 Applying Smart Cloner surgical overrides...
+[FORGER] 🔍 Applying surgical overrides for program: 6EF8...wF6P
+[FORGER] 🎯 Detected Pump.fun. Fixing user_volume_accumulator PDA...
+[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA:
+[FORGER]   Old: 8kZY...YSGn
+[FORGER]   New: GMQh...CBsZ
+[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Building fresh Pump.fun instruction data with correct discriminator...
+[FORGER] ✅ RECONSTRUCTION COMPLETE:
+[FORGER]   - Discriminator: 169168196c813e37
+[FORGER]   - Token amount out: 0
+[FORGER]   - Max SOL cost: 1500000 lamports
+[FORGER]   - Old corrupted data replaced with fresh, correct data
+[FORGER] 🔍 VERIFICATION: Final instruction data: 169168196c813e37000000000000000060e3160000000000
+[UNIVERSAL-CLONER] ✅ Smart Cloner overrides completed
+[SINGAPORE-SENDER] ✅ Universal Cloner built 2 instructions
+[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...
+[SINGAPORE-SENDER] 📊 Simulation details:
+[SINGAPORE-SENDER]   - Instructions: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8...EACS
+[SINGAPORE-SENDER]   - Nonce info: NO
+[SINGAPORE-SENDER]   Instruction 0:
+[SINGAPORE-SENDER]     - Program: ATok...8knL
+[SINGAPORE-SENDER]     - Accounts: 6
+[SINGAPORE-SENDER]     - Data length: 0 bytes
+[SINGAPORE-SENDER]       Account 0: HyF8...EACS (signer: true, writable: true)
+[SINGAPORE-SENDER]       Account 1: 8kE3...n3E9 (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: HyF8...EACS (signer: false, writable: false)
+[SINGAPORE-SENDER]   Instruction 1:
+[SINGAPORE-SENDER]     - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]     - Accounts: 16
+[SINGAPORE-SENDER]     - Data length: 24 bytes
+[SINGAPORE-SENDER]       Account 0: 4wTV...xnjf (signer: false, writable: false)
+[SINGAPORE-SENDER]       Account 1: 7hTc...saCX (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: Hc2G...pump (signer: false, writable: true)
+[SINGAPORE-SENDER] 🔧 Total instructions for simulation: 4 (2 compute + 2 trade)
+[SINGAPORE-SENDER] ⏰ Using fresh blockhash: A5ik...TYZp
+[SINGAPORE-SENDER] ✍️ Transaction signed for simulation
+[SINGAPORE-SENDER] 🧪 Running Solana simulation...
+[SINGAPORE-SENDER] 📊 Simulation completed
+[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!
+[SINGAPORE-SENDER] 🚫 Marked transaction 3SEE...nvcf as failed - will not retry
+[SINGAPORE-SENDER] 🔍 Error details: {
+  "InstructionError": [
+    3,
+    {
+      "Custom": 101
+    }
+  ]
+}
+[SINGAPORE-SENDER] 📋 Full simulation logs:
+[SINGAPORE-SENDER]   1. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   2. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   3. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   4. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   5. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]
+[SINGAPORE-SENDER]   6. Program log: Create
+[SINGAPORE-SENDER]   7. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   8. Program log: Instruction: GetAccountDataSize
+[SINGAPORE-SENDER]   9. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1569 of 789835 compute units
+[SINGAPORE-SENDER]   10. Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=
+[SINGAPORE-SENDER]   11. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   12. Program 11111111111111111111111111111111 invoke [2]
+[SINGAPORE-SENDER]   13. Program 11111111111111111111111111111111 success
+[SINGAPORE-SENDER]   14. Program log: Initialize the associated token account
+[SINGAPORE-SENDER]   15. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   16. Program log: Instruction: InitializeImmutableOwner
+[SINGAPORE-SENDER]   17. Program log: Please upgrade to SPL Token 2022 for immutable owner support
+[SINGAPORE-SENDER]   18. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1405 of 783248 compute units
+[SINGAPORE-SENDER]   19. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   20. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   21. Program log: Instruction: InitializeAccount3
+[SINGAPORE-SENDER]   22. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4188 of 779367 compute units
+[SINGAPORE-SENDER]   23. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   24. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 24804 of 799700 compute units
+[SINGAPORE-SENDER]   25. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success
+[SINGAPORE-SENDER]   26. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]
+[SINGAPORE-SENDER]   27. Program log: AnchorError occurred. Error Code: InstructionFallbackNotFound. Error Number: 101. Error Message: Fallback functions are not supported.
+[SINGAPORE-SENDER]   28. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 5802 of 774896 compute units
+[SINGAPORE-SENDER]   29. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x65
+[SINGAPORE-SENDER] 🎯 Error type: InstructionError
+[SINGAPORE-SENDER] 📍 Failed at instruction 3:
+[SINGAPORE-SENDER]   - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]   - Accounts: 16
+[SINGAPORE-SENDER]   - Data: 24 bytes
+[SINGAPORE-SENDER] 🔍 Instruction error: {
+  "Custom": 101
+}
+[SINGAPORE-SENDER] ❌ Pre-flight simulation error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+[SINGAPORE-SENDER] 🔍 Error stack: Error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2210:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[SINGAPORE-SENDER] 🔧 Debug info:
+[SINGAPORE-SENDER]   - Instructions count: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS
+[SINGAPORE-SENDER]   - Connection endpoint: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[SINGAPORE-SENDER] ❌ Copy trade execution failed for user 5665429224: Error: Pre-flight simulation failed: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2234:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[ROUTER] Forwarding notification from executor to telegram worker.
+[TraceLogger] Cannot append trace. File not found for signature: 3SEEmb7fipzCPCSosBUHToipLUizxpSZkMpCxCzisbKgWiqYV91u6X6wAKw6gTxC6NQBjXJ3iMcnfPQfpZGSnvcf
+[2025-09-07T18:14:28.789Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 14s - within acceptable range {}
+[2025-09-07T18:14:28.789Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 4tzTegNr... {}
+[2025-09-07T18:14:28.863Z] [telegram] [INFO] Sent message via worker { chatId: 5665429224 }
+[2025-09-07T18:14:28.892Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 4tzTegNr... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 4tzTegNr...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:14:28.896Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '4tzTegNr...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 4tzT...NjY2
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 4tzT...NjY2 - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 4tzT...NjY2...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 4tzT...NjY2
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[2025-09-07T18:16:30.166Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:16:30.167Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: yucT7zGU... {}
+[2025-09-07T18:16:30.438Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: yucT7zGU... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: yucT7zGU...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:16:30.446Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: 'yucT7zGU...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: yucT...iuhp
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for yucT...iuhp - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction yucT...iuhp...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: yucT...iuhp
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[2025-09-07T18:16:45.707Z] [monitor] [INFO] ⏰ Periodic subscription refresh triggered {}
+[2025-09-07T18:16:45.708Z] [monitor] [INFO] 🔄 Refreshing LaserStream subscriptions... {}
+[LASERSTREAM-ENHANCED] 🔄 Refreshing trader subscriptions...
+[LASERSTREAM-ENHANCED] ✅ No changes in trader list
+[2025-09-07T18:16:45.712Z] [monitor] [INFO] ✅ No changes in LaserStream subscriptions {}
+[2025-09-07T18:16:45.713Z] [monitor] [INFO] 🔄 Refreshing RPC polling wallet list... {}
+[2025-09-07T18:16:45.715Z] [monitor] [INFO] 📊 Updated RPC polling list: 2 wallets {}
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[2025-09-07T18:16:48.104Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:16:48.104Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 2ThYuohR... {}
+[2025-09-07T18:16:48.197Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 2ThYuohR... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 2ThYuohR...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:16:48.200Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '2ThYuohR...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 2ThY...WxUW
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 2ThY...WxUW - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 2ThY...WxUW...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 2ThY...WxUW
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[2025-09-07T18:18:05.705Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:18:05.706Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 3v2dTvfd... {}
+[2025-09-07T18:18:05.888Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 3v2dTvfd... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 3v2dTvfd...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:18:05.893Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '3v2dTvfd...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 3v2d...cua7
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 3v2d...cua7 - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 3v2d...cua7...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 3v2d...cua7
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 0 SOL (Raw: 0)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] Result: No clear swap pattern detected based on SOL/Token movements.
+SOL Change: 0 (Threshold: 0)
+Received Mint: HPbi...Xt9i, Amount: 3
+Sent Mint: N/A, Amount: 0
+[ANALYZER] ❌ Not a trade transaction - skipping platform analysis
+[EXECUTE_MASTER] ❌ Not copyable: No swap detected in balance changes.
+[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: No swap detected in balance changes.
+💓 Health check: healthy { workers: 6, ready: 6 }
+[2025-09-07T18:18:15.712Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:18:15.712Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: yBF16eVN... {}
+[2025-09-07T18:18:15.883Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: yBF16eVN... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: yBF16eVN...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:18:15.888Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: 'yBF16eVN...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: yBF1...FYZR
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for yBF1...FYZR - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction yBF1...FYZR...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: yBF1...FYZR
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -1.439278932 SOL (Raw: -1439278932)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -1439278932, Token received: DjmP...pump
+[ANALYZER] ✅ Trade detected! Using Universal Cloning Engine...
+[ANALYZER] ✅ Swap confirmed via balance changes. Type: buy
+[BLUEPRINT-CREATOR] 🔍 Creating detailed blueprint for transaction...
+[ANALYZER-V2] 🔍 Searching for core swap instruction using advanced CPI detection...
+[ANALYZER-V2] 📊 Transaction has 24 accounts and 7 instructions
+[ANALYZER-V2] 👤 Trader found at account index: 0
+[ANALYZER-V2] 🎯 Strategy 1: Checking for direct calls signed by the trader...
+[ANALYZER-V2] 🔄 Strategy 2: Checking for Router CPI patterns...
+[ANALYZER-V2] 🔍 Outer instruction 4 signed by trader: F5tfvbLo...
+[ANALYZER-V2] 🔍 Found 8 inner instructions for outer 4
+[ANALYZER-V2] ✅ SUCCESS (Router CPI): Found inner instruction 1 for 6EF8rrec... triggered by trader's signed call.
+[ANALYZER-V2] ✅ SUCCESS: Packaged instruction for cloning.
+[ANALYZER-V2]   -> Platform/Router Program ID: 6EF8rrec...5uBEwF6P (Pump.fun)
+[ANALYZER-V2]   -> Accounts: 16
+[ANALYZER-V2]   -> Data length: 33 chars
+[BalanceAnalysis] Trader suqh...HQfK SOL change: -1.439278932 SOL (Raw: -1439278932)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ BUY Detected (SOL out, Token in). SOL change: -1439278932, Token received: DjmP...pump
+[BLUEPRINT-CREATOR] 🏷️ Annotating account roles for context preservation...
+[BLUEPRINT-CREATOR] ✅ Blueprint created with 16 annotated accounts
+[BLUEPRINT-CREATOR] 📋 Account roles: PLATFORM_OR_PDA(0), PLATFORM_OR_PDA(1), OUTPUT_MINT(2), PLATFORM_OR_PDA(3), PLATFORM_OR_PDA(4), OUTPUT_ATA(5), TRADER_WALLET(6), SYSTEM_PROGRAM(7), TOKEN_PROGRAM(8), PLATFORM_OR_PDA(9), PLATFORM_OR_PDA(10), PLATFORM_OR_PDA(11), PLATFORM_OR_PDA(12), PLATFORM_OR_PDA(13), PLATFORM_OR_PDA(14), PLATFORM_OR_PDA(15)
+[ANALYZER] 🎉 SUCCESS! BUY on UniversalCloner | 1.4393 SOL → DjmP...pump | Fee: 0.000105 SOL | Slot: 365301937
+[EXECUTE_MASTER] 📊 BUY on UniversalCloner | 1.4393 SOL → DjmP...pump | Fee: 0.000105 SOL | Slot: 365301937
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: UniversalCloner, Type: buy
+[EXECUTE_MASTER] 🎯 Using platform from analysis: UniversalCloner
+[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms
+[EXECUTE_MASTER] 🔧 Platform: UniversalCloner | Program ID: 6EF8...wF6P | Compute Units: 800000
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 5665429224
+[EXECUTE_MASTER] 🚀 Dispatching copy for UniversalCloner trade to 1 user(s).
+[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'DjmPgcyVSPuB3RLk223rTjSPUqgbCiuY13t3EJgtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  inputMintType: 'string',
+  outputMintType: 'string',
+  hasCloningTarget: true
+}
+[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts: [
+  {
+    "pubkey": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": false,
+    "index": 0
+  },
+  {
+    "pubkey": "62qc2CNXwrYqQScmEdiZFFAnJR262PxWEuNQtxfafNgV",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 1
+  },
+  {
+    "pubkey": "DjmPgcyVSPuB3RLk223rTjSPUqgbCiuY13t3EJgtpump",
+    "role": "OUTPUT_MINT",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 2
+  }
+]
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 5665429224
+[SINGAPORE-SENDER] 🚀 COPY TRADE: BUY UniversalCloner | Token: DjmP...pump | User: 5665429224
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 5
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 5
+[KeypairProvider] ✅ Resolved wallet "zap" for user 3.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[TRADE-VALIDATION] 🔍 Validating trade for copy...
+[TRADE-VALIDATION] ✅ Trade validation passed! Type: buy
+[SINGAPORE-SENDER] 💰 User 5665429224 SOL amount per trade: 0.001 SOL (1000000 lamports)
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[SINGAPORE-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders
+[SINGAPORE-SENDER] 🔍 TradeDetails validation: {
+  tradeType: 'buy',
+  inputMint: 'So11111111111111111111111111111111111111112',
+  outputMint: 'DjmPgcyVSPuB3RLk223rTjSPUqgbCiuY13t3EJgtpump',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  hasCloningTarget: true,
+  traderPubkey: 'suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK',
+  platformProgramId: '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'
+}
+[NONCE] ❌ Failed to get latest nonce for FeDt...pGCn: Nonce account FeDt...pGCn is not initialized.
+[SINGAPORE-SENDER] 🔧 Building Universal Cloned instructions...
+[SINGAPORE-SENDER] ⚠️ Failed to get nonce info: Nonce account FeDt...pGCn is not initialized.. Using regular blockhash.
+[SINGAPORE-SENDER] 🔑 Transaction signature: yBF16eVN7dnfyN57zf7s2FKb7mx4pwhpkXYWJr23WZk1L2oX4ui4EaRmL9dPRmWvARPpe7ogUKbvzYsWvNdFYZR
+[SINGAPORE-SENDER] 💰 Master trader amount: undefined raw units
+[SINGAPORE-SENDER] 💰 User copy trade amount: 1000000 raw units
+[TRANSACTION-LOGGER] 📝 Copy trade logged to: copy_trade_yBF16eVN7dnfyN57zf7s2FKb7mx4pwhpkXYWJr23WZk1L2oX4ui4EaRmL9dPRmWvARPpe7ogUKbvzYsWvNdFYZR.json
+[BLUEPRINT-FORGER] 🔧 Building cloned instruction for user HyF8...EACS
+[BLUEPRINT-FORGER] 🎯 Target program: 6EF8...wF6P
+[BLUEPRINT-FORGER] 💰 Trade type: buy
+[BLUEPRINT-FORGER] 📊 Blueprint accounts: 16
+[FORGER] 🗺️ Creating forging map for account swaps...
+[FORGER] 📝 Map: TRADER_WALLET suqh...HQfK → HyF8...EACS
+[FORGER] 📝 Map: OUTPUT_ATA GY9P...Hjpw → Bwys...eLUZ
+[FORGER] ✅ Forging map created with 2 account swaps
+[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint...
+[BLUEPRINT-FORGER] ✅ Forged 16 accounts using blueprint
+[BLUEPRINT-FORGER] 📋 BLUEPRINT vs FORGED COMPARISON:
+┌─────────┬───────┬───────────────────┬─────────────────┬───────────────┬───────────┬─────────────┬───────────┐
+│ (index) │ index │ role              │ original_pubkey │ forged_pubkey │ is_signer │ is_writable │ status    │
+├─────────┼───────┼───────────────────┼─────────────────┼───────────────┼───────────┼─────────────┼───────────┤
+│ 0       │ 0     │ 'PLATFORM_OR_PDA' │ '4wTV...xnjf'   │ '4wTV...xnjf' │ false     │ false       │ 'COPIED'  │
+│ 1       │ 1     │ 'PLATFORM_OR_PDA' │ '62qc...fNgV'   │ '62qc...fNgV' │ false     │ true        │ 'COPIED'  │
+│ 2       │ 2     │ 'OUTPUT_MINT'     │ 'DjmP...pump'   │ 'DjmP...pump' │ false     │ true        │ 'COPIED'  │
+│ 3       │ 3     │ 'PLATFORM_OR_PDA' │ 'HCaK...XDCG'   │ 'HCaK...XDCG' │ false     │ true        │ 'COPIED'  │
+│ 4       │ 4     │ 'PLATFORM_OR_PDA' │ 'EFyM...mUeT'   │ 'EFyM...mUeT' │ false     │ true        │ 'COPIED'  │
+│ 5       │ 5     │ 'OUTPUT_ATA'      │ 'GY9P...Hjpw'   │ 'Bwys...eLUZ' │ false     │ true        │ 'SWAPPED' │
+│ 6       │ 6     │ 'TRADER_WALLET'   │ 'suqh...HQfK'   │ 'HyF8...EACS' │ true      │ true        │ 'SWAPPED' │
+│ 7       │ 7     │ 'SYSTEM_PROGRAM'  │ '1111...1111'   │ '1111...1111' │ false     │ true        │ 'COPIED'  │
+│ 8       │ 8     │ 'TOKEN_PROGRAM'   │ 'Toke...Q5DA'   │ 'Toke...Q5DA' │ false     │ false       │ 'COPIED'  │
+│ 9       │ 9     │ 'PLATFORM_OR_PDA' │ '99V6...84fi'   │ '99V6...84fi' │ false     │ true        │ 'COPIED'  │
+│ 10      │ 10    │ 'PLATFORM_OR_PDA' │ 'Ce6T...p9F1'   │ 'Ce6T...p9F1' │ false     │ false       │ 'COPIED'  │
+│ 11      │ 11    │ 'PLATFORM_OR_PDA' │ '6EF8...wF6P'   │ '6EF8...wF6P' │ false     │ false       │ 'COPIED'  │
+│ 12      │ 12    │ 'PLATFORM_OR_PDA' │ 'Hq2w...wn2Y'   │ 'Hq2w...wn2Y' │ false     │ true        │ 'COPIED'  │
+│ 13      │ 13    │ 'PLATFORM_OR_PDA' │ '8kZY...YSGn'   │ '8kZY...YSGn' │ false     │ true        │ 'COPIED'  │
+│ 14      │ 14    │ 'PLATFORM_OR_PDA' │ '8Wf5...VwTt'   │ '8Wf5...VwTt' │ false     │ true        │ 'COPIED'  │
+│ 15      │ 15    │ 'PLATFORM_OR_PDA' │ 'pfee...ojVZ'   │ 'pfee...ojVZ' │ false     │ true        │ 'COPIED'  │
+└─────────┴───────┴───────────────────┴─────────────────┴───────────────┴───────────┴─────────────┴───────────┘
+[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: DjmP...pump
+[UNIVERSAL-CLONER] 🔧 Creating ATA for user: HyF8...EACS
+[UNIVERSAL-CLONER] 🔍 Mint DjmP...pump uses Standard SPL Token program
+[UNIVERSAL-CLONER] 🎯 Using Token Program: Toke...Q5DA for mint DjmP...pump
+[UNIVERSAL-CLONER] ✅ ATA creation instruction added with Standard SPL Token program
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBwtQA72tHn3DyDkTknvT7XV
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data: AJTQ2h9DXrBwtQA72tHn3DyDkTknvT7XV
+[UNIVERSAL-CLONER] 🔍 Input data type: string
+[UNIVERSAL-CLONER] 🔍 Input data length: 33
+[UNIVERSAL-CLONER] 🔍 Decoded buffer length: 24 bytes
+[UNIVERSAL-CLONER] 🔍 Decoded buffer (hex): 66063d1201daebea97ce29d68417000082f1b05400000000
+[UNIVERSAL-CLONER] 🔒 Non-Photon platform (6EF8rrec...). Preserving original instruction data for safety.
+[UNIVERSAL-CLONER] 💰 Using user's SOL amount for BUY: 1000000 lamports
+[UNIVERSAL-CLONER] 🔒 Using original instruction data - surgical overrides will apply platform-specific fixes
+[UNIVERSAL-CLONER] 💡 Platform-specific data modifications handled by Smart Cloner overrides
+[UNIVERSAL-CLONER] ✅ Created cloned instruction: { programId: '6EF8...wF6P', accountCount: 16, dataLength: 24 }
+[UNIVERSAL-CLONER] 🧠 Applying Smart Cloner surgical overrides...
+[FORGER] 🔍 Applying surgical overrides for program: 6EF8...wF6P
+[FORGER] 🎯 Detected Pump.fun. Fixing user_volume_accumulator PDA...
+[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA:
+[FORGER]   Old: 8kZY...YSGn
+[FORGER]   New: GMQh...CBsZ
+[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Building fresh Pump.fun instruction data with correct discriminator...
+[FORGER] ✅ RECONSTRUCTION COMPLETE:
+[FORGER]   - Discriminator: 169168196c813e37
+[FORGER]   - Token amount out: 0
+[FORGER]   - Max SOL cost: 1500000 lamports
+[FORGER]   - Old corrupted data replaced with fresh, correct data
+[FORGER] 🔍 VERIFICATION: Final instruction data: 169168196c813e37000000000000000060e3160000000000
+[UNIVERSAL-CLONER] ✅ Smart Cloner overrides completed
+[SINGAPORE-SENDER] ✅ Universal Cloner built 2 instructions
+[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...
+[SINGAPORE-SENDER] 📊 Simulation details:
+[SINGAPORE-SENDER]   - Instructions: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8...EACS
+[SINGAPORE-SENDER]   - Nonce info: NO
+[SINGAPORE-SENDER]   Instruction 0:
+[SINGAPORE-SENDER]     - Program: ATok...8knL
+[SINGAPORE-SENDER]     - Accounts: 6
+[SINGAPORE-SENDER]     - Data length: 0 bytes
+[SINGAPORE-SENDER]       Account 0: HyF8...EACS (signer: true, writable: true)
+[SINGAPORE-SENDER]       Account 1: Bwys...eLUZ (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: HyF8...EACS (signer: false, writable: false)
+[SINGAPORE-SENDER]   Instruction 1:
+[SINGAPORE-SENDER]     - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]     - Accounts: 16
+[SINGAPORE-SENDER]     - Data length: 24 bytes
+[SINGAPORE-SENDER]       Account 0: 4wTV...xnjf (signer: false, writable: false)
+[SINGAPORE-SENDER]       Account 1: 62qc...fNgV (signer: false, writable: true)
+[SINGAPORE-SENDER]       Account 2: DjmP...pump (signer: false, writable: true)
+[SINGAPORE-SENDER] 🔧 Total instructions for simulation: 4 (2 compute + 2 trade)
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+[SINGAPORE-SENDER] ⏰ Using fresh blockhash: DcYH...GCkV
+[SINGAPORE-SENDER] ✍️ Transaction signed for simulation
+[SINGAPORE-SENDER] 🧪 Running Solana simulation...
+[SINGAPORE-SENDER] 📊 Simulation completed
+[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!
+[SINGAPORE-SENDER] 🚫 Marked transaction yBF1...FYZR as failed - will not retry
+[SINGAPORE-SENDER] 🔍 Error details: {
+  "InstructionError": [
+    3,
+    {
+      "Custom": 101
+    }
+  ]
+}
+[SINGAPORE-SENDER] 📋 Full simulation logs:
+[SINGAPORE-SENDER]   1. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   2. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   3. Program ComputeBudget111111111111111111111111111111 invoke [1]
+[SINGAPORE-SENDER]   4. Program ComputeBudget111111111111111111111111111111 success
+[SINGAPORE-SENDER]   5. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL invoke [1]
+[SINGAPORE-SENDER]   6. Program log: Create
+[SINGAPORE-SENDER]   7. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   8. Program log: Instruction: GetAccountDataSize
+[SINGAPORE-SENDER]   9. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1569 of 794335 compute units
+[SINGAPORE-SENDER]   10. Program return: TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA pQAAAAAAAAA=
+[SINGAPORE-SENDER]   11. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   12. Program 11111111111111111111111111111111 invoke [2]
+[SINGAPORE-SENDER]   13. Program 11111111111111111111111111111111 success
+[SINGAPORE-SENDER]   14. Program log: Initialize the associated token account
+[SINGAPORE-SENDER]   15. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   16. Program log: Instruction: InitializeImmutableOwner
+[SINGAPORE-SENDER]   17. Program log: Please upgrade to SPL Token 2022 for immutable owner support
+[SINGAPORE-SENDER]   18. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 1405 of 787748 compute units
+[SINGAPORE-SENDER]   19. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   20. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA invoke [2]
+[SINGAPORE-SENDER]   21. Program log: Instruction: InitializeAccount3
+[SINGAPORE-SENDER]   22. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA consumed 4188 of 783867 compute units
+[SINGAPORE-SENDER]   23. Program TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA success
+[SINGAPORE-SENDER]   24. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL consumed 20304 of 799700 compute units
+[SINGAPORE-SENDER]   25. Program ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL success
+[SINGAPORE-SENDER]   26. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P invoke [1]
+[SINGAPORE-SENDER]   27. Program log: AnchorError occurred. Error Code: InstructionFallbackNotFound. Error Number: 101. Error Message: Fallback functions are not supported.
+[SINGAPORE-SENDER]   28. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P consumed 5802 of 779396 compute units
+[SINGAPORE-SENDER]   29. Program 6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P failed: custom program error: 0x65
+[SINGAPORE-SENDER] 🎯 Error type: InstructionError
+[SINGAPORE-SENDER] 📍 Failed at instruction 3:
+[SINGAPORE-SENDER]   - Program: 6EF8...wF6P
+[SINGAPORE-SENDER]   - Accounts: 16
+[SINGAPORE-SENDER]   - Data: 24 bytes
+[SINGAPORE-SENDER] 🔍 Instruction error: {
+  "Custom": 101
+}
+[SINGAPORE-SENDER] ❌ Pre-flight simulation error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+[SINGAPORE-SENDER] 🔍 Error stack: Error: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2210:27)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[SINGAPORE-SENDER] 🔧 Debug info:
+[SINGAPORE-SENDER]   - Instructions count: 2
+[SINGAPORE-SENDER]   - User wallet: HyF8LGHjFdX7cD7gRJGVRusRYpACjHzV4tg4yryZEACS
+[SINGAPORE-SENDER]   - Connection endpoint: https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769
+[SINGAPORE-SENDER] ❌ Copy trade execution failed for user 5665429224: Error: Pre-flight simulation failed: Transaction failed pre-flight simulation: {"InstructionError":[3,{"Custom":101}]}
+    at TradingEngine._executeCopyTradeWithSingaporeSender (/home/sunny/zap-mono-grk1522/tradingEngine.js:2234:23)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Promise.allSettled (index 0)
+    at async TradingEngine._executeCopyForUser (/home/sunny/zap-mono-grk1522/tradingEngine.js:600:9)
+[ROUTER] Forwarding notification from executor to telegram worker.
+[TraceLogger] Cannot append trace. File not found for signature: yBF16eVN7dnfyN57zf7s2FKb7mx4pwhpkXYWJr23WZk1L2oX4ui4EaRmL9dPRmWvARPpe7ogUKbvzYsWvNdFYZR
+[2025-09-07T18:18:18.610Z] [telegram] [INFO] Sent message via worker { chatId: 5665429224 }
+[2025-09-07T18:18:40.132Z] [monitor] [INFO] [FILTER] ✅ Transaction age: 15s - within acceptable range {}
+[2025-09-07T18:18:40.132Z] [monitor] [INFO] 🚀 New transaction detected for wallet suqh5sHt... | Sig: 239j9LAS... {}
+[2025-09-07T18:18:40.295Z] [monitor] [INFO] 🎯 Transaction detected for suqh5sHt... | Sig: 239j9LAS... | Forwarding to analyzer... {}
+🚀 FORWARDING COPY TRADE from monitor to executor:
+   📍 Trader: cup (suqh...HQfK)
+   🔑 Signature: 239j9LAS...
+   📊 Has pre-fetched data: true
+✅ Executor worker ready, forwarding message...
+[2025-09-07T18:18:40.300Z] [executor] [INFO] 🚀 EXECUTING HIGH-SPEED COPY TRADE {
+  traderWallet: 'suqh...HQfK',
+  signature: '239j9LAS...',
+  hasPreFetchedData: true
+}
+[PROCESS_SIG] 🎯 Processing signature for copy trade:
+   📍 Source trader: cup (suqh...HQfK)
+   🔑 Signature: 239j...mwsr
+   📊 Has pre-fetched data: true
+   📋 Pre-fetched data: ✅ Present
+[FILTER] ⚠️ No blockTime available for 239j...mwsr - allowing through
+[EXECUTE_MASTER] 🔍 Starting analysis for transaction 239j...mwsr...
+[EXECUTE_MASTER] 📍 Source trader: cup (suqh...HQfK)
+[EXECUTE_MASTER] 📊 Pre-fetched data available: true
+[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...
+[ANALYZER-V5-HELIUS] Processing sig: 239j...mwsr
+[NOISE-FILTER] 🎯 PURE COPY BOT: NO NOISE FILTERING - Copying everything!
+[ANALYZER] Using full pre-fetched gRPC stream object...
+[ANALYZER] ✅ Transaction metadata looks good
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 2.158638777 SOL (Raw: 2158638777)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ SELL Detected (SOL in, Token out). SOL change: 2158638777, Token sent: DjmP...pump
+[ANALYZER] ✅ Trade detected! Using Universal Cloning Engine...
+[ANALYZER] ✅ Swap confirmed via balance changes. Type: sell
+[BLUEPRINT-CREATOR] 🔍 Creating detailed blueprint for transaction...
+[ANALYZER-V2] 🔍 Searching for core swap instruction using advanced CPI detection...
+[ANALYZER-V2] 📊 Transaction has 20 accounts and 6 instructions
+[ANALYZER-V2] 👤 Trader found at account index: 0
+[ANALYZER-V2] 🎯 Strategy 1: Checking for direct calls signed by the trader...
+[ANALYZER-V2] ✅ SUCCESS (Direct Call): Found instruction 3 for 6EF8rrec... signed by trader.
+[ANALYZER-V2] ✅ SUCCESS: Packaged instruction for cloning.
+[ANALYZER-V2]   -> Platform/Router Program ID: 6EF8rrec...5uBEwF6P (Pump.fun)
+[ANALYZER-V2]   -> Accounts: 14
+[ANALYZER-V2]   -> Data length: 33 chars
+[BalanceAnalysis] Trader suqh...HQfK SOL change: 2.158638777 SOL (Raw: 2158638777)
+[BalanceAnalysis] SOL Change Threshold for swap detection: 0 lamports (NO RESTRICTIONS)
+[BalanceAnalysis] ✅ SELL Detected (SOL in, Token out). SOL change: 2158638777, Token sent: DjmP...pump
+[BLUEPRINT-CREATOR] 🏷️ Annotating account roles for context preservation...
+[BLUEPRINT-CREATOR] ✅ Blueprint created with 14 annotated accounts
+[BLUEPRINT-CREATOR] 📋 Account roles: PLATFORM_OR_PDA(0), PLATFORM_OR_PDA(1), INPUT_MINT(2), PLATFORM_OR_PDA(3), PLATFORM_OR_PDA(4), INPUT_ATA(5), TRADER_WALLET(6), SYSTEM_PROGRAM(7), PLATFORM_OR_PDA(8), TOKEN_PROGRAM(9), PLATFORM_OR_PDA(10), PLATFORM_OR_PDA(11), PLATFORM_OR_PDA(12), PLATFORM_OR_PDA(13)
+[ANALYZER] 🎉 SUCCESS! SELL on UniversalCloner | 25.86M DjmP...pump → N/A SOL | Fee: 0.001005 SOL | Slot: 365301997
+[EXECUTE_MASTER] 📊 SELL on UniversalCloner | 25.86M DjmP...pump → N/A SOL | Fee: 0.001005 SOL | Slot: 365301997
+[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: UniversalCloner, Type: sell
+[EXECUTE_MASTER] 🎯 Using platform from analysis: UniversalCloner
+[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms
+[EXECUTE_MASTER] 🔧 Platform: UniversalCloner | Program ID: 6EF8...wF6P | Compute Units: 800000
+[EXECUTE_MASTER] 🔍 Loading traders from database...
+[EXECUTE_MASTER] 📊 Found 1 users with traders
+[EXECUTE_MASTER] ✅ Found active trader: cup for user 5665429224
+[EXECUTE_MASTER] 🚀 Dispatching copy for UniversalCloner trade to 1 user(s).
+[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender: {
+  tradeType: 'sell',
+  inputMint: 'DjmPgcyVSPuB3RLk223rTjSPUqgbCiuY13t3EJgtpump',
+  outputMint: 'So11111111111111111111111111111111111111112',
+  dexPlatform: 'UniversalCloner',
+  hasInputMint: true,
+  hasOutputMint: true,
+  inputMintType: 'string',
+  outputMintType: 'string',
+  hasCloningTarget: true
+}
+[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts: [
+  {
+    "pubkey": "4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": false,
+    "index": 0
+  },
+  {
+    "pubkey": "FWsW1xNtWscwNmKv6wVsU1iTzRN6wmmk3MjxRP5tT7hz",
+    "role": "PLATFORM_OR_PDA",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 1
+  },
+  {
+    "pubkey": "DjmPgcyVSPuB3RLk223rTjSPUqgbCiuY13t3EJgtpump",
+    "role": "INPUT_MINT",
+    "isSigner": false,
+    "isWritable": true,
+    "index": 2
+  }
+]
+[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user 5665429224
+[SINGAPORE-SENDER] 🚀 COPY TRADE: SELL UniversalCloner | Token: So11...1112 | User: 5665429224
+[DIAGNOSTIC] Attempting to get Keypair for wallet ID: 5
+[DIAGNOSTIC] ✅ Decryption successful for "zap".
+[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: 5
+[KeypairProvider] ✅ Resolved wallet "zap" for user 3.
+[SINGAPORE-SENDER] 💼 Using wallet: zap
+[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: UniversalCloner
+[TRADE-VALIDATION] 🔍 Validating trade for copy...
+[TRADE-VALIDATION] ✅ Trade validation passed! Type: sell
+[SINGAPORE-SENDER] ⚠️ SELL detected but user 5665429224 has no DjmP...pump tokens. Skipping trade.
+[SINGAPORE-SENDER] ⏭️ Skipping copy trade for user 5665429224 - no position found
+[PERFORMANCE-MONITOR] 💾 Metrics saved to logs/performance-metrics.json
+💓 Health check: healthy { workers: 6, ready: 6 }
+[FAILURE-CLEANUP] 🔄 Blockhash changed, cleaning up old failed transactions
+
+📡 Received SIGTERM, initiating graceful shutdown...
+🛑 Starting graceful shutdown...
+🔌 Closing health check server...
+
+🛑 Received SIGTERM. Shutting down ThreadedZapBot...
+
+🛑 Received SIGTERM, shutting down gracefully...
+✅ Health check server closed

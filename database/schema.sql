@@ -101,6 +101,7 @@ CREATE TABLE IF NOT EXISTS user_trading_settings (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
     sol_amount_per_trade REAL DEFAULT 0.01,
+    slippage_bps INTEGER DEFAULT 5000,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (user_id) REFERENCES users(id),

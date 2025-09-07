@@ -380,7 +380,9 @@ class TelegramWorker extends BaseWorker {
                 user.id, 
                 label, 
                 walletInfo.publicKey.toBase58(), 
-                walletInfo.encryptedPrivateKey
+                walletInfo.encryptedPrivateKey,
+                walletInfo.nonceAccountPubkey ? walletInfo.nonceAccountPubkey.toBase58() : null,
+                walletInfo.encryptedNonceAccountPrivateKey || null
             );
 
             this.logInfo('Generated wallet stored in database', { chatId, label, userId: user.id });
@@ -429,7 +431,9 @@ class TelegramWorker extends BaseWorker {
                     user.id, 
                     label, 
                     wallet.publicKey.toBase58(), 
-                    wallet.encryptedPrivateKey
+                    wallet.encryptedPrivateKey,
+                    wallet.nonceAccountPubkey ? wallet.nonceAccountPubkey.toBase58() : null,
+                    wallet.encryptedNonceAccountPrivateKey || null
                 );
                 console.log(`[DEBUG] createWallet result:`, result);
             } catch (createError) {

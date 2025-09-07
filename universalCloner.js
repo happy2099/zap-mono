@@ -8,6 +8,7 @@ const { Connection, PublicKey, Transaction, TransactionInstruction, SystemProgra
 const { createAssociatedTokenAccountInstruction } = require('@solana/spl-token');
 const { shortenAddress } = require('./utils.js');
 const bs58 = require('bs58');
+const config = require('./config.js');
 
 class UniversalCloner {
     constructor(connection) {
@@ -15,7 +16,331 @@ class UniversalCloner {
     }
 
     /**
-     * Main cloning function - applies the three swap rules
+     * Helper function to detect if a mint uses Token-2022 program
+     * @param {PublicKey} mintPubkey - The mint public key to check
+     * @returns {Promise<boolean>} - True if Token-2022, false if standard SPL Token
+     */
+    async _isToken2022(mintPubkey) {
+        try {
+            const mintInfo = await this.connection.getAccountInfo(mintPubkey);
+            if (!mintInfo) {
+                console.warn(`[UNIVERSAL-CLONER] ⚠️ Mint ${shortenAddress(mintPubkey.toString())} not found, assuming standard SPL Token`);
+                return false;
+            }
+            
+            const isToken2022 = mintInfo.owner.equals(config.TOKEN_2022_PROGRAM_ID);
+            console.log(`[UNIVERSAL-CLONER] 🔍 Mint ${shortenAddress(mintPubkey.toString())} uses ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
+            return isToken2022;
+        } catch (error) {
+            console.error(`[UNIVERSAL-CLONER] ❌ Error checking token program for mint ${shortenAddress(mintPubkey.toString())}:`, error.message);
+            // Default to standard SPL Token on error
+            return false;
+        }
+    }
+
+    /**
+     * 🧠 RECONSTRUCTION OVERRIDE: Build fresh Pump.fun instruction data with user's parameters
+     * Maximum Control Strategy - Complete control over economic parameters
+     */
+    _reconstructPumpFunBuyData(builderOptions) {
+        console.log(`[FORGER] 🧠 RECONSTRUCTION: Building fresh Pump.fun 'buy' instruction data`);
+        
+        const freshInstructionData = Buffer.alloc(24);
+        const BN = require('bn.js');
+
+        // 1. Write the CORRECT, OFFICIAL 'buy' discriminator
+        config.PUMP_FUN_BUY_DISCRIMINATOR.copy(freshInstructionData, 0);
+
+        // 2. Write the token amount out (ALWAYS 0 for a SOL-based buy)
+        freshInstructionData.writeBigUInt64LE(BigInt(0), 8);
+
+        // 3. Write the user's specific max_sol_cost with their slippage
+        const userSolAmount = new BN(builderOptions.userSolAmount.toString());
+        const slippageBps = new BN(builderOptions.slippageBps?.toString() || '5000'); // Default 50%
+        const BPS_DIVISOR = new BN(10000);
+        
+        // Calculate max SOL cost with slippage: userAmount * (1 + slippage)
+        const ourMaxSolCost = userSolAmount.mul(BPS_DIVISOR.add(slippageBps)).div(BPS_DIVISOR);
+        
+        freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
+        
+        console.log(`[FORGER] ✅ RECONSTRUCTION COMPLETE:`);
+        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_BUY_DISCRIMINATOR.toString('hex')}`);
+        console.log(`[FORGER]   - User SOL Amount: ${userSolAmount.toString()} lamports`);
+        console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
+        console.log(`[FORGER]   - Max SOL Cost: ${ourMaxSolCost.toString()} lamports`);
+        
+        return freshInstructionData;
+    }
+
+    /**
+     * 🧠 RECONSTRUCTION OVERRIDE: Build fresh Raydium Launchpad instruction data with user's parameters
+     * Maximum Control Strategy - Complete control over economic parameters for BuyExactIn
+     */
+    _reconstructRaydiumLaunchpadBuyData(builderOptions) {
+        console.log(`[FORGER] 🧠 RECONSTRUCTION: Building fresh Raydium Launchpad 'BuyExactIn' instruction data`);
+        
+        const freshInstructionData = Buffer.alloc(32);
+        const BN = require('bn.js');
+
+        // 1. Write the CORRECT 'BuyExactIn' discriminator for Raydium Launchpad
+        // From the logs: faea0d7bd59c13ec
+        const LAUNCHPAD_BUY_DISCRIMINATOR = Buffer.from([0xfa, 0xea, 0x0d, 0x7b, 0xd5, 0x9c, 0x13, 0xec]);
+        LAUNCHPAD_BUY_DISCRIMINATOR.copy(freshInstructionData, 0);
+
+        // 2. Write OUR USER's SOL amount (with slippage buffer)
+        const userSolAmount = new BN(builderOptions.userSolAmount.toString());
+        const slippageBps = new BN(builderOptions.slippageBps?.toString() || '5000'); // Default 50%
+        const BPS_DIVISOR = new BN(10000);
+        
+        // Calculate max SOL cost with slippage: userAmount * (1 + slippage)
+        const ourMaxSolCost = userSolAmount.mul(BPS_DIVISOR.add(slippageBps)).div(BPS_DIVISOR);
+        
+        // Write SOL amount at offset 8 (little-endian u64)
+        freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 8);
+
+        // 3. Write minimum token out (set to 1 for maximum slippage tolerance)
+        // This is a sniper bot - we want the trade to succeed even with high slippage
+        const minTokenOut = BigInt(1);
+        freshInstructionData.writeBigUInt64LE(minTokenOut, 16);
+
+        // 4. Padding (8 bytes of zeros) - already initialized to 0
+        
+        console.log(`[FORGER] ✅ RAYDIUM LAUNCHPAD RECONSTRUCTION COMPLETE:`);
+        console.log(`[FORGER]   - Discriminator: ${LAUNCHPAD_BUY_DISCRIMINATOR.toString('hex')}`);
+        console.log(`[FORGER]   - User SOL Amount: ${userSolAmount.toString()} lamports`);
+        console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
+        console.log(`[FORGER]   - Max SOL Cost: ${ourMaxSolCost.toString()} lamports`);
+        console.log(`[FORGER]   - Min Token Out: ${minTokenOut.toString()} tokens (maximum slippage)`);
+        console.log(`[FORGER]   - Final Data: ${freshInstructionData.toString('hex')}`);
+        
+        return freshInstructionData;
+    }
+
+    /**
+     * 🔪 SURGICAL OVERRIDE: Modify specific fields in original data
+     * Maximum Safety Strategy - Minimal changes to preserve structure
+     */
+    _surgicallyModifyPhotonData(originalDataBuffer) {
+        console.log(`[FORGER] 🔪 SURGICAL: Photon Router timestamp update`);
+        
+        const TIMESTAMP_OFFSET = 9;
+        if (originalDataBuffer.length >= TIMESTAMP_OFFSET + 8) {
+            const newTimestamp = BigInt(Math.floor(Date.now() / 1000));
+            originalDataBuffer.writeBigUInt64LE(newTimestamp, TIMESTAMP_OFFSET);
+            console.log(`[FORGER] ✅ SURGICAL COMPLETE: Updated Photon timestamp to ${newTimestamp}`);
+        } else {
+            console.log(`[FORGER] ⚠️ SURGICAL SKIPPED: Data too short for timestamp update`);
+        }
+        
+        return originalDataBuffer;
+    }
+
+    /**
+     * 🧠 SMART OVERRIDE DISPATCHER: The pinnacle of the Smart Cloner architecture
+     * Hybrid strategy: Reconstruction for high-frequency platforms, Surgical for others
+     */
+    async _applySurgicalOverrides(clonedInstruction, builderOptions) {
+        const programIdStr = clonedInstruction.programId.toBase58();
+        let finalInstructionData = clonedInstruction.data; // Start with cloned data
+
+        console.log(`[FORGER] 🧠 SMART OVERRIDE DISPATCHER: Processing program ${shortenAddress(programIdStr)}`);
+
+        // --- THE STRATEGY DISPATCHER ---
+
+        // 🎯 CASE 1: Pump.fun Buy -> TOTAL RECONSTRUCTION (Maximum Control)
+        if (programIdStr === config.PUMP_FUN_PROGRAM_ID && builderOptions.tradeType === 'buy') {
+            console.log(`[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Pump.fun detected - building fresh instruction data`);
+            finalInstructionData = this._reconstructPumpFunBuyData(builderOptions);
+        }
+
+        // 🎯 CASE 2: Raydium Launchpad Buy -> TOTAL RECONSTRUCTION (Maximum Control)
+        else if (programIdStr === 'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj' && builderOptions.tradeType === 'buy') {
+            console.log(`[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Raydium Launchpad detected - building fresh instruction data`);
+            finalInstructionData = this._reconstructRaydiumLaunchpadBuyData(builderOptions);
+        }
+
+        // 🔪 CASE 3: Photon Router -> SURGICAL TIMESTAMP EDIT (Maximum Safety)
+        else if (programIdStr === 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW') {
+            console.log(`[FORGER] 🔪 SURGICAL OVERRIDE: Photon Router detected - updating timestamp`);
+            finalInstructionData = this._surgicallyModifyPhotonData(finalInstructionData);
+        }
+
+        // 🔒 CASE 3: All Other Platforms -> PRESERVE ORIGINAL (Maximum Universality)
+        else {
+            console.log(`[FORGER] 🔒 CONSERVATIVE OVERRIDE: Unknown platform - preserving original data for safety`);
+        }
+
+        // Update the instruction with the potentially modified data
+        clonedInstruction.data = finalInstructionData;
+
+        // --- STRUCTURAL FIXES (Applied to all platforms) ---
+        // These are account-level fixes, not data-level fixes
+
+        // --- OVERRIDE RULE #1: Pump.fun User Volume Accumulator PDA Fix ---
+        if (programIdStr === config.PUMP_FUN_PROGRAM_ID.toBase58() || programIdStr === config.PUMP_FUN_PROGRAM_ID_VARIANT.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Pump.fun. Fixing user_volume_accumulator PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                
+                // The user_volume_accumulator is typically at index 13 based on the error logs
+                const USER_VOLUME_ACCUMULATOR_INDEX = 13;
+                
+                if (clonedInstruction.keys.length > USER_VOLUME_ACCUMULATOR_INDEX) {
+                    // Derive the correct PDA for our user
+                    const [userVolumeAccumulator] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("user_volume_accumulator"),
+                            userPublicKey.toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[USER_VOLUME_ACCUMULATOR_INDEX].pubkey.toBase58();
+                    clonedInstruction.keys[USER_VOLUME_ACCUMULATOR_INDEX].pubkey = userVolumeAccumulator;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userVolumeAccumulator.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Cannot find user_volume_accumulator at expected index ${USER_VOLUME_ACCUMULATOR_INDEX}`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Pump.fun PDA derivation failed:`, e.message);
+            }
+            
+            // --- PUMP.FUN SURGICAL DATA MODIFICATION: Preserve structure, modify user-specific fields ---
+            // Instead of complete reconstruction, surgically modify only the amount fields
+            if (builderOptions.tradeType === 'buy') {
+                console.log(`[FORGER] 🧠 SURGICAL MODIFICATION: Preserving original structure, modifying user-specific amounts...`);
+                
+                try {
+                    // HYBRID APPROACH: Use original instruction data but modify user-specific fields
+                    const originalData = clonedInstruction.data;
+                    console.log(`[FORGER] 🔍 Original instruction data: ${originalData.toString('hex')}`);
+                    
+                    // Verify the original data has the expected structure (24 bytes for Pump.fun)
+                    if (originalData.length !== 24) {
+                        console.warn(`[FORGER] ⚠️ Unexpected data length: ${originalData.length} bytes. Expected 24 bytes.`);
+                        return clonedInstruction; // Return without modification
+                    }
+                    
+                    // Create a copy of the original data to modify
+                    const modifiedData = Buffer.from(originalData);
+                    
+                    // Calculate user's max SOL cost with slippage
+                    const BN = require('bn.js');
+                    const userSolAmount = builderOptions.userSolAmount || 1000000; // Default 0.001 SOL
+                    const slippageBps = builderOptions.slippageBps || 5000; // 50% slippage for safety
+                    console.log(`[FORGER] 🔍 DEBUG: userSolAmount = ${userSolAmount}, slippageBps = ${slippageBps}`);
+                    const userSolLamports = new BN(userSolAmount.toString());
+                    const slippage = new BN(slippageBps);
+                    const BPS_DIVISOR = new BN(10000);
+                    const ourMaxSolCost = userSolLamports.mul(BPS_DIVISOR.add(slippage)).div(BPS_DIVISOR);
+                    
+                    // SURGICAL MODIFICATION: Only modify the max_sol_cost field (bytes 16-23)
+                    // Keep the original discriminator and token_amount_out fields intact
+                    modifiedData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
+                    
+                    // Replace the instruction data with our surgically modified version
+                    clonedInstruction.data = modifiedData;
+                    
+                    console.log(`[FORGER] ✅ SURGICAL MODIFICATION COMPLETE:`);
+                    console.log(`[FORGER]   - Original discriminator preserved: ${modifiedData.subarray(0, 8).toString('hex')}`);
+                    console.log(`[FORGER]   - Original token_amount_out preserved: ${modifiedData.readBigUInt64LE(8)}`);
+                    console.log(`[FORGER]   - Modified max SOL cost: ${ourMaxSolCost.toString()} lamports`);
+                    console.log(`[FORGER]   - Original structure preserved, only amount field modified`);
+                    console.log(`[FORGER] 🔍 VERIFICATION: Final instruction data: ${clonedInstruction.data.toString('hex')}`);
+                    console.log(`[FORGER] 🔍 DOUBLE-CHECK: Discriminator in final data: ${clonedInstruction.data.subarray(0, 8).toString('hex')}`);
+                    
+                } catch (e) {
+                    console.error(`[FORGER] ❌ Pump.fun reconstruction failed:`, e.message);
+                }
+            }
+        }
+        
+        // --- OVERRIDE RULE #2: Raydium AMM V4 Token Program Fix ---
+        else if (programIdStr === '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') {
+            console.log(`[FORGER] 🎯 Detected Raydium AMM V4. Verifying Token Program accounts...`);
+            
+            // Check if we're dealing with Token-2022 mints
+            const inputMintPk = new PublicKey(inputMint);
+            const outputMintPk = new PublicKey(outputMint);
+            
+            const isInputToken2022 = await this._isToken2022(inputMintPk);
+            const isOutputToken2022 = await this._isToken2022(outputMintPk);
+            
+            // Raydium's instruction expects the Token Program at index 0 in its keys array
+            const TOKEN_PROGRAM_INDEX = 0;
+            
+            if (isInputToken2022 || isOutputToken2022) {
+                console.log(`[FORGER] 🔧 Token-2022 detected (Input: ${isInputToken2022}, Output: ${isOutputToken2022})`);
+                clonedInstruction.keys[TOKEN_PROGRAM_INDEX].pubkey = config.TOKEN_2022_PROGRAM_ID;
+                console.log(`[FORGER] ✅ OVERRIDE APPLIED: Switched to Token-2022 Program for Raydium at index ${TOKEN_PROGRAM_INDEX}`);
+            } else {
+                console.log(`[FORGER] ✅ Standard SPL Token detected, keeping original Token Program`);
+            }
+        }
+        
+        // --- OVERRIDE RULE #3: Photon Router Timestamp Fix ---
+        else if (programIdStr === 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW') {
+            console.log(`[FORGER] 🎯 Detected Photon Router. Updating timestamp in instruction data...`);
+            const TIMESTAMP_OFFSET = 8; // Updated offset based on previous analysis
+            if (clonedInstruction.data.length >= TIMESTAMP_OFFSET + 8) {
+                const newTimestamp = BigInt(Math.floor(Date.now() / 1000));
+                clonedInstruction.data.writeBigUInt64LE(newTimestamp, TIMESTAMP_OFFSET);
+                console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Photon timestamp to ${newTimestamp}`);
+            } else {
+                console.log(`[FORGER] ⚠️ Photon instruction data too short for timestamp update`);
+            }
+        }
+        
+        // --- FUTURE OVERRIDE RULES GO HERE ---
+        // Add more `else if` blocks as new platform-specific issues are discovered
+        
+        else {
+            console.log(`[FORGER] ✅ No surgical overrides needed for program: ${shortenAddress(programIdStr)}`);
+        }
+        
+        return clonedInstruction;
+    }
+
+    /**
+     * STAGE 2: Generate the Forging Map - defines exactly which accounts need to be changed
+     */
+    _createForgingMap(builderOptions) {
+        const { userPublicKey, masterTraderWallet, inputMint, outputMint } = builderOptions;
+        const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+        const forgingMap = new Map();
+
+        console.log(`[FORGER] 🗺️ Creating forging map for account swaps...`);
+
+        // 1. Map the trader's wallet to our user's wallet
+        forgingMap.set(masterTraderWallet, userPublicKey.toBase58());
+        console.log(`[FORGER] 📝 Map: TRADER_WALLET ${shortenAddress(masterTraderWallet)} → ${shortenAddress(userPublicKey.toBase58())}`);
+
+        // 2. Map the trader's ATAs to our user's ATAs
+        if (inputMint !== config.NATIVE_SOL_MINT) {
+            const masterInputATA = getAssociatedTokenAddressSync(new PublicKey(inputMint), new PublicKey(masterTraderWallet));
+            const userInputATA = getAssociatedTokenAddressSync(new PublicKey(inputMint), userPublicKey);
+            forgingMap.set(masterInputATA.toBase58(), userInputATA.toBase58());
+            console.log(`[FORGER] 📝 Map: INPUT_ATA ${shortenAddress(masterInputATA.toBase58())} → ${shortenAddress(userInputATA.toBase58())}`);
+        }
+        
+        if (outputMint !== config.NATIVE_SOL_MINT) {
+            const masterOutputATA = getAssociatedTokenAddressSync(new PublicKey(outputMint), new PublicKey(masterTraderWallet));
+            const userOutputATA = getAssociatedTokenAddressSync(new PublicKey(outputMint), userPublicKey);
+            forgingMap.set(masterOutputATA.toBase58(), userOutputATA.toBase58());
+            console.log(`[FORGER] 📝 Map: OUTPUT_ATA ${shortenAddress(masterOutputATA.toBase58())} → ${shortenAddress(userOutputATA.toBase58())}`);
+        }
+        
+        console.log(`[FORGER] ✅ Forging map created with ${forgingMap.size} account swaps`);
+        return forgingMap;
+    }
+
+    /**
+     * STAGE 3: Blueprint-Based Forging - Main cloning function using blueprint and forging map
      */
     async buildClonedInstruction(builderOptions) {
         const { 
@@ -36,30 +361,63 @@ class UniversalCloner {
             nonceInfo = null
         } = builderOptions;
 
-        console.log(`[UNIVERSAL-CLONER] 🔧 Building cloned instruction for user ${shortenAddress(userPublicKey.toString())}`);
-        console.log(`[UNIVERSAL-CLONER] 🎯 Target program: ${shortenAddress(cloningTarget.programId)}`);
-        console.log(`[UNIVERSAL-CLONER] 💰 Trade type: ${tradeType}`);
-        console.log(`[UNIVERSAL-CLONER] 📊 Account count: ${cloningTarget.accounts.length}`);
+        console.log(`[BLUEPRINT-FORGER] 🔧 Building cloned instruction for user ${shortenAddress(userPublicKey.toString())}`);
+        console.log(`[BLUEPRINT-FORGER] 🎯 Target program: ${shortenAddress(cloningTarget.programId)}`);
+        console.log(`[BLUEPRINT-FORGER] 💰 Trade type: ${tradeType}`);
+        console.log(`[BLUEPRINT-FORGER] 📊 Blueprint accounts: ${cloningTarget.accounts.length}`);
 
         try {
-            // Step 1: Apply the three swap rules
-            // Ready to apply swap rules
+            // STAGE 2: Generate the forging map
+            const forgingMap = this._createForgingMap(builderOptions);
+
+            // STAGE 3: Forge using blueprint and map
+            console.log(`[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint...`);
             
-            const clonedAccounts = await this._applySwapRules(
-                cloningTarget.accounts,
-                masterTraderWallet,
-                userPublicKey,
-                inputMint,
-                outputMint
-            );
+            const clonedKeys = cloningTarget.accounts.map((blueprintAccount, index) => {
+                const originalPubkey = blueprintAccount.pubkey;
+                
+                // Look up the original account in our map. If it exists, use the new value.
+                // Otherwise, use the original value (perfect preservation).
+                const finalPubkeyStr = forgingMap.get(originalPubkey) || originalPubkey;
+                const finalPubkey = new PublicKey(finalPubkeyStr);
+                
+                // Revised Signer Logic based on blueprint
+                let finalIsSigner = false;
+                if (finalPubkey.equals(userPublicKey)) {
+                    finalIsSigner = true; // Our user is always a signer
+                } else if (blueprintAccount.isSigner) {
+                    // Preserve the signer flag for PDAs
+                    finalIsSigner = true; 
+                }
 
-            console.log(`[UNIVERSAL-CLONER] ✅ Applied swap rules to ${clonedAccounts.length} accounts`);
+                return {
+                    pubkey: finalPubkey,
+                    isSigner: finalIsSigner,
+                    isWritable: blueprintAccount.isWritable,
+                };
+            });
 
-            // Step 2: Check if user needs ATA creation
-            const ataInstructions = await this._checkATACreation(
+            console.log(`[BLUEPRINT-FORGER] ✅ Forged ${clonedKeys.length} accounts using blueprint`);
+
+            // DEBUGGING: Show the blueprint vs forged comparison
+            console.log(`[BLUEPRINT-FORGER] 📋 BLUEPRINT vs FORGED COMPARISON:`);
+            console.table(cloningTarget.accounts.map((blueprintAcc, i) => ({
+                index: i,
+                role: blueprintAcc.role,
+                original_pubkey: shortenAddress(blueprintAcc.pubkey),
+                forged_pubkey: shortenAddress(clonedKeys[i].pubkey.toBase58()),
+                is_signer: clonedKeys[i].isSigner,
+                is_writable: clonedKeys[i].isWritable,
+                status: blueprintAcc.pubkey === clonedKeys[i].pubkey.toBase58() ? 'COPIED' : 'SWAPPED'
+            })));
+
+            // Step 2: Handle all prerequisites (ATA creation, wSOL wrapping, etc.)
+            const prerequisiteInstructions = await this._handlePrerequisites(
                 userPublicKey,
                 outputMint,
-                tradeType
+                tradeType,
+                inputMint, // Pass inputMint for comprehensive prerequisite handling
+                builderOptions // 🚀 CRITICAL: Pass builderOptions for userSolAmount
             );
 
             // Step 3: Handle instruction data - CRITICAL FIX for data corruption
@@ -156,33 +514,15 @@ class UniversalCloner {
                 console.warn(`[UNIVERSAL-CLONER] ⚠️ Using master trader's amount as fallback: ${this._extractAmountValue(amountBN)}`);
             }
             
-            // CRITICAL FIX: For production safety, preserve original data unless we're 100% sure
-            // The data corruption issue shows we need to be more conservative
-            console.log(`[UNIVERSAL-CLONER] 🔒 PRODUCTION SAFETY: Using original instruction data to prevent corruption`);
-            console.log(`[UNIVERSAL-CLONER] 💡 User amount will be handled by account balance, not data modification`);
-            
-            // Future enhancement: Add platform-specific data modification only for known, tested platforms
-            if (userAmountToUse && this._isValidAmount(userAmountToUse)) {
-                console.log(`[UNIVERSAL-CLONER] 📊 User amount available: ${this._extractAmountValue(userAmountToUse)} lamports`);
-                console.log(`[UNIVERSAL-CLONER] 🔄 For safety, keeping original data format and relying on account states`);
-                
-                // Only modify for explicitly supported platforms where we've tested the data format
-                if (cloningTarget.programId === '6EF8rrecthR5DkVaGFKLkma4YkdrkvPPHoqUPLQkwQjR') { // Pump.fun - tested
-                    console.log(`[UNIVERSAL-CLONER] 🔧 Pump.fun detected - applying tested data modification`);
-                    if (finalInstructionData.length >= 24) {
-                        const amountValue = this._extractAmountValue(userAmountToUse);
-                        finalInstructionData.writeBigUInt64LE(BigInt(amountValue), 16);
-                        console.log(`[UNIVERSAL-CLONER] ✅ Modified Pump.fun instruction data with user amount: ${amountValue}`);
-                    }
-                } else {
-                    console.log(`[UNIVERSAL-CLONER] 🔒 Unknown/untested platform - preserving original data for safety`);
-                }
-            }
+            // The surgical override system will handle all platform-specific data modifications
+            console.log(`[UNIVERSAL-CLONER] 🔒 Using original instruction data - surgical overrides will apply platform-specific fixes`);
+            console.log(`[UNIVERSAL-CLONER] 💡 Platform-specific data modifications handled by Smart Cloner overrides`);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: Original instruction data before overrides: ${finalInstructionData.toString('hex')}`);
 
-            // Step 4: Create the cloned instruction
-            const clonedInstruction = new TransactionInstruction({
+            // Step 4: Create the cloned instruction using blueprint-forged keys
+            let clonedInstruction = new TransactionInstruction({
                 programId: new PublicKey(cloningTarget.programId),
-                keys: clonedAccounts,
+                keys: clonedKeys,
                 data: finalInstructionData
             });
 
@@ -192,10 +532,15 @@ class UniversalCloner {
                 dataLength: clonedInstruction.data.length
             });
 
-            // Step 5: Prepare all instructions (ATA creation + cloned instruction)
-            let allInstructions = [...ataInstructions, clonedInstruction];
+            // Step 5: SMART CLONER - Apply surgical overrides for known platform issues
+            console.log(`[UNIVERSAL-CLONER] 🧠 Applying Smart Cloner surgical overrides...`);
+            clonedInstruction = await this._applySurgicalOverrides(clonedInstruction, builderOptions);
+            console.log(`[UNIVERSAL-CLONER] ✅ Smart Cloner overrides completed`);
+
+            // Step 6: Prepare all instructions (prerequisites + cloned instruction)
+            let allInstructions = [...prerequisiteInstructions, clonedInstruction];
             
-            // Step 6: Add durable nonce instruction if provided (must be FIRST)
+            // Step 7: Add durable nonce instruction if provided (must be FIRST)
             if (nonceInfo) {
                 console.log(`[UNIVERSAL-CLONER] 🔐 Adding durable nonce instruction for account: ${shortenAddress(nonceInfo.noncePubkey.toString())}`);
                 const nonceInstruction = SystemProgram.nonceAdvance({
@@ -211,7 +556,7 @@ class UniversalCloner {
                 success: true,
                 platform: 'Universal',
                 method: 'swap_rules_cloning',
-                ataInstructions: ataInstructions.length,
+                prerequisiteInstructions: prerequisiteInstructions.length,
                 clonedInstruction: true,
                 nonceUsed: !!nonceInfo
             };
@@ -297,7 +642,8 @@ class UniversalCloner {
         // Skip system accounts and known program accounts
         const systemAccounts = [
             '11111111111111111111111111111111', // System Program
-            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // Token Program
+            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token Program
+            'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb', // Token-2022 Program
             'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
             'So11111111111111111111111111111111111111112' // SOL
         ];
@@ -352,12 +698,20 @@ class UniversalCloner {
     }
 
     /**
-     * Check if user needs ATA creation for the output token
+     * Handle all prerequisites for the trade: ATA creation, wSOL wrapping, etc.
+     * This is the "Prerequisite Handler" - the final architectural component
      */
-    async _checkATACreation(userPublicKey, outputMint, tradeType) {
+    async _handlePrerequisites(userPublicKey, outputMint, tradeType, inputMint = null, builderOptions = {}) {
         const ataInstructions = [];
 
-        // Only create ATA for BUY trades (when user receives tokens)
+        // DEBUG: Log all parameters to understand the issue
+        console.log(`[FORGER-PREQ] 🔍 PREREQUISITE HANDLER DEBUG:`);
+        console.log(`[FORGER-PREQ]   - tradeType: "${tradeType}"`);
+        console.log(`[FORGER-PREQ]   - outputMint: ${outputMint}`);
+        console.log(`[FORGER-PREQ]   - inputMint: ${inputMint}`);
+        console.log(`[FORGER-PREQ]   - SOL mint: So11111111111111111111111111111111111111112`);
+
+        // Create ATA for OUTPUT tokens (BUY trades - when user receives tokens)
         if (tradeType === 'buy' && outputMint !== 'So11111111111111111111111111111111111111112') {
             try {
                 console.log(`[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: ${shortenAddress(outputMint)}`);
@@ -369,20 +723,133 @@ class UniversalCloner {
                 if (!ataAccountInfo) {
                     console.log(`[UNIVERSAL-CLONER] 🔧 Creating ATA for user: ${shortenAddress(userPublicKey.toString())}`);
                     
+                    // 🔧 TOKEN-2022 FIX: Determine which token program owns the mint
+                    const outputMintPk = new PublicKey(outputMint);
+                    const isToken2022 = await this._isToken2022(outputMintPk);
+                    const tokenProgramId = isToken2022 ? config.TOKEN_2022_PROGRAM_ID : config.TOKEN_PROGRAM_ID;
+                    
+                    console.log(`[UNIVERSAL-CLONER] 🎯 Using Token Program: ${shortenAddress(tokenProgramId.toString())} for mint ${shortenAddress(outputMint)}`);
+                    
                     const createATAInstruction = createAssociatedTokenAccountInstruction(
                         userPublicKey, // payer
                         userATA, // ata
                         userPublicKey, // owner
-                        new PublicKey(outputMint) // mint
+                        outputMintPk, // mint
+                        tokenProgramId // 🔧 CRITICAL FIX: Pass the correct token program
                     );
                     
                     ataInstructions.push(createATAInstruction);
-                    console.log(`[UNIVERSAL-CLONER] ✅ ATA creation instruction added`);
+                    console.log(`[UNIVERSAL-CLONER] ✅ ATA creation instruction added with ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
                 } else {
                     console.log(`[UNIVERSAL-CLONER] ✅ User already has ATA for this token`);
                 }
             } catch (error) {
-                console.error(`[UNIVERSAL-CLONER] ❌ ATA creation check failed:`, error.message);
+                console.error(`[UNIVERSAL-CLONER] ❌ OUTPUT ATA creation check failed:`, error.message);
+            }
+        }
+
+        // Create ATA for INPUT tokens (SELL trades - when user needs to sell tokens)
+        if (tradeType === 'sell' && inputMint && inputMint !== 'So11111111111111111111111111111111111111112') {
+            try {
+                console.log(`[UNIVERSAL-CLONER] 🔍 Checking INPUT ATA creation for mint: ${shortenAddress(inputMint)}`);
+                
+                // Check if user already has an ATA for this input token
+                const userInputATA = await this._getAssociatedTokenAddress(userPublicKey, inputMint);
+                const inputATAAccountInfo = await this.connection.getAccountInfo(userInputATA);
+                
+                if (!inputATAAccountInfo) {
+                    console.log(`[UNIVERSAL-CLONER] 🔧 Creating INPUT ATA for user: ${shortenAddress(userPublicKey.toString())}`);
+                    
+                    // 🔧 TOKEN-2022 FIX: Determine which token program owns the mint
+                    const inputMintPk = new PublicKey(inputMint);
+                    const isToken2022 = await this._isToken2022(inputMintPk);
+                    const tokenProgramId = isToken2022 ? config.TOKEN_2022_PROGRAM_ID : config.TOKEN_PROGRAM_ID;
+                    
+                    console.log(`[UNIVERSAL-CLONER] 🎯 Using Token Program: ${shortenAddress(tokenProgramId.toString())} for INPUT mint ${shortenAddress(inputMint)}`);
+                    
+                    const createInputATAInstruction = createAssociatedTokenAccountInstruction(
+                        userPublicKey, // payer
+                        userInputATA, // ata
+                        userPublicKey, // owner
+                        inputMintPk, // mint
+                        tokenProgramId // 🔧 CRITICAL FIX: Pass the correct token program
+                    );
+                    
+                    ataInstructions.push(createInputATAInstruction);
+                    console.log(`[UNIVERSAL-CLONER] ✅ INPUT ATA creation instruction added with ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
+                } else {
+                    console.log(`[UNIVERSAL-CLONER] ✅ User already has INPUT ATA for this token`);
+                }
+            } catch (error) {
+                console.error(`[UNIVERSAL-CLONER] ❌ INPUT ATA creation check failed:`, error.message);
+            }
+        }
+
+        // 🚀 THE FINAL FIX: Handle wSOL prerequisite for AMM trades
+        // This is needed when BUY trades use SOL as input but AMMs expect wSOL accounts
+        if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112') {
+            try {
+                console.log(`[FORGER-PREQ] 🔍 BUY trade detected with SOL as input - checking wSOL prerequisite...`);
+                
+                const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+                const { SystemProgram } = require('@solana/web3.js');
+                const { createSyncNativeInstruction } = require('@solana/spl-token');
+                
+                // Check if user has a wSOL ATA
+                const userWSOLATA = getAssociatedTokenAddressSync(
+                    new PublicKey('So11111111111111111111111111111111111111112'), 
+                    userPublicKey
+                );
+                
+                const wsolATAInfo = await this.connection.getAccountInfo(userWSOLATA);
+                
+                if (!wsolATAInfo) {
+                    console.log(`[FORGER-PREQ] ⚠️ User is missing a Wrapped SOL account. This is required for AMM trades.`);
+                    console.log(`[FORGER-PREQ] ✅ Adding wSOL account creation and funding instructions...`);
+                    
+                    // 1. Create the wSOL ATA
+                    const createWSOLATAInstruction = createAssociatedTokenAccountInstruction(
+                        userPublicKey, // payer
+                        userWSOLATA, // ata
+                        userPublicKey, // owner
+                        new PublicKey('So11111111111111111111111111111111111111112'), // mint (wSOL)
+                        config.TOKEN_PROGRAM_ID // token program
+                    );
+                    
+                    ataInstructions.push(createWSOLATAInstruction);
+                    console.log(`[FORGER-PREQ] ✅ wSOL ATA creation instruction added`);
+                    
+                    // 2. Transfer SOL to the wSOL ATA to fund it
+                    // 🚀 CRITICAL FIX: Use the user's actual configured trade amount, not hardcoded 0.1 SOL
+                    const { userSolAmount } = builderOptions;
+                    
+                    if (!userSolAmount || userSolAmount.toString() === '0') {
+                        throw new Error("[FORGER-PREQ] userSolAmount is missing or zero, cannot fund wSOL account.");
+                    }
+                    
+                    // Convert BN to number for the transfer instruction
+                    const solAmountToWrap = typeof userSolAmount === 'object' ? parseInt(userSolAmount.toString()) : userSolAmount;
+                    
+                    const transferSOLInstruction = SystemProgram.transfer({
+                        fromPubkey: userPublicKey,
+                        toPubkey: userWSOLATA,
+                        lamports: solAmountToWrap // 🎯 USE THE CORRECT USER AMOUNT
+                    });
+                    
+                    ataInstructions.push(transferSOLInstruction);
+                    console.log(`[FORGER-PREQ] ✅ SOL transfer instruction added (${solAmountToWrap} lamports) - USER'S CONFIGURED AMOUNT`);
+                    
+                    // 3. Sync native to convert SOL to wSOL
+                    const syncNativeInstruction = createSyncNativeInstruction(userWSOLATA);
+                    ataInstructions.push(syncNativeInstruction);
+                    console.log(`[FORGER-PREQ] ✅ Sync native instruction added to convert SOL to wSOL`);
+                    
+                } else {
+                    console.log(`[FORGER-PREQ] ✅ User already has wSOL ATA - no prerequisite needed`);
+                }
+                
+            } catch (error) {
+                console.error(`[FORGER-PREQ] ❌ wSOL prerequisite check failed:`, error.message);
             }
         }
 

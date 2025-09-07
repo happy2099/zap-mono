@@ -430,11 +430,11 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // 1. Check for a valid swap
         console.log(`[ANALYZER] ✅ Swap confirmed via balance changes. Type: ${balanceAnalysis.details.tradeType}`);
 
-        // 2. Detective Work: Find the instruction to clone
-        const coreInstruction = this._findCoreSwapInstruction(transactionResponse, traderPublicKey);
+        // 2. Blueprint Creation: Create detailed blueprint with account roles
+        const blueprint = await this._createCloningBlueprint(transactionResponse, traderPublicKey);
 
-        if (!coreInstruction) {
-            return { isCopyable: false, reason: "Could not identify core swap instruction to clone." };
+        if (!blueprint) {
+            return { isCopyable: false, reason: "Could not create cloning blueprint." };
         }
 
         // 3. Success: Package the result for the engine.
@@ -442,20 +442,12 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         const finalDetails = {
             ...balanceAnalysis.details,
             dexPlatform: 'UniversalCloner', // A generic name, as we no longer care about the specific platform.
-            platformProgramId: coreInstruction.programId.toBase58(),
+            platformProgramId: blueprint.programId, // Already a string from blueprint
             traderPubkey: finalTraderPk.toBase58(),
             originalTransaction: transactionResponse,
             
             // This is the critical blueprint for the forger.
-            cloningTarget: {
-                programId: coreInstruction.programId.toBase58(),
-                accounts: coreInstruction.accounts.map(acc => ({
-                    pubkey: acc.pubkey.toBase58(),
-                    isSigner: acc.isSigner,
-                    isWritable: acc.isWritable
-                })),
-                data: typeof coreInstruction.data === 'string' ? coreInstruction.data : bs58.encode(coreInstruction.data), // CRITICAL FIX: Handle both string and Uint8Array data
-            },
+            cloningTarget: blueprint, // Rich blueprint with account roles and metadata
         };
         
         const tradeSummary = this._createTradeSummary(finalDetails, transactionResponse);
@@ -470,11 +462,117 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     }
     
     /**
+     * BLUEPRINT CREATOR: Create a rich, detailed blueprint of the master instruction
+     * This creates a context-aware blueprint that preserves account roles and relationships
+     */
+    async _createCloningBlueprint(transactionResponse, traderPublicKey) {
+        console.log(`[BLUEPRINT-CREATOR] 🔍 Creating detailed blueprint for transaction...`);
+        
+        const { transaction, meta } = transactionResponse;
+        const traderPk = new PublicKey(traderPublicKey);
+        
+        // First, find the core instruction using our existing detective logic
+        const coreInstructionResult = this._findCoreSwapInstruction(transactionResponse, traderPublicKey);
+        if (!coreInstructionResult) {
+            console.log('[BLUEPRINT-CREATOR] ❌ Core instruction not found, cannot create blueprint.');
+            return null;
+        }
+        
+        // Get balance analysis for mint information
+        const rawAccountKeys = transaction.message.accountKeys || transaction.message.staticAccountKeys;
+        const accountKeys = rawAccountKeys.map(key => {
+            if (key && key.pubkey) return new PublicKey(key.pubkey);
+            if (key instanceof PublicKey) return key;
+            return new PublicKey(key);
+        });
+        
+        const balanceAnalysis = this.analyzeBalanceChangesInternal(meta, accountKeys, traderPk);
+        if (!balanceAnalysis.isSwap) {
+            console.log('[BLUEPRINT-CREATOR] ❌ Not a swap, cannot create blueprint.');
+            return null;
+        }
+        
+        const { inputMint, outputMint } = balanceAnalysis.details;
+        
+        return await this._annotateAccountRoles(coreInstructionResult, traderPk, inputMint, outputMint, transaction, meta);
+    }
+
+    /**
+     * Annotate each account in the instruction with its role for context-aware cloning
+     */
+    async _annotateAccountRoles(coreInstructionResult, traderPk, inputMint, outputMint, transaction, meta) {
+        console.log(`[BLUEPRINT-CREATOR] 🏷️ Annotating account roles for context preservation...`);
+        
+        const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+        
+        // Calculate expected ATAs for the master trader
+        const masterInputATA = (inputMint !== this.NATIVE_SOL_MINT) ? 
+            getAssociatedTokenAddressSync(new PublicKey(inputMint), traderPk) : null;
+        const masterOutputATA = (outputMint !== this.NATIVE_SOL_MINT) ? 
+            getAssociatedTokenAddressSync(new PublicKey(outputMint), traderPk) : null;
+        
+        // Annotate each account with its role
+        const annotatedAccounts = coreInstructionResult.accounts.map((account, index) => {
+            const pubkey = new PublicKey(account.pubkey);
+            let role = 'UNKNOWN_ACCOUNT'; // Default role
+            
+            // Identify account roles
+            if (pubkey.equals(traderPk)) {
+                role = 'TRADER_WALLET';
+            } else if (masterInputATA && pubkey.equals(masterInputATA)) {
+                role = 'INPUT_ATA';
+            } else if (masterOutputATA && pubkey.equals(masterOutputATA)) {
+                role = 'OUTPUT_ATA';
+            } else if (pubkey.equals(config.TOKEN_PROGRAM_ID)) {
+                role = 'TOKEN_PROGRAM';
+            } else if (pubkey.equals(config.TOKEN_2022_PROGRAM_ID)) {
+                role = 'TOKEN_2022_PROGRAM';
+            } else if (pubkey.equals(config.ASSOCIATED_TOKEN_PROGRAM_ID)) {
+                role = 'ASSOCIATED_TOKEN_PROGRAM';
+            } else if (pubkey.equals(config.SYSTEM_PROGRAM_ID)) {
+                role = 'SYSTEM_PROGRAM';
+            } else if (pubkey.toString() === inputMint) {
+                role = 'INPUT_MINT';
+            } else if (pubkey.toString() === outputMint) {
+                role = 'OUTPUT_MINT';
+            } else {
+                role = 'PLATFORM_OR_PDA'; // DEX-specific accounts, PDAs, etc.
+            }
+            
+            return {
+                pubkey: account.pubkey, // Keep as string for consistency
+                role: role,
+                isSigner: account.isSigner,
+                isWritable: account.isWritable,
+                index: index
+            };
+        });
+        
+        // Create the final blueprint
+        const blueprint = {
+            programId: coreInstructionResult.programId,
+            accounts: annotatedAccounts,
+            data: coreInstructionResult.data,
+            metadata: {
+                inputMint,
+                outputMint,
+                traderWallet: traderPk.toBase58(),
+                totalAccounts: annotatedAccounts.length
+            }
+        };
+        
+        console.log(`[BLUEPRINT-CREATOR] ✅ Blueprint created with ${annotatedAccounts.length} annotated accounts`);
+        console.log(`[BLUEPRINT-CREATOR] 📋 Account roles:`, annotatedAccounts.map(acc => `${acc.role}(${acc.index})`).join(', '));
+        
+        return blueprint;
+    }
+    
+    /**
      * Find the core swap instruction signed by the trader - the heart of the Universal Cloning Engine
      * This method implements the "Detective" logic to identify the exact instruction to clone
      */
     _findCoreSwapInstruction(transactionResponse, traderPublicKey) {
-        console.log(`[ANALYZER] 🔍 Searching for core swap instruction signed by trader...`);
+        console.log(`[ANALYZER-V2] 🔍 Searching for core swap instruction using advanced CPI detection...`);
         const { transaction, meta } = transactionResponse;
         const traderPk = new PublicKey(traderPublicKey);
 
@@ -486,7 +584,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         } else if (transaction.message.staticAccountKeys) {
             // Versioned transaction
             accountKeysFromMessage = transaction.message.staticAccountKeys.map(k => new PublicKey(k));
-        } else {
+                                } else {
             // Try to get account keys using the getAccountKeys method
             try {
                 const accountKeys = transaction.message.getAccountKeys();
@@ -495,7 +593,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                     accountKeysFromMessage.push(accountKeys.get(i));
                 }
             } catch (error) {
-                console.error('[ANALYZER] ❌ Could not extract account keys from transaction:', error.message);
+                console.error('[ANALYZER-V2] ❌ Could not extract account keys from transaction:', error.message);
                 return null;
             }
         }
@@ -524,17 +622,99 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             }
         };
 
-        // --- IMPROVED HEURISTIC: Find the best swap instruction signed by trader ---
-        const candidateInstructions = [];
+        console.log(`[ANALYZER-V2] 📊 Transaction has ${allAccountKeys.length} accounts and ${transaction.message.instructions.length} instructions`);
         
-        // System and utility programs to deprioritize
+        // Find trader's account index
+        const traderAccountIndex = accountKeysFromMessage.findIndex(pk => pk.equals(traderPk));
+        if (traderAccountIndex === -1) {
+            console.warn(`[ANALYZER-V2] ⚠️ Trader ${traderPk.toBase58()} not found in transaction accounts`);
+            return null;
+        }
+        
+        console.log(`[ANALYZER-V2] 👤 Trader found at account index: ${traderAccountIndex}`);
+        
+        // Helper to get program ID from instruction
+        const getProgramId = (ix) => allAccountKeys[ix.programIdIndex];
+        
+        // Helper to check if a program is a known DEX/Router
+        const isKnownPlatform = (programId) => {
+            if (!programId) return false;
+            const programIdStr = programId.toBase58();
+            return this._identifyPlatform(programIdStr) !== null;
+        };
+        
+        // System and utility programs to ignore
         const systemPrograms = new Set([
             '11111111111111111111111111111111', // System Program
             'ComputeBudget111111111111111111111111111111', // Compute Budget
             'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
             'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA' // Token Program
         ]);
-
+        
+        // --- STRATEGY 1: Direct Call Detection (Trader signs the DEX instruction) ---
+        console.log("[ANALYZER-V2] 🎯 Strategy 1: Checking for direct calls signed by the trader...");
+        
+        for (const [index, instruction] of transaction.message.instructions.entries()) {
+            const programId = getProgramId(instruction);
+            const programIdStr = programId.toBase58();
+            
+            // Skip system programs
+            if (systemPrograms.has(programIdStr)) continue;
+            
+            // Check if trader is involved in this instruction
+            const isTraderInvolved = instruction.accounts && instruction.accounts.includes(traderAccountIndex);
+            
+            if (isTraderInvolved && isKnownPlatform(programId)) {
+                console.log(`[ANALYZER-V2] ✅ SUCCESS (Direct Call): Found instruction ${index} for ${programIdStr.substring(0, 8)}... signed by trader.`);
+                return this._packageInstructionForCloning(instruction, transaction, meta, allAccountKeys, programIdStr);
+            }
+        }
+        
+        // --- STRATEGY 2: Router CPI Detection (Trader signs Router, Router calls DEX) ---
+        console.log("[ANALYZER-V2] 🔄 Strategy 2: Checking for Router CPI patterns...");
+        
+        for (const [outerIndex, outerInstruction] of transaction.message.instructions.entries()) {
+            // Check if trader signed this outer instruction
+            const isTraderSignedOuter = outerInstruction.accounts && outerInstruction.accounts.includes(traderAccountIndex);
+            if (!isTraderSignedOuter) continue;
+            
+            const outerProgramId = getProgramId(outerInstruction);
+            const outerProgramIdStr = outerProgramId.toBase58();
+            
+            // Skip system programs for outer instruction too
+            if (systemPrograms.has(outerProgramIdStr)) continue;
+            
+            console.log(`[ANALYZER-V2] 🔍 Outer instruction ${outerIndex} signed by trader: ${outerProgramIdStr.substring(0, 8)}...`);
+            
+            // Find the inner instructions triggered by this outer instruction
+            const innerInstructionGroup = (meta.innerInstructions || []).find(group => group.index === outerIndex);
+            if (!innerInstructionGroup) {
+                console.log(`[ANALYZER-V2] ⏭️ No inner instructions for outer instruction ${outerIndex}`);
+                continue;
+            }
+            
+            console.log(`[ANALYZER-V2] 🔍 Found ${innerInstructionGroup.instructions.length} inner instructions for outer ${outerIndex}`);
+            
+            // Search inner instructions for known DEX calls
+            for (const [innerIndex, innerInstruction] of innerInstructionGroup.instructions.entries()) {
+                const innerProgramId = getProgramId(innerInstruction);
+                const innerProgramIdStr = innerProgramId.toBase58();
+                
+                // Skip system programs in inner instructions too
+                if (systemPrograms.has(innerProgramIdStr)) continue;
+                
+                if (isKnownPlatform(innerProgramId)) {
+                    console.log(`[ANALYZER-V2] ✅ SUCCESS (Router CPI): Found inner instruction ${innerIndex} for ${innerProgramIdStr.substring(0, 8)}... triggered by trader's signed call.`);
+                    return this._packageInstructionForCloning(innerInstruction, transaction, meta, allAccountKeys, innerProgramIdStr);
+                }
+            }
+        }
+        
+        // --- STRATEGY 3: Fallback - Use the old heuristic for unknown patterns ---
+        console.log("[ANALYZER-V2] 🔄 Strategy 3: Fallback to best candidate heuristic...");
+        
+        const candidateInstructions = [];
+        
         for (const instruction of transaction.message.instructions) {
             // Find which account pubkey corresponds to the trader in this instruction
             const isSignerPresent = instruction.accounts.some(accountIndex => {
@@ -543,53 +723,21 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             });
 
             // The instruction must actually have the trader's key AND that key must be a signer in the transaction header
-            const traderIndexInHeader = accountKeysFromMessage.findIndex(pk => pk.equals(traderPk));
-            const isTraderSignerInHeader = traderIndexInHeader >= 0 && traderIndexInHeader < transaction.message.header.numRequiredSignatures;
+            const isTraderSignerInHeader = traderAccountIndex >= 0 && traderAccountIndex < transaction.message.header.numRequiredSignatures;
 
             if (isSignerPresent && isTraderSignerInHeader) {
-                const programId = accountKeysFromMessage[instruction.programIdIndex];
+                const programId = allAccountKeys[instruction.programIdIndex];
                 const programIdStr = programId.toBase58();
+                
+                // Skip system programs
+                if (systemPrograms.has(programIdStr)) continue;
                 
                 // Create candidate instruction
                 const candidate = {
                     programId: programId,
                     programIdStr: programIdStr,
-                    accounts: instruction.accounts.map(accIdx => {
-                        const pubkey = accountMeta.get(accIdx);
-                        const header = transaction.message.header;
-                        
-                        // Determine if account is signer
-                        const isSigner = accIdx < header.numRequiredSignatures;
-                        
-                        // Determine if account is writable
-                        const numSigners = header.numRequiredSignatures;
-                        const numReadonlySigners = header.numReadonlySignedAccounts;
-                        const numWritableSigners = numSigners - numReadonlySigners;
-                        
-                        let isWritable;
-                        if (accIdx < numWritableSigners) {
-                            // Writable signer
-                            isWritable = true;
-                        } else if (accIdx < numSigners) {
-                            // Readonly signer
-                            isWritable = false;
-                        } else {
-                            // Unsigned account
-                            const totalAccounts = allAccountKeys.length;
-                            const numReadonlyUnsigned = header.numReadonlyUnsignedAccounts;
-                            const numWritableUnsigned = totalAccounts - numSigners - numReadonlyUnsigned;
-                            isWritable = (accIdx - numSigners) < numWritableUnsigned;
-                        }
-            
-            return { 
-                            pubkey: pubkey,
-                            isSigner: isSigner,
-                            isWritable: isWritable
-                        };
-                    }),
-                    data: typeof instruction.data === 'string' ? instruction.data : bs58.encode(instruction.data), // CRITICAL FIX: Handle both string and Uint8Array data
+                    instruction: instruction,
                     instructionIndex: transaction.message.instructions.indexOf(instruction),
-                    isSystemProgram: systemPrograms.has(programIdStr),
                     accountCount: instruction.accounts.length
                 };
                 
@@ -598,18 +746,12 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         }
 
         if (candidateInstructions.length === 0) {
-            console.warn(`[ANALYZER] ⚠️ Could not find any outer instruction signed by the trader.`);
+            console.warn(`[ANALYZER-V2] ❌ All strategies failed. Could not find a core swap instruction.`);
             return null;
         }
 
-        // Sort candidates by priority:
-        // 1. Non-system programs first
-        // 2. More accounts (swap instructions typically have more accounts)
-        // 3. Later in transaction (main swap usually comes after setup)
+        // Sort candidates by priority: More accounts first, then later instructions
         candidateInstructions.sort((a, b) => {
-            if (a.isSystemProgram !== b.isSystemProgram) {
-                return a.isSystemProgram ? 1 : -1; // Non-system programs first
-            }
             if (a.accountCount !== b.accountCount) {
                 return b.accountCount - a.accountCount; // More accounts first
             }
@@ -617,17 +759,117 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         });
 
         const bestCandidate = candidateInstructions[0];
-        console.log(`[ANALYZER] ✅ SUCCESS: Found instruction signed by trader.`);
-        console.log(`[ANALYZER]   -> Platform/Router Program ID: ${bestCandidate.programIdStr}`);
-        console.log(`[ANALYZER]   -> Instruction Index: ${bestCandidate.instructionIndex} (outer)`);
-        console.log(`[ANALYZER]   -> Account Count: ${bestCandidate.accountCount}`);
-        console.log(`[ANALYZER]   -> Candidates Found: ${candidateInstructions.length}`);
+        console.log(`[ANALYZER-V2] ✅ SUCCESS (Fallback): Using best candidate instruction.`);
+        console.log(`[ANALYZER-V2]   -> Program ID: ${bestCandidate.programIdStr.substring(0, 8)}...`);
+        console.log(`[ANALYZER-V2]   -> Instruction Index: ${bestCandidate.instructionIndex}`);
+        console.log(`[ANALYZER-V2]   -> Account Count: ${bestCandidate.accountCount}`);
+        console.log(`[ANALYZER-V2]   -> Candidates Found: ${candidateInstructions.length}`);
 
-        return {
-            programId: bestCandidate.programId,
-            accounts: bestCandidate.accounts,
-            data: bestCandidate.data,
+        return this._packageInstructionForCloning(bestCandidate.instruction, transaction, meta, allAccountKeys, bestCandidate.programIdStr);
+    }
+    
+    // NEW HELPER to consistently package the result
+    _packageInstructionForCloning(instruction, transaction, meta, allAccountKeys, programIdStr) {
+        // Build the accounts array for this instruction
+        const accounts = instruction.accounts.map(accountIndex => {
+            const pubkey = allAccountKeys[accountIndex];
+            if (!pubkey) {
+                throw new Error(`Failed to resolve account at index ${accountIndex}. Possible ATL issue.`);
+            }
+            
+            // Determine signer and writable status using transaction header
+            const header = transaction.message.header;
+            
+            // Determine if account is signer
+            const isSigner = accountIndex < header.numRequiredSignatures;
+            
+            // Determine if account is writable
+            const numSigners = header.numRequiredSignatures;
+            const numReadonlySigners = header.numReadonlySignedAccounts;
+            const numWritableSigners = numSigners - numReadonlySigners;
+            
+            let isWritable;
+            if (accountIndex < numWritableSigners) {
+                // Writable signer
+                isWritable = true;
+            } else if (accountIndex < numSigners) {
+                // Readonly signer
+                isWritable = false;
+            } else {
+                // Unsigned account
+                const totalAccounts = allAccountKeys.length;
+                const numReadonlyUnsigned = header.numReadonlyUnsignedAccounts;
+                const numWritableUnsigned = totalAccounts - numSigners - numReadonlyUnsigned;
+                isWritable = (accountIndex - numSigners) < numWritableUnsigned;
+            }
+            
+            return { 
+                pubkey: pubkey.toBase58(),
+                isSigner,
+                isWritable
+            };
+        });
+        
+        // Package the instruction data properly
+        let instructionData;
+        if (typeof instruction.data === 'string') {
+            instructionData = instruction.data; // Already Base58 encoded
+        } else if (instruction.data instanceof Uint8Array || Buffer.isBuffer(instruction.data)) {
+            instructionData = bs58.encode(instruction.data); // Encode to Base58
+        } else {
+            console.warn(`[ANALYZER-V2] ⚠️ Unexpected instruction data type: ${typeof instruction.data}`);
+            instructionData = instruction.data.toString();
+        }
+        
+        const platformInfo = this._identifyPlatform(programIdStr);
+        
+        console.log(`[ANALYZER-V2] ✅ SUCCESS: Packaged instruction for cloning.`);
+        console.log(`[ANALYZER-V2]   -> Platform/Router Program ID: ${programIdStr.substring(0, 8)}...${programIdStr.substring(programIdStr.length - 8)} (${platformInfo?.name || 'Unknown'})`);
+        console.log(`[ANALYZER-V2]   -> Accounts: ${accounts.length}`);
+        console.log(`[ANALYZER-V2]   -> Data length: ${instructionData.length} chars`);
+            
+            return { 
+            programId: programIdStr, // Keep as string for consistency with existing code
+            accounts: accounts,
+            data: instructionData
         };
+    }
+    
+    /**
+     * Identify platform based on program ID
+     */
+    _identifyPlatform(programIdStr) {
+        if (!programIdStr) return null;
+        
+        // Check against known platform IDs from config
+        const platforms = [
+            { name: 'Jupiter V6', ids: [this.platformIds.JUPITER_V6] },
+            { name: 'Pump.fun', ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT, this.platformIds.PUMP_FUN_AMM] },
+            { name: 'Raydium V4', ids: [this.platformIds.RAYDIUM_V4] },
+            { name: 'Raydium AMM V4', ids: [this.platformIds.RAYDIUM_AMM_V4] },
+            { name: 'Raydium Launchpad', ids: [this.platformIds.RAYDIUM_LAUNCHPAD] },
+            { name: 'Raydium CPMM', ids: [this.platformIds.RAYDIUM_CPMM] },
+            { name: 'Raydium CLMM', ids: [this.platformIds.RAYDIUM_CLMM] },
+            { name: 'Meteora DLMM', ids: [this.platformIds.METEORA_DLMM] },
+            { name: 'Meteora DBC', ids: this.platformIds.METEORA_DBC || [] },
+            { name: 'Meteora CP-AMM', ids: [this.platformIds.METEORA_CP_AMM] },
+            { name: 'Jupiter Aggregator', ids: [this.platformIds['Jupiter Aggregator']] },
+            { name: 'Photon Router', ids: [this.platformIds.PHOTON] },
+            { name: 'Axiom', ids: [this.platformIds.AXIOM] }
+        ];
+        
+        for (const platform of platforms) {
+            if (!platform.ids) continue;
+            
+            const ids = Array.isArray(platform.ids) ? platform.ids : [platform.ids];
+            for (const id of ids) {
+                if (id && id.toBase58 && id.toBase58() === programIdStr) {
+                    return { name: platform.name, programId: programIdStr };
+                }
+            }
+        }
+        
+        return null;
     }
     
     _resolveProgramId(instruction, allAccountKeys) {
@@ -1863,9 +2105,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
                     
                     // Check against known Pump.fun discriminators
                     if (discriminator.equals(config.PUMP_FUN_BUY_DISCRIMINATOR) ||
-                        discriminator.equals(config.PUMP_FUN_SELL_DISCRIMINATOR) ||
-                        discriminator.equals(config.PUMP_AMM_BUY_DISCRIMINATOR) ||
-                        discriminator.equals(config.PUMP_AMM_SELL_DISCRIMINATOR)) {
+                        discriminator.equals(config.PUMP_FUN_SELL_DISCRIMINATOR)) {
                         console.log(`[ANALYZER] 🔍 Pump.fun discriminator detected in instruction data`);
                         return true;
                     }

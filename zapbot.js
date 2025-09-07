@@ -591,7 +591,9 @@ class ZapBot {
                     user.id, 
                     label, 
                     walletInfo.publicKey.toBase58(), 
-                    walletInfo.encryptedPrivateKey
+                    walletInfo.encryptedPrivateKey,
+                    walletInfo.nonceAccountPubkey ? walletInfo.nonceAccountPubkey.toBase58() : null,
+                    walletInfo.encryptedNonceAccountPrivateKey || null
                 );
             }
             
@@ -614,7 +616,9 @@ class ZapBot {
                     user.id, 
                     label, 
                     walletInfo.publicKey.toBase58(), 
-                    walletInfo.encryptedPrivateKey
+                    walletInfo.encryptedPrivateKey,
+                    walletInfo.nonceAccountPubkey ? walletInfo.nonceAccountPubkey.toBase58() : null,
+                    walletInfo.encryptedNonceAccountPrivateKey || null
                 );
             }
 

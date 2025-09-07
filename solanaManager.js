@@ -119,15 +119,15 @@ class SolanaManager {
            console.log(`[NONCE] Creating and initializing new nonce account: ${shortenAddress(nonceAccountPubkey.toBase58())}`);
 
            // Calculate minimum balance for rent exemption
-           const lamports = await this.connection.getMinimumBalanceForRentExemption(
-   NonceAccount.NONCE_ACCOUNT_LENGTH
-);
+           // Nonce accounts are 80 bytes in size
+           const NONCE_ACCOUNT_SIZE = 80;
+           const lamports = await this.connection.getMinimumBalanceForRentExemption(NONCE_ACCOUNT_SIZE);
 
            const createAccountInstruction = SystemProgram.createAccount({
                fromPubkey: payerKeypair.publicKey,
                newAccountPubkey: nonceAccountPubkey,
                lamports,
-               space: NonceAccount.NONCE_ACCOUNT_LENGTH,
+               space: NONCE_ACCOUNT_SIZE,
                programId: SystemProgram.programId,
            });
 
@@ -149,11 +149,32 @@ class SolanaManager {
                preflightCommitment: 'confirmed'
            });
 
-           await this.connection.confirmTransaction({
-               signature,
-               blockhash,
-               lastValidBlockHeight
-           }, 'confirmed');
+           // Use polling instead of WebSocket subscription for confirmation
+           let confirmed = false;
+           let attempts = 0;
+           const maxAttempts = 30;
+           
+           while (!confirmed && attempts < maxAttempts) {
+               try {
+                   const status = await this.connection.getSignatureStatus(signature);
+                   if (status.value && status.value.confirmationStatus === 'confirmed') {
+                       confirmed = true;
+                       break;
+                   }
+                   if (status.value && status.value.err) {
+                       throw new Error(`Transaction failed: ${JSON.stringify(status.value.err)}`);
+                   }
+               } catch (error) {
+                   console.log(`[NONCE] Confirmation attempt ${attempts + 1}/${maxAttempts}...`);
+               }
+               
+               attempts++;
+               await new Promise(resolve => setTimeout(resolve, 2000)); // Wait 2 seconds
+           }
+           
+           if (!confirmed) {
+               throw new Error('Transaction confirmation timeout');
+           }
 
            console.log(`[NONCE] ✅ Nonce account ${shortenAddress(nonceAccountPubkey.toBase58())} created and initialized. TXID: ${signature}`);
            return { nonceAccountKeypair, nonceAccountPubkey };

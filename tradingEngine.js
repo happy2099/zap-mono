@@ -2014,9 +2014,12 @@ async checkPumpFunMigration(tokenMint) {
                 throw new Error(`Cannot execute ${tradeDetails.dexPlatform} trade: missing inputMint or outputMint fields`);
             }
 
-            // Get user-specific configuration
-            const userSolAmounts = await this.databaseManager.loadSolAmounts();
-            const userSolAmount = userSolAmounts[String(userChatId)] || 0.01; // Default 0.01 SOL
+            // Get user-specific configuration (SOL amount + slippage)
+            const userSettings = await this.databaseManager.getUserSettings(userChatId);
+            const userSolAmount = userSettings.solAmount; // SOL amount per trade
+            const userSlippageBps = userSettings.slippageBps; // Slippage in basis points
+            
+            console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} settings: ${userSolAmount} SOL, ${userSlippageBps} BPS slippage`);
             
             // Get user positions for SELL trades
             let userTokenBalance = null;
@@ -2052,13 +2055,13 @@ async checkPumpFunMigration(tokenMint) {
                 inputMint: tradeDetails.inputMint,
                 outputMint: tradeDetails.outputMint,
                 amountBN: userAmountBN, // Keep for backward compatibility
-                slippageBps: tradeDetails.slippageBps || 5000,
+                slippageBps: userSlippageBps, // 🚀 USER'S CONFIGURED SLIPPAGE
                 // NEW: User-specific parameters
                 userChatId: userChatId,
                 userSolAmount: new (require('bn.js'))(Math.floor(userSolAmount * 1e9)), // Convert to lamports
                 userTokenBalance: userTokenBalance ? new (require('bn.js'))(userTokenBalance.amountRaw.toString()) : null,
                 userRiskSettings: {
-                    slippageTolerance: tradeDetails.slippageBps || 5000,
+                    slippageTolerance: userSlippageBps, // 🚀 USER'S CONFIGURED SLIPPAGE
                     maxTradesPerDay: 10 // Could be loaded from database
                 },
                 // NEW: Durable nonce support
@@ -2110,27 +2113,134 @@ async checkPumpFunMigration(tokenMint) {
 
             // ✅ PRE-FLIGHT SIMULATION: Test the transaction before sending
             console.log(`[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...`);
+            console.log(`[SINGAPORE-SENDER] 📊 Simulation details:`);
+            console.log(`[SINGAPORE-SENDER]   - Instructions: ${instructions.length}`);
+            console.log(`[SINGAPORE-SENDER]   - User wallet: ${shortenAddress(keypair.publicKey.toString())}`);
+            console.log(`[SINGAPORE-SENDER]   - Nonce info: ${nonceInfo ? 'YES' : 'NO'}`);
+            
             try {
-                // Create a test transaction for simulation
-                const { Transaction } = require('@solana/web3.js');
-                const testTransaction = new Transaction();
-                testTransaction.add(...instructions);
-                
-                // Simulate the transaction
-                const simulationResult = await this.solanaManager.connection.simulateTransaction(testTransaction, {
-                    commitment: 'processed',
-                    sigVerify: false
+                // Enhanced logging for each instruction
+                instructions.forEach((ix, index) => {
+                    console.log(`[SINGAPORE-SENDER]   Instruction ${index}:`);
+                    console.log(`[SINGAPORE-SENDER]     - Program: ${shortenAddress(ix.programId.toString())}`);
+                    console.log(`[SINGAPORE-SENDER]     - Accounts: ${ix.keys.length}`);
+                    console.log(`[SINGAPORE-SENDER]     - Data length: ${ix.data.length} bytes`);
+                    
+                    // Log account details for debugging
+                    ix.keys.forEach((key, keyIndex) => {
+                        if (keyIndex < 3) { // Only log first 3 accounts to avoid spam
+                            console.log(`[SINGAPORE-SENDER]       Account ${keyIndex}: ${shortenAddress(key.pubkey.toString())} (signer: ${key.isSigner}, writable: ${key.isWritable})`);
+                        }
+                    });
                 });
                 
+                // Create proper versioned transaction for simulation
+                const { VersionedTransaction, TransactionMessage, ComputeBudgetProgram } = require('@solana/web3.js');
+                
+                // Add compute budget instructions for proper simulation
+                const computeInstructions = [
+                    ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 }),
+                    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
+                ];
+                
+                const allInstructions = [...computeInstructions, ...instructions];
+                console.log(`[SINGAPORE-SENDER] 🔧 Total instructions for simulation: ${allInstructions.length} (${computeInstructions.length} compute + ${instructions.length} trade)`);
+                
+                // Get recent blockhash or use nonce
+                let recentBlockhash;
+                if (nonceInfo && nonceInfo.nonce) {
+                    recentBlockhash = nonceInfo.nonce;
+                    console.log(`[SINGAPORE-SENDER] 🔐 Using nonce as blockhash: ${shortenAddress(recentBlockhash)}`);
+                } else {
+                    const { blockhash } = await this.solanaManager.connection.getLatestBlockhash('confirmed');
+                    recentBlockhash = blockhash;
+                    console.log(`[SINGAPORE-SENDER] ⏰ Using fresh blockhash: ${shortenAddress(recentBlockhash)}`);
+                }
+                
+                // Create versioned transaction message
+                const message = new TransactionMessage({
+                    payerKey: keypair.publicKey,
+                    recentBlockhash: recentBlockhash,
+                    instructions: allInstructions
+                }).compileToV0Message();
+                
+                const versionedTx = new VersionedTransaction(message);
+                
+                // Sign the transaction for simulation
+                versionedTx.sign([keypair]);
+                console.log(`[SINGAPORE-SENDER] ✍️ Transaction signed for simulation`);
+                
+                // DEBUG: Log the exact instruction data being sent to simulation
+                console.log(`[SINGAPORE-SENDER] 🔍 SIMULATION DEBUG: Transaction instructions:`);
+                for (let i = 0; i < instructions.length; i++) {
+                    const instr = instructions[i];
+                    console.log(`[SINGAPORE-SENDER]   Instruction ${i}: Program ${instr.programId.toBase58().substring(0, 8)}..., Data: ${instr.data.toString('hex')}`);
+                }
+                
+                // Simulate the versioned transaction
+                console.log(`[SINGAPORE-SENDER] 🧪 Running Solana simulation...`);
+                const simulationResult = await this.solanaManager.connection.simulateTransaction(versionedTx, {
+                    commitment: 'processed',
+                    sigVerify: false,
+                    replaceRecentBlockhash: !nonceInfo, // Don't replace if using nonce
+                    accounts: {
+                        encoding: 'base64',
+                        addresses: [] // Let Solana determine which accounts to return
+                    }
+                });
+                
+                console.log(`[SINGAPORE-SENDER] 📊 Simulation completed`);
+                
                 if (simulationResult.value.err) {
-                    console.error(`[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!`, simulationResult.value.err);
-                    console.error(`[SINGAPORE-SENDER] 📋 Simulation logs:`, simulationResult.value.logs);
+                    console.error(`[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!`);
+                    console.error(`[SINGAPORE-SENDER] 🔍 Error details:`, JSON.stringify(simulationResult.value.err, null, 2));
+                    console.error(`[SINGAPORE-SENDER] 📋 Full simulation logs:`);
+                    if (simulationResult.value.logs) {
+                        simulationResult.value.logs.forEach((log, index) => {
+                            console.error(`[SINGAPORE-SENDER]   ${index + 1}. ${log}`);
+                        });
+                    }
+                    
+                    // Enhanced error analysis
+                    const errorType = Object.keys(simulationResult.value.err)[0];
+                    console.error(`[SINGAPORE-SENDER] 🎯 Error type: ${errorType}`);
+                    
+                    if (errorType === 'InstructionError') {
+                        const [instructionIndex, instructionError] = simulationResult.value.err.InstructionError;
+                        console.error(`[SINGAPORE-SENDER] 📍 Failed at instruction ${instructionIndex}:`);
+                        if (instructionIndex < allInstructions.length) {
+                            const failedInstruction = allInstructions[instructionIndex];
+                            console.error(`[SINGAPORE-SENDER]   - Program: ${shortenAddress(failedInstruction.programId.toString())}`);
+                            console.error(`[SINGAPORE-SENDER]   - Accounts: ${failedInstruction.keys.length}`);
+                            console.error(`[SINGAPORE-SENDER]   - Data: ${failedInstruction.data.length} bytes`);
+                        }
+                        console.error(`[SINGAPORE-SENDER] 🔍 Instruction error:`, JSON.stringify(instructionError, null, 2));
+                    }
+                    
                     throw new Error(`Transaction failed pre-flight simulation: ${JSON.stringify(simulationResult.value.err)}`);
                 }
                 
-                console.log(`[SINGAPORE-SENDER] ✅ Pre-flight simulation passed! Units consumed: ${simulationResult.value.unitsConsumed}`);
+                console.log(`[SINGAPORE-SENDER] ✅ Pre-flight simulation passed!`);
+                console.log(`[SINGAPORE-SENDER] ⚡ Units consumed: ${simulationResult.value.unitsConsumed}`);
+                console.log(`[SINGAPORE-SENDER] 📊 Accounts read: ${simulationResult.value.accounts?.length || 0}`);
+                
+                if (simulationResult.value.logs && simulationResult.value.logs.length > 0) {
+                    console.log(`[SINGAPORE-SENDER] 📜 Success logs (first 3):`);
+                    simulationResult.value.logs.slice(0, 3).forEach((log, index) => {
+                        console.log(`[SINGAPORE-SENDER]   ${index + 1}. ${log}`);
+                    });
+                }
+                
             } catch (simulationError) {
                 console.error(`[SINGAPORE-SENDER] ❌ Pre-flight simulation error:`, simulationError.message);
+                console.error(`[SINGAPORE-SENDER] 🔍 Error stack:`, simulationError.stack);
+                
+                // Additional debugging info
+                console.error(`[SINGAPORE-SENDER] 🔧 Debug info:`);
+                console.error(`[SINGAPORE-SENDER]   - Instructions count: ${instructions.length}`);
+                console.error(`[SINGAPORE-SENDER]   - User wallet: ${keypair.publicKey.toString()}`);
+                console.error(`[SINGAPORE-SENDER]   - Connection endpoint: ${this.solanaManager.connection.rpcEndpoint}`);
+                
                 throw new Error(`Pre-flight simulation failed: ${simulationError.message}`);
             }
 

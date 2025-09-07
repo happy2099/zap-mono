@@ -129,7 +129,7 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     // --- TRANSACTION FILTERING CONFIGURATION ---
     TRANSACTION_FILTERING: {
         ENABLED: process.env.TRANSACTION_FILTERING_ENABLED !== 'false', // Default: enabled
-        MAX_AGE_SECONDS: parseInt(process.env.TRANSACTION_MAX_AGE_SECONDS) || 30, // Default: 30 seconds
+        MAX_AGE_SECONDS: parseInt(process.env.TRANSACTION_MAX_AGE_SECONDS) || 60, // Default: 60 seconds (1 minute)
         BLOCKHASH_VALIDATION: process.env.BLOCKHASH_VALIDATION_ENABLED !== 'false', // Default: enabled
         MAX_BLOCKHASH_AGE_SLOTS: parseInt(process.env.MAX_BLOCKHASH_AGE_SLOTS) || 150, // Default: ~1 minute
         LOG_FILTERED_TRANSACTIONS: process.env.LOG_FILTERED_TRANSACTIONS === 'true' // Default: disabled
@@ -214,7 +214,7 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     CLOCK_PUBKEY: SYSVAR_CLOCK_PUBKEY,
     COMPUTE_BUDGET_PROGRAM_ID: ComputeBudgetProgram.programId,
     LAMPORTS_PER_SOL_CONST: LAMPORTS_PER_SOL,
-    TOKEN_2022_PROGRAM_ID: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpG4MZN'),
+    TOKEN_2022_PROGRAM_ID: new PublicKey('TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb'),
 
     // --- MEV & Priority Fees ---
     MEV_PROTECTION: {
@@ -235,7 +235,9 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     
     // --- Platform & Program IDs ---
     PLATFORM_IDS: {
+        // JUPITER_V6: new PublicKey('JUP6LkbZbjS1jKKwapdHch4GTJsy9FpAEQ6LXuLgWuuU'), // TODO: Fix invalid program ID
         RAYDIUM_V4: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'),
+        RAYDIUM_AMM_V4: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
         RAYDIUM_LAUNCHPAD: new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj'),
         RAYDIUM_CPMM: new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'),
         RAYDIUM_CLMM: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
@@ -285,13 +287,17 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
         'https://api.pump.fun/coins/',           // Official API  
     ],
     // Note: Primary data fetching now uses Helius RPC for reliability
+    // ✅ OFFICIAL Pump.fun discriminators (sha256('global:buy') and sha256('global:sell'))
     PUMP_FUN_BUY_DISCRIMINATOR: Buffer.from('169168196c813e37', 'hex'), // Correct BUY discriminator (global:buy)
     PUMP_FUN_SELL_DISCRIMINATOR: Buffer.from('43a0271383796d13', 'hex'), // Correct SELL discriminator (global:sell)
-    PUMP_AMM_BUY_DISCRIMINATOR: Buffer.from([27, 57, 130, 10, 211, 244, 242, 167]),
-    PUMP_AMM_SELL_DISCRIMINATOR: Buffer.from([124, 74, 67, 128, 26, 10, 120, 93]),
     PUMP_FUN_PROGRAM_ID: new PublicKey('6EF8rrecthR5DkVaGFKLkma4YkdrkvPPHoqUPLQkwQjR'),
     PUMP_FUN_PROGRAM_ID_VARIANT: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
     PUMP_FUN_AMM_PROGRAM_ID: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
+    
+    // --- JUPITER & RAYDIUM PROGRAM IDS ---
+    // JUPITER_V6_PROGRAM_ID: new PublicKey('JUP6LkbZbjS1jKKwapdHch4GTJsy9FpAEQ6LXuLgWuuU'), // TODO: Fix invalid program ID
+    RAYDIUM_AMM_V4_PROGRAM_ID: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
+    RAYDIUM_CLMM_PROGRAM_ID: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
     PUMP_FUN_GLOBAL: new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk'),
     PUMP_FUN_FEE_RECIPIENT: new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1S77jyZ52gXSJGTk5M'),
 
