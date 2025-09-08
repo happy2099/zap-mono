@@ -558,6 +558,14 @@ async initialize() {
         const user = await this.getUser(chatId);
         if (!user) throw new Error(`User with chat_id ${chatId} not found`);
 
+        // ✅ VALIDATION: Ensure we have a valid non-zero amount
+        if (!amountRaw || amountRaw === "0" || BigInt(amountRaw) <= 0n) {
+            console.warn(`[DB-VALIDATION] Skipping position recording: Invalid amount (${amountRaw}) for token ${tokenMint}`);
+            return;
+        }
+
+        console.log(`[DB-VALIDATION] Recording position: ${amountRaw} tokens for ${tokenMint}`);
+
         // Check if position already exists
         const existing = await this.get(`
             SELECT * FROM user_positions 
@@ -571,12 +579,14 @@ async initialize() {
                 SET amount_raw = ?, sol_spent = ?, updated_at = CURRENT_TIMESTAMP
                 WHERE user_id = ? AND token_mint = ?
             `, [amountRaw, solSpent, user.id, tokenMint]);
+            console.log(`[DB-VALIDATION] Updated existing position for ${tokenMint}`);
         } else {
             // Create new position
             await this.run(`
                 INSERT INTO user_positions (user_id, token_mint, amount_raw, sol_spent, created_at, updated_at)
                 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
             `, [user.id, tokenMint, amountRaw, solSpent]);
+            console.log(`[DB-VALIDATION] Created new position for ${tokenMint}`);
         }
     }
 

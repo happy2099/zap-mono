@@ -129,7 +129,7 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     // --- TRANSACTION FILTERING CONFIGURATION ---
     TRANSACTION_FILTERING: {
         ENABLED: process.env.TRANSACTION_FILTERING_ENABLED !== 'false', // Default: enabled
-        MAX_AGE_SECONDS: parseInt(process.env.TRANSACTION_MAX_AGE_SECONDS) || 60, // Default: 60 seconds (1 minute)
+        MAX_AGE_SECONDS: parseInt(process.env.TRANSACTION_MAX_AGE_SECONDS) || 300, // ✅ INCREASED: 5 minutes (was 60s)
         BLOCKHASH_VALIDATION: process.env.BLOCKHASH_VALIDATION_ENABLED !== 'false', // Default: enabled
         MAX_BLOCKHASH_AGE_SLOTS: parseInt(process.env.MAX_BLOCKHASH_AGE_SLOTS) || 150, // Default: ~1 minute
         LOG_FILTERED_TRANSACTIONS: process.env.LOG_FILTERED_TRANSACTIONS === 'true' // Default: disabled

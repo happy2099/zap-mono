@@ -1,9 +1,9 @@
 {
-  "timestamp": "2025-09-08T16:06:09.710Z",
+  "timestamp": "2025-09-08T16:43:32.344Z",
   "uptime": {
-    "total": 632531,
+    "total": 183485,
     "hours": 0,
-    "minutes": 10
+    "minutes": 3
   },
   "laserstream": {
     "totalDetections": 0,

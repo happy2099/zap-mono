@@ -738,6 +738,8 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
     const { keypair, wallet } = keypairPacket;
 
     // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
+    // COMMENTED OUT: Preflight check for buys to allow multiple positions per token
+    /*
 const isBuy = tradeDetails.tradeType === 'buy';
 if (isBuy) {
     const userPositions = this.databaseManager.getUserPositions(String(userChatId));
@@ -756,6 +758,7 @@ if (isBuy) {
         return; 
     }
 }
+    */
 // ===========================================
 
     try {
@@ -773,11 +776,35 @@ if (isBuy) {
             amountBN = new BN(Math.floor(solAmountForNotification * config.LAMPORTS_PER_SOL_CONST));
             tradeDetails.solSpent = solAmountForNotification;
             preInstructions.push(createAssociatedTokenAccountIdempotentInstruction(keypair.publicKey, getAssociatedTokenAddressSync(new PublicKey(tradeDetails.outputMint), keypair.publicKey), keypair.publicKey, new PublicKey(tradeDetails.outputMint)));
-        } else { // SELL logic remains the same
+        } else { // ✅ ENHANCED SELL logic with better validation
             const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
-            if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) throw new Error(`No recorded position for this token.`);
-            amountBN = sellDetails.amountToSellBN;
-            tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
+            
+            if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) {
+                console.warn(`[SELL-VALIDATION] No recorded position found in database, trying on-chain balance check...`);
+                
+                // ✅ FALLBACK: Check on-chain balance if database position is missing
+                try {
+                    const onChainBalance = await this._getOnChainTokenBalance(keypair.publicKey.toBase58(), tradeDetails.inputMint);
+                    if (onChainBalance.gt(new BN(0))) {
+                        console.log(`[SELL-VALIDATION] Found ${onChainBalance.toString()} tokens on-chain, using this amount`);
+                        amountBN = onChainBalance;
+                        tradeDetails.originalSolSpent = 0; // Unknown original amount
+                        
+                        // ✅ RECORD the position for future reference
+                        await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                        console.log(`[SELL-VALIDATION] Recorded on-chain position in database for future reference`);
+                    } else {
+                        throw new Error(`No recorded position for this token and no tokens found on-chain.`);
+                    }
+                } catch (balanceError) {
+                    console.error(`[SELL-VALIDATION] On-chain balance check failed: ${balanceError.message}`);
+                    throw new Error(`No recorded position for this token and unable to verify on-chain balance.`);
+                }
+            } else {
+                console.log(`[SELL-VALIDATION] Using database position: ${sellDetails.amountToSellBN.toString()} tokens`);
+                amountBN = sellDetails.amountToSellBN;
+                tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
+            }
         }
 
         // Get nonce info for durable transactions (eliminates old hash errors)
@@ -858,9 +885,31 @@ if (isBuy) {
         };
         await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, finalizedDetails);
         if (isBuy) {
-            await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, finalizedDetails.outputAmountRaw || "0", solAmountForNotification);
-            finalizedDetails.userChatId = userChatId;
-            await this._precacheSellInstruction(signature, finalizedDetails);
+            // ✅ FIX: Ensure we have a valid token amount before recording position
+            let tokenAmount = finalizedDetails.outputAmountRaw;
+            if (!tokenAmount || tokenAmount === "0") {
+                console.warn(`[POSITION-FIX] No outputAmountRaw in finalizedDetails, calculating from transaction...`);
+                try {
+                    const calculatedAmount = await this._getAmountReceivedFromBuy(signature, keypair.publicKey.toBase58(), finalizedDetails.outputMint);
+                    tokenAmount = calculatedAmount.toString();
+                    console.log(`[POSITION-FIX] Calculated amount: ${tokenAmount} for token ${shortenAddress(finalizedDetails.outputMint)}`);
+                } catch (calcError) {
+                    console.error(`[POSITION-FIX] Failed to calculate token amount: ${calcError.message}`);
+                    // Don't record position if we can't determine the amount
+                    console.warn(`[POSITION-FIX] Skipping position recording due to amount calculation failure`);
+                    return;
+                }
+            }
+            
+            // Only record position if we have a valid non-zero amount
+            if (tokenAmount && tokenAmount !== "0" && BigInt(tokenAmount) > 0n) {
+                await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, tokenAmount, solAmountForNotification);
+                console.log(`[POSITION-FIX] ✅ Position recorded: ${tokenAmount} tokens for ${shortenAddress(finalizedDetails.outputMint)}`);
+                finalizedDetails.userChatId = userChatId;
+                await this._precacheSellInstruction(signature, finalizedDetails);
+            } else {
+                console.error(`[POSITION-FIX] ❌ Invalid token amount (${tokenAmount}), skipping position recording`);
+            }
                } else {
             // Get post-sell balance to calculate solReceived accurately
             const postSellBalance = await this.solanaManager.connection.getBalance(keypair.publicKey);
@@ -885,18 +934,83 @@ if (isBuy) {
 
 // Helper function extracted for clarity
 async _getAmountReceivedFromBuy(buySignature, walletAddress, tokenMint) {
-    const txInfo = await this.solanaManager.connection.getTransaction(buySignature, { 
-        maxSupportedTransactionVersion: 0,
-        encoding: 'json'
-    });
-    if (!txInfo || txInfo.meta.err) throw new Error(`Buy transaction ${buySignature} failed or not found.`);
+    try {
+        console.log(`[AMOUNT-CALC] Calculating amount received for ${shortenAddress(tokenMint)} from tx ${shortenAddress(buySignature)}`);
+        
+        const txInfo = await this.solanaManager.connection.getTransaction(buySignature, { 
+            maxSupportedTransactionVersion: 0,
+            encoding: 'json'
+        });
+        
+        if (!txInfo) {
+            throw new Error(`Transaction ${buySignature} not found`);
+        }
+        
+        if (txInfo.meta.err) {
+            throw new Error(`Transaction ${buySignature} failed with error: ${JSON.stringify(txInfo.meta.err)}`);
+        }
 
-    const postBalance = txInfo.meta.postTokenBalances.find(tb => tb.owner === walletAddress && tb.mint === tokenMint);
-    const preBalance = txInfo.meta.preTokenBalances.find(tb => tb.owner === walletAddress && tb.mint === tokenMint);
+        // ✅ IMPROVED: Better token balance detection
+        const postBalance = txInfo.meta.postTokenBalances?.find(tb => 
+            tb.owner === walletAddress && tb.mint === tokenMint
+        );
+        const preBalance = txInfo.meta.preTokenBalances?.find(tb => 
+            tb.owner === walletAddress && tb.mint === tokenMint
+        );
 
-    const postAmount = new BN(postBalance?.uiTokenAmount.amount || '0');
-    const preAmount = new BN(preBalance?.uiTokenAmount.amount || '0');
-    return postAmount.sub(preAmount);
+        console.log(`[AMOUNT-CALC] Pre-balance: ${preBalance?.uiTokenAmount?.amount || '0'}, Post-balance: ${postBalance?.uiTokenAmount?.amount || '0'}`);
+
+        const postAmount = new BN(postBalance?.uiTokenAmount?.amount || '0');
+        const preAmount = new BN(preBalance?.uiTokenAmount?.amount || '0');
+        const amountReceived = postAmount.sub(preAmount);
+
+        console.log(`[AMOUNT-CALC] Calculated amount received: ${amountReceived.toString()}`);
+
+        // ✅ FALLBACK: If transaction metadata fails, try on-chain balance check
+        if (amountReceived.isZero()) {
+            console.warn(`[AMOUNT-CALC] Transaction metadata shows 0 amount, trying on-chain balance check...`);
+            try {
+                const currentBalance = await this._getOnChainTokenBalance(walletAddress, tokenMint);
+                if (currentBalance.gt(new BN(0))) {
+                    console.log(`[AMOUNT-CALC] On-chain balance shows ${currentBalance.toString()} tokens, using this as fallback`);
+                    return currentBalance;
+                }
+            } catch (balanceError) {
+                console.warn(`[AMOUNT-CALC] On-chain balance check failed: ${balanceError.message}`);
+            }
+        }
+
+        return amountReceived;
+    } catch (error) {
+        console.error(`[AMOUNT-CALC] Error calculating amount received: ${error.message}`);
+        throw error;
+    }
+}
+
+// ✅ NEW: Helper function to get on-chain token balance as fallback
+async _getOnChainTokenBalance(walletAddress, tokenMint) {
+    try {
+        const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+        const { PublicKey } = require('@solana/web3.js');
+        
+        const userPublicKey = new PublicKey(walletAddress);
+        const mintPublicKey = new PublicKey(tokenMint);
+        
+        // Get the associated token account address
+        const tokenAccountAddress = getAssociatedTokenAddressSync(mintPublicKey, userPublicKey);
+        
+        // Get the token account info
+        const tokenAccountInfo = await this.solanaManager.connection.getTokenAccountBalance(tokenAccountAddress);
+        
+        if (tokenAccountInfo.value) {
+            return new BN(tokenAccountInfo.value.amount);
+        }
+        
+        return new BN(0);
+    } catch (error) {
+        console.warn(`[ON-CHAIN-BALANCE] Failed to get balance for ${shortenAddress(tokenMint)}: ${error.message}`);
+        return new BN(0);
+    }
 }
 
 
@@ -1110,13 +1224,37 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
             amountToSwap = parseInt((solAmountToUse * config.LAMPORTS_PER_SOL_CONST).toString());
             tradeDetails.solSpent = solAmountToUse;
         } else {
+            // ✅ ENHANCED: Same improved sell validation for Jupiter API
             const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
+            
             if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) {
-                throw new Error(`Sell copy failed: User has no recorded position for this token.`);
+                console.warn(`[JUPITER-SELL] No recorded position found in database, trying on-chain balance check...`);
+                
+                // ✅ FALLBACK: Check on-chain balance if database position is missing
+                try {
+                    const onChainBalance = await this._getOnChainTokenBalance(keypair.publicKey.toBase58(), tradeDetails.inputMint);
+                    if (onChainBalance.gt(new BN(0))) {
+                        console.log(`[JUPITER-SELL] Found ${onChainBalance.toString()} tokens on-chain, using this amount`);
+                        amountToSwap = parseInt(onChainBalance.toString());
+                        tradeDetails.originalSolSpent = 0; // Unknown original amount
+                        tradeDetails.inputAmountRaw = onChainBalance.toString();
+                        
+                        // ✅ RECORD the position for future reference
+                        await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                        console.log(`[JUPITER-SELL] Recorded on-chain position in database for future reference`);
+                    } else {
+                        throw new Error(`Sell copy failed: User has no recorded position for this token and no tokens found on-chain.`);
+                    }
+                } catch (balanceError) {
+                    console.error(`[JUPITER-SELL] On-chain balance check failed: ${balanceError.message}`);
+                    throw new Error(`Sell copy failed: User has no recorded position for this token and unable to verify on-chain balance.`);
+                }
+            } else {
+                console.log(`[JUPITER-SELL] Using database position: ${sellDetails.amountToSellBN.toString()} tokens`);
+                amountToSwap = parseInt(sellDetails.amountToSellBN.toString());
+                tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
+                tradeDetails.inputAmountRaw = sellDetails.amountToSellBN.toString();
             }
-            amountToSwap = parseInt(sellDetails.amountToSellBN.toString());
-            tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
-            tradeDetails.inputAmountRaw = sellDetails.amountToSellBN.toString();
         }
 
         const serializedTxs = await this.apiManager.getSwapTransactionFromJupiter({
@@ -2289,7 +2427,7 @@ async checkPumpFunMigration(tokenMint) {
                                 keypair.publicKey
                             );
                             
-                            const tokenAccountInfo = await connection.getTokenAccountBalance(userTokenAccount);
+                            const tokenAccountInfo = await this.solanaManager.connection.getTokenAccountBalance(userTokenAccount);
                             const userTokenBalance = new BN(tokenAccountInfo.value.amount);
                             
                             console.log(`[SINGAPORE-SENDER] 🔍 User token balance after BUY: ${userTokenBalance.toString()} raw units`);
@@ -2297,15 +2435,14 @@ async checkPumpFunMigration(tokenMint) {
                             if (userTokenBalance.gt(new BN(0))) {
                                 console.log(`[SINGAPORE-SENDER] ✅ FALSE POSITIVE CHECK PASSED: User received ${userTokenBalance.toString()} tokens`);
                                 
-                                // Update user position in database
-                                await this.databaseManager.updateUserPosition(
+                                // ✅ FIX: Use enhanced recordBuyPosition with validation
+                                await this.databaseManager.recordBuyPosition(
                                     userChatId,
                                     tradeDetails.outputMint,
                                     userTokenBalance.toString(),
-                                    'buy',
-                                    result.signature
+                                    userSolAmount || 0 // Use user's SOL amount
                                 );
-                                console.log(`[SINGAPORE-SENDER] 💾 Updated user position in database`);
+                                console.log(`[SINGAPORE-SENDER] 💾 ✅ Position recorded: ${userTokenBalance.toString()} tokens for ${shortenAddress(tradeDetails.outputMint)}`);
                                 
                             } else {
                                 console.log(`[SINGAPORE-SENDER] ❌ FALSE POSITIVE DETECTED: Transaction reported success but user received 0 tokens!`);
