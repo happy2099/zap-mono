@@ -193,7 +193,8 @@ class SolanaManager {
            }
 
            const nonceAccount = NonceAccount.fromAccountData(accountInfo.data);
-           if (nonceAccount.state !== 1) { // 1 means initialized
+           // Fix: Check if nonce account is properly initialized (state should be an object with initialized flag)
+           if (!nonceAccount || !nonceAccount.nonce) {
                throw new Error(`Nonce account ${shortenAddress(nonceAccountPubkey.toBase58())} is not initialized.`);
            }
 

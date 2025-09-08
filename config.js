@@ -298,8 +298,19 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
     // JUPITER_V6_PROGRAM_ID: new PublicKey('JUP6LkbZbjS1jKKwapdHch4GTJsy9FpAEQ6LXuLgWuuU'), // TODO: Fix invalid program ID
     RAYDIUM_AMM_V4_PROGRAM_ID: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
     RAYDIUM_CLMM_PROGRAM_ID: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
+    
+    // --- PUMP.FUN CONSTANTS ---
+    PUMP_FUN_PROGRAM_ID: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
+    PUMP_FUN_PROGRAM_ID_VARIANT: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
     PUMP_FUN_GLOBAL: new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk'),
-    PUMP_FUN_FEE_RECIPIENT: new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1S77jyZ52gXSJGTk5M'),
+    PUMP_FUN_FEE_RECIPIENT: new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM'),
+    
+    // Pump.fun instruction discriminators
+    PUMP_FUN_BUY_DISCRIMINATOR: Buffer.from([0x66, 0x06, 0x3d, 0x12, 0x01, 0xda, 0xeb, 0xea]),
+    PUMP_FUN_SELL_DISCRIMINATOR: Buffer.from([0x33, 0xe6, 0x85, 0xa4, 0x01, 0x7f, 0x83, 0xad]),
+    
+    // Additional program IDs
+    RENT_PROGRAM_ID: SYSVAR_RENT_PUBKEY,
 
     // --- JANITOR CACHE CLEANER ---
     JANITOR_PUMP_MCAP_THRESHOLD: 1000,

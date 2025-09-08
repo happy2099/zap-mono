@@ -813,315 +813,103 @@ async function buildPumpFunSellInstructionManually({ user, mint, creator, tokenA
 }
 
 async function buildPumpFunInstruction(builderOptions) {
-    const { connection, userPublicKey, swapDetails, amountBN, slippageBps, apiManager, sdk, keypair } = builderOptions;
-
-    // --- Input Validation ---
-    if (!apiManager) throw new Error("Pump.fun builder requires an apiManager instance.");
-    if (!sdk) throw new Error("Pump.fun builder requires an sdk instance.");
-
-    const isBuy = swapDetails.tradeType === 'buy';
-    
-    // Enhanced debug logging for swapDetails
-    console.log(`[PUMP_BUILDER_BC-SDK] 🔍 SwapDetails debug:`, {
-        tradeType: swapDetails.tradeType,
-        inputMint: swapDetails.inputMint,
-        outputMint: swapDetails.outputMint,
-        hasInputMint: !!swapDetails.inputMint,
-        hasOutputMint: !!swapDetails.outputMint,
-        inputMintType: typeof swapDetails.inputMint,
-        outputMintType: typeof swapDetails.outputMint
-    });
-    
-    const tokenMint = isBuy ? swapDetails.outputMint : swapDetails.inputMint;
-    
-    // Enhanced validation with detailed error messages
-    if (!tokenMint) {
-        const missingField = isBuy ? 'outputMint' : 'inputMint';
-        const errorMsg = `Missing ${missingField} in swapDetails for ${isBuy ? 'buy' : 'sell'} trade. ` +
-                        `TradeType: ${swapDetails.tradeType}, ` +
-                        `InputMint: ${swapDetails.inputMint}, ` +
-                        `OutputMint: ${swapDetails.outputMint}, ` +
-                        `DexPlatform: ${swapDetails.dexPlatform}. ` +
-                        `Full SwapDetails: ${JSON.stringify(swapDetails, null, 2)}`;
-        throw new Error(errorMsg);
-    }
-    
-    if (typeof tokenMint !== 'string') {
-        throw new Error(`Invalid tokenMint type for Pump.fun: expected string, got ${typeof tokenMint}. ` +
-                       `Value: ${tokenMint}. SwapDetails: ${JSON.stringify(swapDetails, null, 2)}`);
-    }
-    
-    console.log(`[PUMP_BUILDER_BC-SDK] 🔍 TokenMint validation: ${tokenMint} (type: ${typeof tokenMint})`);
-    
-    let tokenMintPk;
-    try {
-        tokenMintPk = new PublicKey(tokenMint);
-    } catch (error) {
-        throw new Error(`Failed to create PublicKey from tokenMint "${tokenMint}": ${error.message}`);
-    }
-
-    console.log(`[PUMP_BUILDER_BC-SDK] Building ${isBuy ? 'BUY' : 'SELL'} for ${shortenAddress(tokenMint)}...`);
+    // This builder is for BONDING CURVE (BC) trades on Pump.fun
+    const { connection, keypair, swapDetails, amountBN, slippageBps } = builderOptions;
+    const userWalletPk = keypair.publicKey;
 
     try {
-        // --- Get Critical Coin Data (including creator) from API ---
-        let coinData, creatorPk;
-        
-        try {
-            coinData = await apiManager.getPumpFunCoinData(tokenMint);
+        const isBuy = swapDetails.tradeType === 'buy';
+        if (!isBuy) {
+            // =============================================================================
+            // HYBRID SELL APPROACH: Use SDK simulation + manual instruction building
+            // =============================================================================
+            console.log(`[PUMP_BUILDER_BC] 🔄 Engineering HYBRID SELL for ${shortenAddress(swapDetails.inputMint)}...`);
             
-            // Validate creator data before creating PublicKey
-            if (!coinData || !coinData.creator || typeof coinData.creator !== 'string') {
-                throw new Error(`Invalid creator data for Pump.fun token ${tokenMint}: ${JSON.stringify(coinData)}`);
-            }
+            const { sdk } = builderOptions;
+            const tokenMintPk = new PublicKey(swapDetails.inputMint);
+            const tokenAmountBN = amountBN;
             
-            creatorPk = new PublicKey(coinData.creator);
-            console.log(`[PUMP_BUILDER_BC-SDK] ✅ Got creator from API: ${shortenAddress(coinData.creator)}`);
+            // TACTIC 1: REAL-TIME RECONNAISSANCE for sell simulation
+            console.log(`[PUMP_BUILDER_BC] Querying live bonding curve for sell quote...`);
             
-        } catch (apiError) {
-            console.warn(`[PUMP_BUILDER_BC-SDK] ⚠️ API failed to get creator, trying transaction extraction: ${apiError.message}`);
+            const global = await sdk.fetchGlobal();
+            const { bondingCurveAccountInfo, bondingCurve } = await sdk.fetchSellState(tokenMintPk, userWalletPk);
             
-            // Fallback: Extract creator from original transaction
-            if (swapDetails.originalTransaction) {
-                const txExtraction = extractTransactionData(swapDetails.originalTransaction, '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P');
-                
-                if (txExtraction.success && txExtraction.data.targetInstruction) {
-                    const instruction = txExtraction.data.targetInstruction.instruction;
-                    const accountKeys = txExtraction.data.accountKeys;
-                    
-                    // Creator is typically at account index 9 in Pump.fun instructions
-                    if (instruction.accounts && instruction.accounts.length > 9) {
-                        const creatorIndex = instruction.accounts[9];
-                        if (accountKeys[creatorIndex]) {
-                            creatorPk = accountKeys[creatorIndex];
-                            console.log(`[PUMP_BUILDER_BC-SDK] ✅ Extracted creator from transaction: ${shortenAddress(creatorPk.toString())}`);
-                        }
-                    }
-                }
-            }
-            
-            if (!creatorPk) {
-                throw new Error(`Failed to get creator for Pump.fun token ${tokenMint} from both API and transaction data`);
-            }
-        }
-        
-        const feeRecipient = new PublicKey(config.PUMP_FUN_FEE_RECIPIENT);
-        
-        let instructions = [];
-        if (isBuy) {
-            // For a buy, amountBN is the amount of SOL to spend (in lamports)
-            const solIn = amountBN;
-            
-            // Check if user has an ATA for this token, create if not
-            const { getAssociatedTokenAddressSync, createAssociatedTokenAccountInstruction } = require('@solana/spl-token');
-            const userTokenAccount = getAssociatedTokenAddressSync(tokenMintPk, userPublicKey);
-            
-            try {
-                // Check if ATA exists
-                const accountInfo = await connection.getAccountInfo(userTokenAccount);
-                if (!accountInfo) {
-                    console.log(`[PUMP_BUILDER_BC-SDK] 🔧 Creating ATA for user ${userPublicKey.toString().substring(0, 8)}... for token ${tokenMintPk.toString().substring(0, 8)}...`);
-                    const createAtaInstruction = createAssociatedTokenAccountInstruction(
-                        userPublicKey, // payer
-                        userTokenAccount, // ata
-                        userPublicKey, // owner
-                        tokenMintPk, // mint
-                        TOKEN_PROGRAM_ID // Use standard token program for Pump.fun tokens
-                    );
-                    instructions.push(createAtaInstruction);
-                    console.log(`[PUMP_BUILDER_BC-SDK] ✅ ATA creation instruction added`);
-                } else {
-                    console.log(`[PUMP_BUILDER_BC-SDK] ✅ ATA already exists for user`);
-                }
-            } catch (error) {
-                console.log(`[PUMP_BUILDER_BC-SDK] ⚠️ Error checking ATA, proceeding with buy instruction: ${error.message}`);
-                // If we can't check the ATA, assume it needs to be created
-                console.log(`[PUMP_BUILDER_BC-SDK] 🔧 Creating ATA instruction as fallback`);
-                const createAtaInstruction = createAssociatedTokenAccountInstruction(
-                    userPublicKey, // payer
-                    userTokenAccount, // ata
-                    userPublicKey, // owner
-                    tokenMintPk, // mint
-                    TOKEN_PROGRAM_ID // Use standard token program for Pump.fun tokens
-                );
-                instructions.push(createAtaInstruction);
-            }
-            
-            // Use dedicated Pump.fun builder
-            console.log(`[PUMP_BUILDER_BC-SDK] 🔧 Using dedicated Pump.fun bonding curve builder`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 💰 SOL Amount: ${solIn.toString()} lamports (${solIn.toNumber() / 1e9} SOL)`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 🎯 Token Mint: ${tokenMintPk.toString()}`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 👤 User: ${userPublicKey.toString()}`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 🎨 Creator: ${creatorPk.toString()}`);
-            
-            // Check user's SOL balance before building instruction
-            try {
-                const userBalance = await connection.getBalance(userPublicKey);
-                console.log(`[PUMP_BUILDER_BC-SDK] 💳 User SOL balance: ${userBalance} lamports (${userBalance / 1e9} SOL)`);
-                if (userBalance < solIn.toNumber()) {
-                    throw new Error(`Insufficient SOL balance: ${userBalance} < ${solIn.toNumber()}`);
-                }
-            } catch (balanceError) {
-                console.error(`[PUMP_BUILDER_BC-SDK] ❌ Balance check failed: ${balanceError.message}`);
-                throw balanceError;
-            }
-            
-            // Try to use the original transaction structure if available
-            if (swapDetails.originalTransaction) {
-                console.log(`[PUMP_BUILDER_BC-SDK] 🔧 Attempting to use original transaction structure...`);
-                try {
-                    const originalTxData = extractTransactionData(swapDetails.originalTransaction, new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'));
-                    if (originalTxData.success && originalTxData.data.targetInstruction) {
-                        console.log(`[PUMP_BUILDER_BC-SDK] ✅ Found original Pump.fun instruction, implementing PERFECT CLONING...`);
-                        
-                        // PERFECT CLONING STRATEGY: Copy master instruction exactly, only swap user wallet and ATA
-                        const masterInstruction = originalTxData.data.targetInstruction.instruction;
-                        const masterTraderPubkey = new PublicKey('suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK'); // Master trader from logs
-                        
-                        console.log(`[PUMP_BUILDER_BC-SDK] 🎯 Master trader: ${masterTraderPubkey.toString().substring(0, 8)}...`);
-                        console.log(`[PUMP_BUILDER_BC-SDK] 🎯 Our user: ${userPublicKey.toString().substring(0, 8)}...`);
-                        
-                        // Step 1: Copy instruction data exactly (including correct discriminator, amounts, etc.)
-                        const clonedInstructionData = Buffer.from(masterInstruction.data);
-                        console.log(`[PUMP_BUILDER_BC-SDK] 📋 Cloned instruction data: ${clonedInstructionData.toString('hex')}`);
-                        
-                        // Step 2: Build the new keys array by perfect mapping
-                        const newKeys = [];
-                        for (let idx = 0; idx < masterInstruction.accounts.length; idx++) {
-                            const accountIndex = masterInstruction.accounts[idx];
-                            const masterAccount = originalTxData.data.accountKeys[accountIndex];
-                            
-                            // Copy the account structure from master
-                            let newAccount = {
-                                pubkey: masterAccount,
-                                isSigner: false,
-                                isWritable: true // Most accounts in Pump.fun are writable
-                            };
-                            
-                            // THE SWAP LOGIC: Only swap master trader's wallet and ATA
-                            if (masterAccount.equals(masterTraderPubkey)) {
-                                // This is the master trader's wallet - swap for our user's wallet
-                                console.log(`[PUMP_BUILDER_BC-SDK] 🔄 Swapping master trader wallet at index ${idx}`);
-                                newAccount.pubkey = userPublicKey;
-                                newAccount.isSigner = true; // Our user must be the signer
-                            } else {
-                                // Check if this is the master trader's token account for this token
-                                try {
-                                    const masterTokenAccount = getAssociatedTokenAddressSync(tokenMintPk, masterTraderPubkey);
-                                    if (masterAccount.equals(masterTokenAccount)) {
-                                        // This is the master trader's ATA - swap for our user's ATA
-                                        console.log(`[PUMP_BUILDER_BC-SDK] 🔄 Swapping master trader ATA at index ${idx}`);
-                                        newAccount.pubkey = getAssociatedTokenAddressSync(tokenMintPk, userPublicKey);
-                                    }
-                                } catch (error) {
-                                    // If we can't determine if it's an ATA, just keep the original account
-                                    console.log(`[PUMP_BUILDER_BC-SDK] 📋 Keeping original account at index ${idx}: ${masterAccount.toString().substring(0, 8)}...`);
-                                }
-                            }
-                            
-                            newKeys.push(newAccount);
-                        }
-                        
-                        // Step 3: Create the perfectly cloned instruction
-                        const clonedInstruction = new TransactionInstruction({
-                            programId: masterInstruction.programId, // Copy exactly
-                            data: clonedInstructionData, // Copy exactly (no SOL amount modification needed!)
-                            keys: newKeys // Perfect mapping with only user wallet and ATA swapped
-                        });
-                        
-                        instructions.push(clonedInstruction);
-                        console.log(`[PUMP_BUILDER_BC-SDK] ✅ PERFECT CLONING COMPLETE: ${clonedInstruction.keys.length} accounts, all PDAs preserved from master transaction`);
-                    } else {
-                        throw new Error("Could not extract original instruction");
-                    }
-                } catch (originalError) {
-                    console.log(`[PUMP_BUILDER_BC-SDK] ⚠️ Failed to use original structure, falling back to manual: ${originalError.message}`);
-                    
-                    const buyInstruction = await buildPumpFunBuyInstructionManually({
-                        user: userPublicKey,
-                        mint: tokenMintPk,
-                        creator: creatorPk,
-                        solAmount: solIn,
-                        feeRecipient: feeRecipient,
-                        connection: connection
-                    });
-                    instructions.push(buyInstruction);
-                }
-            } else {
-                const buyInstruction = await buildPumpFunBuyInstructionManually({
-                    user: userPublicKey,
-                    mint: tokenMintPk,
-                    creator: creatorPk,
-                    solAmount: solIn,
-                    feeRecipient: feeRecipient,
-                    connection: connection
-                });
-                instructions.push(buyInstruction);
-            }
-
-        } else { // SELL LOGIC
-            // For a sell, amountBN is the raw amount of tokens to sell
-            const tokenAmountIn = amountBN;
-
-            // We calculate the minimum SOL output we are willing to accept
-            const traderSolOutput = new BN(swapDetails.outputAmountLamports);
-            const slippage = new BN(slippageBps);
-            const BPS_DIVISOR = new BN(10000); // 100% in basis points
-            const minSolOutput = traderSolOutput.mul(BPS_DIVISOR.sub(slippage)).div(BPS_DIVISOR);
-            
-            console.log(`[PUMP_BUILDER_BC-SDK] Trader received ${traderSolOutput.toString()} lamports. Min acceptable with ${slippageBps} bps slippage: ${minSolOutput.toString()}`);
-            
-            // Use dedicated Pump.fun sell builder
-            console.log(`[PUMP_BUILDER_BC-SDK] 🔧 Using dedicated Pump.fun bonding curve sell builder`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 🪙 Token Amount: ${tokenAmountIn.toString()} raw units`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 💰 Min SOL Output: ${minSolOutput.toString()} lamports`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 🎯 Token Mint: ${tokenMintPk.toString()}`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 👤 User: ${userPublicKey.toString()}`);
-            console.log(`[PUMP_BUILDER_BC-SDK] 🎨 Creator: ${creatorPk.toString()}`);
-            
-            // Check user's token balance before building instruction
-            try {
-                const userTokenAccount = getAssociatedTokenAddressSync(tokenMintPk, userPublicKey);
-                const tokenAccountInfo = await connection.getTokenAccountBalance(userTokenAccount);
-                const userTokenBalance = new BN(tokenAccountInfo.value.amount);
-                console.log(`[PUMP_BUILDER_BC-SDK] 💳 User token balance: ${userTokenBalance.toString()} raw units`);
-                if (userTokenBalance.lt(tokenAmountIn)) {
-                    throw new Error(`Insufficient token balance: ${userTokenBalance.toString()} < ${tokenAmountIn.toString()}`);
-                }
-            } catch (balanceError) {
-                console.error(`[PUMP_BUILDER_BC-SDK] ❌ Token balance check failed: ${balanceError.message}`);
-                throw balanceError;
-            }
-            
-            const sellInstruction = await buildPumpFunSellInstructionManually({
-                user: userPublicKey,
+            const sellInstructions = await sdk.sellInstructions({
+                global,
+                bondingCurveAccountInfo,
+                bondingCurve,
                 mint: tokenMintPk,
-                creator: creatorPk,
-                tokenAmount: tokenAmountIn,
-                minSolOutput: minSolOutput,
-                feeRecipient: feeRecipient,
-                connection: connection
+                user: userWalletPk,
+                amount: tokenAmountBN,
+                slippage: Math.floor((slippageBps || 4000) / 100), // Convert BPS to percentage
             });
-            instructions.push(sellInstruction);
+
+            if (!sellInstructions || sellInstructions.length === 0) {
+                throw new Error('SDK sell reconnaissance failed: Could not generate sell instructions.');
+            }
+
+            console.log(`[PUMP_BUILDER_BC] ✅ SDK SELL reconnaissance complete`);
+            console.log(`[PUMP_BUILDER_BC]   🪙 Token amount: ${tokenAmountBN.toString()}`);
+            console.log(`[PUMP_BUILDER_BC]   📋 Instructions generated: ${sellInstructions.length}`);
+
+            console.log(`[PUMP_BUILDER_BC] ✅ Returning SDK-generated SELL instructions. Ready for pre-flight simulation.`);
+            return sellInstructions;
         }
 
-        if (instructions.length === 0) {
-            throw new Error('Pump.fun SDK failed to return any valid instructions.');
-        }
+        const tokenMintPk = new PublicKey(swapDetails.outputMint);
+        const solInLamports = amountBN;
+        console.log(`[PUMP_BUILDER_BC] Engineering HYBRID BUY for ${shortenAddress(tokenMintPk.toBase58())}...`);
 
-        // Debug: Log instruction order
-        console.log(`[PUMP_BUILDER_BC-SDK] 📋 Final instruction order:`);
-        instructions.forEach((ix, index) => {
-            console.log(`[PUMP_BUILDER_BC-SDK]   ${index}: ${ix.programId.toString().substring(0, 8)}... (${ix.keys.length} accounts)`);
+        // =============================================================================
+        // TACTIC 1: REAL-TIME RECONNAISSANCE to solve Error 6002 (TooMuchSolRequired)
+        // =============================================================================
+        const { sdk } = builderOptions;
+        console.log(`[PUMP_BUILDER_BC] Querying live bonding curve for quote...`);
+        
+        // This SDK call acts as our targeting computer. It returns the precise values needed.
+        const global = await sdk.fetchGlobal();
+        const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = 
+            await sdk.fetchBuyState(tokenMintPk, userWalletPk);
+        
+        // Calculate token amount from SOL amount using the helper function
+        const { getBuyTokenAmountFromSolAmount } = require('@pump-fun/pump-sdk');
+        const tokenAmount = getBuyTokenAmountFromSolAmount(global, bondingCurve, new BN(solInLamports));
+        
+        const buyInstructions = await sdk.buyInstructions({
+            global,
+            bondingCurveAccountInfo,
+            bondingCurve,
+            associatedUserAccountInfo,
+            mint: tokenMintPk,
+            user: userWalletPk,
+            solAmount: new BN(solInLamports),
+            amount: tokenAmount,
+            slippage: Math.floor((slippageBps || 2500) / 100), // Convert BPS to percentage
         });
 
-        // Return the instructions array (may include ATA creation + buy/sell instruction)
-        return instructions;
+        if (!buyInstructions || buyInstructions.length === 0) {
+            throw new Error('SDK reconnaissance failed: Could not generate buy instructions.');
+        }
 
-    } catch (error) {
-        console.error(`[PUMP_BUILDER_BC-SDK] ❌ Failed to build Pump.fun swap with SDK: ${error.message}`);
-        throw error;
+        console.log(`[PUMP_BUILDER_BC] ✅ SDK Live Reconnaissance Complete:`);
+        console.log(`[PUMP_BUILDER_BC]   📊 SOL amount: ${solInLamports / 1e9} SOL (${solInLamports} lamports)`);
+        console.log(`[PUMP_BUILDER_BC]   🪙 Expected tokens: ${tokenAmount.toNumber()}`);
+        console.log(`[PUMP_BUILDER_BC]   📋 Instructions generated: ${buyInstructions.length}`);
+
+        // =============================================================================
+        // RETURN SDK-GENERATED INSTRUCTIONS - They are already perfect!
+        // =============================================================================
+        
+        console.log(`[PUMP_BUILDER_BC] ✅ Returning SDK-generated instructions. Ready for pre-flight simulation.`);
+        return buyInstructions;
+
+    } catch (err) {
+        console.error(`[PUMP_BUILDER_BC] ❌ Engineering process failed:`, err.message);
+        throw err; // Pass the error up to the trading engine.
     }
 }
+
 
 // Helper function to get creator from bonding curve
 async function getCreatorFromBondingCurve(connection, mint) {

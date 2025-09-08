@@ -2146,14 +2146,14 @@ async checkPumpFunMigration(tokenMint) {
                 const allInstructions = [...computeInstructions, ...instructions];
                 console.log(`[SINGAPORE-SENDER] 🔧 Total instructions for simulation: ${allInstructions.length} (${computeInstructions.length} compute + ${instructions.length} trade)`);
                 
-                // Get recent blockhash or use nonce
-                let recentBlockhash;
+                // CRITICAL FIX: Always use recent blockhash for simulation, nonce for actual submission
+                const { blockhash } = await this.solanaManager.connection.getLatestBlockhash('confirmed');
+                let recentBlockhash = blockhash;
+                
                 if (nonceInfo && nonceInfo.nonce) {
-                    recentBlockhash = nonceInfo.nonce;
-                    console.log(`[SINGAPORE-SENDER] 🔐 Using nonce as blockhash: ${shortenAddress(recentBlockhash)}`);
+                    console.log(`[SINGAPORE-SENDER] 🔐 Using recent blockhash for simulation: ${shortenAddress(recentBlockhash)}`);
+                    console.log(`[SINGAPORE-SENDER] 🔐 Nonce available for actual submission: ${shortenAddress(nonceInfo.nonce)}`);
                 } else {
-                    const { blockhash } = await this.solanaManager.connection.getLatestBlockhash('confirmed');
-                    recentBlockhash = blockhash;
                     console.log(`[SINGAPORE-SENDER] ⏰ Using fresh blockhash: ${shortenAddress(recentBlockhash)}`);
                 }
                 

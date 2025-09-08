@@ -74,6 +74,89 @@ class UniversalCloner {
     }
 
     /**
+     * 🧠 RECONSTRUCTION OVERRIDE: Build fresh Pump.fun SELL instruction data with user's parameters
+     * Maximum Control Strategy - Complete control over economic parameters for sell transactions
+     */
+    _reconstructPumpFunSellData(builderOptions) {
+        console.log(`[FORGER] 🧠 RECONSTRUCTION: Building fresh Pump.fun 'sell' instruction data`);
+        
+        const freshInstructionData = Buffer.alloc(24);
+        const BN = require('bn.js');
+
+        // 1. Write the CORRECT, OFFICIAL 'sell' discriminator
+        config.PUMP_FUN_SELL_DISCRIMINATOR.copy(freshInstructionData, 0);
+
+        // 2. Write the token amount to sell (user's token amount)
+        const userTokenAmount = new BN(builderOptions.userTokenAmount.toString());
+        freshInstructionData.writeBigUInt64LE(BigInt(userTokenAmount.toString()), 8);
+
+        // 3. Write the minimum SOL output with slippage protection
+        const expectedSolOutput = new BN(builderOptions.expectedSolOutput.toString());
+        const slippageBps = new BN(builderOptions.slippageBps?.toString() || '5000'); // Default 50%
+        const BPS_DIVISOR = new BN(10000);
+        
+        // Calculate minimum SOL output with slippage: expectedOutput * (1 - slippage)
+        const minSolOutput = expectedSolOutput.mul(BPS_DIVISOR.sub(slippageBps)).div(BPS_DIVISOR);
+        
+        freshInstructionData.writeBigUInt64LE(BigInt(minSolOutput.toString()), 16);
+        
+        console.log(`[FORGER] ✅ SELL RECONSTRUCTION COMPLETE:`);
+        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_SELL_DISCRIMINATOR.toString('hex')}`);
+        console.log(`[FORGER]   - Token Amount: ${userTokenAmount.toString()} tokens`);
+        console.log(`[FORGER]   - Expected SOL Output: ${expectedSolOutput.toString()} lamports`);
+        console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
+        console.log(`[FORGER]   - Min SOL Output: ${minSolOutput.toString()} lamports`);
+        
+        return freshInstructionData;
+    }
+
+    /**
+     * 🧠 TRANSACTION-DRIVEN RECONSTRUCTION: Use master's discriminator and structure, only modify economic parameters
+     * Maximum Accuracy Strategy - Preserve everything from master except user-specific amounts
+     */
+    _reconstructPumpFunFromMasterTransaction(originalData, builderOptions) {
+        console.log(`[FORGER] 🔍 TRANSACTION-DRIVEN: Analyzing master's instruction data`);
+        console.log(`[FORGER] 🔍 Original master data: ${originalData.toString('hex')}`);
+        
+        const BN = require('bn.js');
+
+        // RULE: Transaction is source of truth - preserve master's discriminator!
+        const masterDiscriminator = originalData.subarray(0, 8);
+        console.log(`[FORGER] ✅ Preserving MASTER'S discriminator: ${masterDiscriminator.toString('hex')}`);
+
+        // RULE: Only modify economic parameters with user's settings
+        const userSolAmount = new BN(builderOptions.userSolAmount.toString());
+        const slippageBps = new BN(builderOptions.slippageBps?.toString() || '5000');
+        const BPS_DIVISOR = new BN(10000);
+        
+        // Calculate user's max SOL cost with slippage
+        const ourMaxSolCost = userSolAmount.mul(BPS_DIVISOR.add(slippageBps)).div(BPS_DIVISOR);
+
+        // Build new instruction data preserving master's structure
+        const freshInstructionData = Buffer.alloc(24); // Pump.fun instruction is 24 bytes
+        
+        // 1. Copy master's discriminator exactly (bytes 0-7)
+        masterDiscriminator.copy(freshInstructionData, 0);
+        
+        // 2. Set minimal token output for maximum slippage tolerance (bytes 8-15)
+        const minTokenOut = BigInt(1);
+        freshInstructionData.writeBigUInt64LE(minTokenOut, 8);
+        
+        // 3. Set user's max SOL cost (bytes 16-23)
+        freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
+
+        console.log(`[FORGER] ✅ TRANSACTION-DRIVEN RECONSTRUCTION COMPLETE:`);
+        console.log(`[FORGER]   - Master's discriminator preserved: ${masterDiscriminator.toString('hex')}`);
+        console.log(`[FORGER]   - User SOL Amount: ${userSolAmount.toString()} lamports`);
+        console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
+        console.log(`[FORGER]   - Max SOL Cost: ${ourMaxSolCost.toString()} lamports`);
+        console.log(`[FORGER]   - Min Token Out: ${minTokenOut.toString()} tokens (maximum slippage)`);
+        console.log(`[FORGER]   - Final Data: ${freshInstructionData.toString('hex')}`);
+        
+        return freshInstructionData;
+    }
+
+    /**
      * 🧠 RECONSTRUCTION OVERRIDE: Build fresh Raydium Launchpad instruction data with user's parameters
      * Maximum Control Strategy - Complete control over economic parameters for BuyExactIn
      */
@@ -137,6 +220,57 @@ class UniversalCloner {
     }
 
     /**
+     * 🔄 PHOTON ROUTER CPI EXTRACTION: Extract inner Pump.fun instruction from Photon Router
+     * This converts complex router calls into direct Pump.fun calls for successful cloning
+     */
+    async _extractAndClonePumpFunFromPhoton(photonInstruction, builderOptions) {
+        try {
+            console.log(`[FORGER-PHOTON] 🔄 Starting CPI extraction from Photon Router...`);
+            
+            // Create a direct Pump.fun instruction using our platformBuilders
+            const { userPublicKey, outputMint, inputMint, tradeType, userSolAmount, slippageBps } = builderOptions;
+            
+            console.log(`[FORGER-PHOTON] 🎯 Reconstructing as direct Pump.fun ${tradeType.toUpperCase()} instruction`);
+            console.log(`[FORGER-PHOTON] 💰 Amount: ${userSolAmount} lamports`);
+            console.log(`[FORGER-PHOTON] 📊 Slippage: ${slippageBps} BPS`);
+            console.log(`[FORGER-PHOTON] 🪙 Token: ${outputMint || inputMint}`);
+            
+            // Import platformBuilders dynamically to avoid circular dependency
+            const { buildPumpFunInstruction } = require('./platformBuilders');
+            const { PumpSdk } = require('@pump-fun/pump-sdk');
+            
+            // Build the direct Pump.fun instruction using proper builderOptions format
+            const pumpBuilderOptions = {
+                connection: this.connection,
+                keypair: { publicKey: userPublicKey }, // Mock keypair structure
+                swapDetails: {
+                    tradeType: tradeType,
+                    inputMint: tradeType === 'sell' ? (outputMint || inputMint) : 'So11111111111111111111111111111111111111112',
+                    outputMint: tradeType === 'buy' ? (outputMint || inputMint) : 'So11111111111111111111111111111111111111112'
+                },
+                amountBN: new (require('bn.js'))(userSolAmount),
+                slippageBps: slippageBps,
+                sdk: new PumpSdk(this.connection) // Add SDK instance
+            };
+            
+            const directPumpFunInstruction = await buildPumpFunInstruction(pumpBuilderOptions);
+            
+            console.log(`[FORGER-PHOTON] ✅ Successfully extracted and rebuilt as direct Pump.fun instruction`);
+            console.log(`[FORGER-PHOTON] 📊 Direct instruction: Program ${shortenAddress(directPumpFunInstruction.programId.toBase58())}, Accounts: ${directPumpFunInstruction.keys.length}`);
+            
+            // Return the full instruction object (programId, keys, data)
+            return directPumpFunInstruction;
+            
+        } catch (error) {
+            console.error(`[FORGER-PHOTON] ❌ CPI extraction failed:`, error.message);
+            console.log(`[FORGER-PHOTON] 🔄 Falling back to conservative cloning...`);
+            
+            // Fall back to original instruction (this will likely fail, but it's a safety net)
+            throw error; // Re-throw to let the calling function handle the fallback
+        }
+    }
+
+    /**
      * 🧠 SMART OVERRIDE DISPATCHER: The pinnacle of the Smart Cloner architecture
      * Hybrid strategy: Reconstruction for high-frequency platforms, Surgical for others
      */
@@ -148,10 +282,31 @@ class UniversalCloner {
 
         // --- THE STRATEGY DISPATCHER ---
 
-        // 🎯 CASE 1: Pump.fun Buy -> TOTAL RECONSTRUCTION (Maximum Control)
-        if (programIdStr === config.PUMP_FUN_PROGRAM_ID && builderOptions.tradeType === 'buy') {
-            console.log(`[FORGER] 🧠 RECONSTRUCTION OVERRIDE: Pump.fun detected - building fresh instruction data`);
-            finalInstructionData = this._reconstructPumpFunBuyData(builderOptions);
+        // 🔄 CASE 0: Photon Router -> EXTRACT INNER PUMP.FUN INSTRUCTION (CPI Extraction Override)
+        if (programIdStr === 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW') {
+            console.log(`[FORGER] 🔄 PHOTON ROUTER DETECTED: Extracting inner Pump.fun instruction for direct cloning`);
+            console.log(`[FORGER] 🎯 CPI EXTRACTION OVERRIDE: Converting router call to direct Pump.fun call`);
+            
+            // Extract the inner Pump.fun instruction and reconstruct as direct call
+            const directInstruction = await this._extractAndClonePumpFunFromPhoton(clonedInstruction, builderOptions);
+            
+            // Update the cloned instruction to use direct Pump.fun program and accounts
+            clonedInstruction.programId = directInstruction.programId;
+            clonedInstruction.keys = directInstruction.keys;
+            
+            console.log(`[FORGER] ✅ Photon Router converted to direct Pump.fun instruction`);
+            console.log(`[FORGER] 📊 New program: ${shortenAddress(directInstruction.programId.toBase58())}`);
+            console.log(`[FORGER] 📊 New accounts: ${directInstruction.keys.length}`);
+            
+            return directInstruction.data;
+        }
+
+        // 🎯 CASE 1: Pump.fun Buy -> TRANSACTION-DRIVEN RECONSTRUCTION (Maximum Accuracy)
+        if ((programIdStr === config.PUMP_FUN_PROGRAM_ID.toBase58() || 
+             programIdStr === config.PUMP_FUN_PROGRAM_ID_VARIANT.toBase58()) && 
+            builderOptions.tradeType === 'buy') {
+            console.log(`[FORGER] 🧠 TRANSACTION-DRIVEN RECONSTRUCTION: Pump.fun detected - using MASTER'S discriminator and structure`);
+            finalInstructionData = this._reconstructPumpFunFromMasterTransaction(finalInstructionData, builderOptions);
         }
 
         // 🎯 CASE 2: Raydium Launchpad Buy -> TOTAL RECONSTRUCTION (Maximum Control)
@@ -210,54 +365,11 @@ class UniversalCloner {
                 console.error(`[FORGER] ❌ Pump.fun PDA derivation failed:`, e.message);
             }
             
-            // --- PUMP.FUN SURGICAL DATA MODIFICATION: Preserve structure, modify user-specific fields ---
-            // Instead of complete reconstruction, surgically modify only the amount fields
-            if (builderOptions.tradeType === 'buy') {
-                console.log(`[FORGER] 🧠 SURGICAL MODIFICATION: Preserving original structure, modifying user-specific amounts...`);
-                
-                try {
-                    // HYBRID APPROACH: Use original instruction data but modify user-specific fields
-                    const originalData = clonedInstruction.data;
-                    console.log(`[FORGER] 🔍 Original instruction data: ${originalData.toString('hex')}`);
-                    
-                    // Verify the original data has the expected structure (24 bytes for Pump.fun)
-                    if (originalData.length !== 24) {
-                        console.warn(`[FORGER] ⚠️ Unexpected data length: ${originalData.length} bytes. Expected 24 bytes.`);
-                        return clonedInstruction; // Return without modification
-                    }
-                    
-                    // Create a copy of the original data to modify
-                    const modifiedData = Buffer.from(originalData);
-                    
-                    // Calculate user's max SOL cost with slippage
-                    const BN = require('bn.js');
-                    const userSolAmount = builderOptions.userSolAmount || 1000000; // Default 0.001 SOL
-                    const slippageBps = builderOptions.slippageBps || 5000; // 50% slippage for safety
-                    console.log(`[FORGER] 🔍 DEBUG: userSolAmount = ${userSolAmount}, slippageBps = ${slippageBps}`);
-                    const userSolLamports = new BN(userSolAmount.toString());
-                    const slippage = new BN(slippageBps);
-                    const BPS_DIVISOR = new BN(10000);
-                    const ourMaxSolCost = userSolLamports.mul(BPS_DIVISOR.add(slippage)).div(BPS_DIVISOR);
-                    
-                    // SURGICAL MODIFICATION: Only modify the max_sol_cost field (bytes 16-23)
-                    // Keep the original discriminator and token_amount_out fields intact
-                    modifiedData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
-                    
-                    // Replace the instruction data with our surgically modified version
-                    clonedInstruction.data = modifiedData;
-                    
-                    console.log(`[FORGER] ✅ SURGICAL MODIFICATION COMPLETE:`);
-                    console.log(`[FORGER]   - Original discriminator preserved: ${modifiedData.subarray(0, 8).toString('hex')}`);
-                    console.log(`[FORGER]   - Original token_amount_out preserved: ${modifiedData.readBigUInt64LE(8)}`);
-                    console.log(`[FORGER]   - Modified max SOL cost: ${ourMaxSolCost.toString()} lamports`);
-                    console.log(`[FORGER]   - Original structure preserved, only amount field modified`);
-                    console.log(`[FORGER] 🔍 VERIFICATION: Final instruction data: ${clonedInstruction.data.toString('hex')}`);
-                    console.log(`[FORGER] 🔍 DOUBLE-CHECK: Discriminator in final data: ${clonedInstruction.data.subarray(0, 8).toString('hex')}`);
-                    
-                } catch (e) {
-                    console.error(`[FORGER] ❌ Pump.fun reconstruction failed:`, e.message);
-                }
-            }
+            // NOTE: Fee recipient and other read-only account fixes are now handled 
+            // by the Quality Control Forging system above - no redundant fixes needed
+            
+            // NOTE: Data modification is now handled by the Smart Override Dispatcher above
+            // This ensures clean separation between structural fixes (PDAs) and data fixes (economic parameters)
         }
         
         // --- OVERRIDE RULE #2: Raydium AMM V4 Token Program Fix ---
@@ -370,30 +482,50 @@ class UniversalCloner {
             // STAGE 2: Generate the forging map
             const forgingMap = this._createForgingMap(builderOptions);
 
-            // STAGE 3: Forge using blueprint and map
-            console.log(`[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint...`);
+            // =======================================================
+            // === STAGE 3.5: QUALITY CONTROL FORGING ================
+            // =======================================================
+            console.log(`[BLUEPRINT-FORGER] 🔨 Forging instruction using blueprint with Quality Control...`);
             
-            const clonedKeys = cloningTarget.accounts.map((blueprintAccount, index) => {
-                const originalPubkey = blueprintAccount.pubkey;
+            // This is the known ruleset for critical, non-writable accounts on Pump.fun
+            const READ_ONLY_RULES = new Set([
+                '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf', // PUMP_FUN_GLOBAL
+                'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // TOKEN_PROGRAM
+                'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // Event Authority PDA
+                '8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt'  // Fee Config PDA
+                // NOTE: Removed fee_recipient - Pump.fun program REQUIRES it to be writable
+            ]);
+
+            const clonedKeys = cloningTarget.accounts.map((blueprintAccount) => {
+                const originalPubkeyStr = blueprintAccount.pubkey;
                 
-                // Look up the original account in our map. If it exists, use the new value.
-                // Otherwise, use the original value (perfect preservation).
-                const finalPubkeyStr = forgingMap.get(originalPubkey) || originalPubkey;
+                // Get the final pubkey from our forging map (swaps trader wallet/ATA for ours)
+                const finalPubkeyStr = forgingMap.get(originalPubkeyStr) || originalPubkeyStr;
                 const finalPubkey = new PublicKey(finalPubkeyStr);
                 
-                // Revised Signer Logic based on blueprint
-                let finalIsSigner = false;
-                if (finalPubkey.equals(userPublicKey)) {
-                    finalIsSigner = true; // Our user is always a signer
-                } else if (blueprintAccount.isSigner) {
-                    // Preserve the signer flag for PDAs
-                    finalIsSigner = true; 
+                // --- Quality Control Logic ---
+                let finalIsWritable = blueprintAccount.isWritable;
+                
+                // RULE #1: ENFORCE READ-ONLY. If this account is in our known read-only list, ALWAYS set isWritable to false.
+                if (READ_ONLY_RULES.has(finalPubkeyStr)) {
+                    if (finalIsWritable) {
+                        console.log(`[FORGER-QC] 🔥 OVERRIDE: Forcing account ${shortenAddress(finalPubkeyStr)} to be READ-ONLY.`);
+                        finalIsWritable = false;
+                    }
                 }
-
+                
+                // RULE #2: OUR WALLET MUST BE WRITABLE.
+                if (finalPubkey.equals(userPublicKey)) {
+                     if (!finalIsWritable) {
+                        console.log(`[FORGER-QC] 🔥 OVERRIDE: Forcing USER WALLET ${shortenAddress(finalPubkeyStr)} to be WRITABLE.`);
+                        finalIsWritable = true;
+                     }
+                }
+                
                 return {
                     pubkey: finalPubkey,
-                    isSigner: finalIsSigner,
-                    isWritable: blueprintAccount.isWritable,
+                    isSigner: finalPubkey.equals(userPublicKey), // Only our user is the signer.
+                    isWritable: finalIsWritable,
                 };
             });
 
@@ -803,9 +935,11 @@ class UniversalCloner {
                 
                 const wsolATAInfo = await this.connection.getAccountInfo(userWSOLATA);
                 
+                // CRITICAL FIX: Always ensure wSOL ATA is funded for AMM trades!
+                // AMMs require wSOL accounts to have sufficient balance, even if they exist
+                
                 if (!wsolATAInfo) {
-                    console.log(`[FORGER-PREQ] ⚠️ User is missing a Wrapped SOL account. This is required for AMM trades.`);
-                    console.log(`[FORGER-PREQ] ✅ Adding wSOL account creation and funding instructions...`);
+                    console.log(`[FORGER-PREQ] ⚠️ User is missing a Wrapped SOL account. Creating and funding it...`);
                     
                     // 1. Create the wSOL ATA
                     const createWSOLATAInstruction = createAssociatedTokenAccountInstruction(
@@ -818,35 +952,38 @@ class UniversalCloner {
                     
                     ataInstructions.push(createWSOLATAInstruction);
                     console.log(`[FORGER-PREQ] ✅ wSOL ATA creation instruction added`);
-                    
-                    // 2. Transfer SOL to the wSOL ATA to fund it
-                    // 🚀 CRITICAL FIX: Use the user's actual configured trade amount, not hardcoded 0.1 SOL
-                    const { userSolAmount } = builderOptions;
-                    
-                    if (!userSolAmount || userSolAmount.toString() === '0') {
-                        throw new Error("[FORGER-PREQ] userSolAmount is missing or zero, cannot fund wSOL account.");
-                    }
-                    
-                    // Convert BN to number for the transfer instruction
-                    const solAmountToWrap = typeof userSolAmount === 'object' ? parseInt(userSolAmount.toString()) : userSolAmount;
-                    
-                    const transferSOLInstruction = SystemProgram.transfer({
-                        fromPubkey: userPublicKey,
-                        toPubkey: userWSOLATA,
-                        lamports: solAmountToWrap // 🎯 USE THE CORRECT USER AMOUNT
-                    });
-                    
-                    ataInstructions.push(transferSOLInstruction);
-                    console.log(`[FORGER-PREQ] ✅ SOL transfer instruction added (${solAmountToWrap} lamports) - USER'S CONFIGURED AMOUNT`);
-                    
-                    // 3. Sync native to convert SOL to wSOL
-                    const syncNativeInstruction = createSyncNativeInstruction(userWSOLATA);
-                    ataInstructions.push(syncNativeInstruction);
-                    console.log(`[FORGER-PREQ] ✅ Sync native instruction added to convert SOL to wSOL`);
-                    
                 } else {
-                    console.log(`[FORGER-PREQ] ✅ User already has wSOL ATA - no prerequisite needed`);
+                    console.log(`[FORGER-PREQ] ✅ User has wSOL ATA - will fund it for AMM trade`);
                 }
+                
+                // ALWAYS fund the wSOL ATA for AMM trades (regardless of existence)
+                console.log(`[FORGER-PREQ] 💰 Funding wSOL ATA for AMM trade with user's configured amount...`);
+                
+                // 2. Transfer SOL to the wSOL ATA to fund it
+                const { userSolAmount } = builderOptions;
+                
+                if (!userSolAmount || userSolAmount.toString() === '0') {
+                    throw new Error("[FORGER-PREQ] userSolAmount is missing or zero, cannot fund wSOL account.");
+                }
+                
+                // Convert BN to number for the transfer instruction
+                const solAmountToWrap = typeof userSolAmount === 'object' ? parseInt(userSolAmount.toString()) : userSolAmount;
+                
+                const transferSOLInstruction = SystemProgram.transfer({
+                    fromPubkey: userPublicKey,
+                    toPubkey: userWSOLATA,
+                    lamports: solAmountToWrap // 🎯 USE THE CORRECT USER AMOUNT
+                });
+                
+                ataInstructions.push(transferSOLInstruction);
+                console.log(`[FORGER-PREQ] ✅ SOL transfer instruction added (${solAmountToWrap} lamports) - USER'S CONFIGURED AMOUNT`);
+                
+                // 3. Sync native to convert SOL to wSOL
+                const syncNativeInstruction = createSyncNativeInstruction(userWSOLATA);
+                ataInstructions.push(syncNativeInstruction);
+                console.log(`[FORGER-PREQ] ✅ Sync native instruction added to convert SOL to wSOL`);
+                console.log(`[FORGER-PREQ] 🎯 AMM wSOL prerequisite completed - account funded and ready`);
+                
                 
             } catch (error) {
                 console.error(`[FORGER-PREQ] ❌ wSOL prerequisite check failed:`, error.message);
