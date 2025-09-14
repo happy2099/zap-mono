@@ -11,8 +11,9 @@ const bs58 = require('bs58');
 const config = require('./config.js');
 
 class UniversalCloner {
-    constructor(connection) {
+    constructor(connection, apiManager = null) {
         this.connection = connection;
+        this.apiManager = apiManager;
     }
 
     /**
@@ -250,7 +251,8 @@ class UniversalCloner {
                 },
                 amountBN: new (require('bn.js'))(userSolAmount),
                 slippageBps: slippageBps,
-                sdk: new PumpSdk(this.connection) // Add SDK instance
+                sdk: new PumpSdk(this.connection), // Add SDK instance
+                apiManager: this.apiManager // Pass apiManager for Jupiter quotes
             };
             
             const directPumpFunInstruction = await buildPumpFunInstruction(pumpBuilderOptions);
@@ -491,9 +493,16 @@ class UniversalCloner {
             const READ_ONLY_RULES = new Set([
                 '4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4Jjaxnjf', // PUMP_FUN_GLOBAL
                 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // TOKEN_PROGRAM
-                'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1', // Event Authority PDA
-                '8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt'  // Fee Config PDA
-                // NOTE: Removed fee_recipient - Pump.fun program REQUIRES it to be writable
+                'Ce6TQqeHC9p8KetsN6JsjHK7UTZk7nasjjnr7XxXp9F1'  // Event Authority PDA
+                // NOTE: Fee Config PDA and fee_recipient are NOT in READ_ONLY_RULES - they MUST be writable
+            ]);
+
+            // This is the known ruleset for accounts that MUST be writable on Pump.fun
+            const MUST_BE_WRITABLE_RULES = new Set([
+                'CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', // PUMP_FUN_FEE_RECIPIENT
+                '8Wf5TiAheLUqBrKXeYg2JtAFFMWtKdG2BSFgqUcPVwTt', // Fee Config PDA - MUST be writable
+                'Hq2wp8uJ9jCPsYgNHex8RtqdvMPfVGoYwjvF1ATiwn2Y', // Global Volume Accumulator
+                'GMQhT8QhbTtNeuve1xzJaBqX3D1KefNy9e2td2NWCBSZ'  // User Volume Accumulator
             ]);
 
             const clonedKeys = cloningTarget.accounts.map((blueprintAccount) => {
@@ -514,6 +523,14 @@ class UniversalCloner {
                     }
                 }
                 
+                // RULE #1.5: ENFORCE MUST-BE-WRITABLE. If this account is in our known must-be-writable list, ALWAYS set isWritable to true.
+                if (MUST_BE_WRITABLE_RULES.has(finalPubkeyStr)) {
+                    if (!finalIsWritable) {
+                        console.log(`[FORGER-QC] 🔥 OVERRIDE: Forcing account ${shortenAddress(finalPubkeyStr)} to be WRITABLE (required by program).`);
+                        finalIsWritable = true;
+                    }
+                }
+                
                 // RULE #2: OUR WALLET MUST BE WRITABLE.
                 if (finalPubkey.equals(userPublicKey)) {
                      if (!finalIsWritable) {
@@ -531,17 +548,7 @@ class UniversalCloner {
 
             console.log(`[BLUEPRINT-FORGER] ✅ Forged ${clonedKeys.length} accounts using blueprint`);
 
-            // DEBUGGING: Show the blueprint vs forged comparison
-            console.log(`[BLUEPRINT-FORGER] 📋 BLUEPRINT vs FORGED COMPARISON:`);
-            console.table(cloningTarget.accounts.map((blueprintAcc, i) => ({
-                index: i,
-                role: blueprintAcc.role,
-                original_pubkey: shortenAddress(blueprintAcc.pubkey),
-                forged_pubkey: shortenAddress(clonedKeys[i].pubkey.toBase58()),
-                is_signer: clonedKeys[i].isSigner,
-                is_writable: clonedKeys[i].isWritable,
-                status: blueprintAcc.pubkey === clonedKeys[i].pubkey.toBase58() ? 'COPIED' : 'SWAPPED'
-            })));
+            // Blueprint vs forged comparison - removed for speed
 
             // Step 2: Handle all prerequisites (ATA creation, wSOL wrapping, etc.)
             const prerequisiteInstructions = await this._handlePrerequisites(
@@ -556,22 +563,11 @@ class UniversalCloner {
             // The issue: We're converting base64 → Buffer → base64, which adds padding
             // Solution: Keep original data format and only convert when creating TransactionInstruction
             
-            console.log(`[UNIVERSAL-CLONER] 🔍 Input data: ${cloningTarget.data}`);
-            console.log(`[UNIVERSAL-CLONER] 🔍 Input data type: ${typeof cloningTarget.data}`);
-            
-            // Store original data format for comparison
-            const originalDataString = cloningTarget.data;
-            
-            // Convert to Buffer for instruction creation (but don't re-encode to base64)
+            // Convert to Buffer for instruction creation - minimal logging for speed
             let finalInstructionData;
-            console.log(`[UNIVERSAL-CLONER] 🔍 Input data: ${cloningTarget.data}`);
-            console.log(`[UNIVERSAL-CLONER] 🔍 Input data type: ${typeof cloningTarget.data}`);
-            console.log(`[UNIVERSAL-CLONER] 🔍 Input data length: ${cloningTarget.data ? cloningTarget.data.length : 'null'}`);
             
             try {
                 finalInstructionData = Buffer.from(bs58.decode(cloningTarget.data)); // CRITICAL FIX: Decode from Base58, not Base64
-                console.log(`[UNIVERSAL-CLONER] 🔍 Decoded buffer length: ${finalInstructionData.length} bytes`);
-                console.log(`[UNIVERSAL-CLONER] 🔍 Decoded buffer (hex): ${finalInstructionData.toString('hex')}`);
                 
                 // Platform-specific, SURGICAL data modifications for timestamp expiration fixes
                 const PHOTON_ROUTER_ID = 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW';
@@ -632,6 +628,8 @@ class UniversalCloner {
             
             // Determine the actual user amount to use based on trade type
             let userAmountToUse = null;
+            let expectedOutput = null;
+            
             if (tradeType === 'buy' && userSolAmount) {
                 // For BUY trades: Use user's configured SOL amount per trade
                 userAmountToUse = userSolAmount;
@@ -640,6 +638,16 @@ class UniversalCloner {
                 // For SELL trades: Use user's actual token balance
                 userAmountToUse = userTokenBalance;
                 console.log(`[UNIVERSAL-CLONER] 💰 Using user's token balance for SELL: ${this._extractAmountValue(userTokenBalance)} tokens`);
+                
+                // Try to pre-calculate expected SOL output for sell trades
+                try {
+                    expectedOutput = await this._calculateExpectedSolOutput(cloningTarget.platform, userTokenBalance, swapDetails);
+                    if (expectedOutput) {
+                        console.log(`[UNIVERSAL-CLONER] 🧮 Pre-calculated expected SOL output: ${expectedOutput.toString()} lamports`);
+                    }
+                } catch (calcError) {
+                    console.warn(`[UNIVERSAL-CLONER] ⚠️ Could not pre-calculate SOL output: ${calcError.message}`);
+                }
             } else if (amountBN && this._isValidAmount(amountBN)) {
                 // Fallback: Use the provided amountBN (master's amount)
                 userAmountToUse = amountBN;
@@ -917,11 +925,16 @@ class UniversalCloner {
             }
         }
 
-        // 🚀 THE FINAL FIX: Handle wSOL prerequisite for AMM trades
-        // This is needed when BUY trades use SOL as input but AMMs expect wSOL accounts
-        if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112') {
+        // 🚀 PLATFORM-SPECIFIC wSOL prerequisite handling
+        // Only AMM platforms (Raydium, Meteora) need wSOL, not Pump.fun
+        const needsWSOL = builderOptions.platform && 
+                         (builderOptions.platform.includes('Raydium') || 
+                          builderOptions.platform.includes('Meteora') ||
+                          builderOptions.platform.includes('AMM'));
+        
+        if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112' && needsWSOL) {
             try {
-                console.log(`[FORGER-PREQ] 🔍 BUY trade detected with SOL as input - checking wSOL prerequisite...`);
+                console.log(`[FORGER-PREQ] 🔍 AMM BUY trade detected with SOL as input - checking wSOL prerequisite for ${builderOptions.platform}...`);
                 
                 const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
                 const { SystemProgram } = require('@solana/web3.js');
@@ -988,6 +1001,8 @@ class UniversalCloner {
             } catch (error) {
                 console.error(`[FORGER-PREQ] ❌ wSOL prerequisite check failed:`, error.message);
             }
+        } else if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112' && !needsWSOL) {
+            console.log(`[FORGER-PREQ] ✅ Pump.fun BUY trade - no wSOL needed, using direct SOL`);
         }
 
         return ataInstructions;
@@ -1058,6 +1073,58 @@ class UniversalCloner {
         } catch (error) {
             console.warn(`[UNIVERSAL-CLONER] ⚠️ Error extracting amount value: ${error.message}`);
             return '0';
+        }
+    }
+
+    /**
+     * Calculate expected SOL output for sell trades using platform-specific SDKs
+     */
+    async _calculateExpectedSolOutput(platform, tokenAmount, swapDetails) {
+        try {
+            const BN = require('bn.js');
+            const { PublicKey } = require('@solana/web3.js');
+            
+            // Convert token amount to BN if needed
+            const tokenAmountBN = new BN(tokenAmount.toString());
+            
+            if (platform === 'Pump.fun') {
+                // Use Pump.fun SDK to calculate expected SOL output
+                const { PumpSdk } = require('@pump-fun/pump-sdk');
+                const sdk = new PumpSdk(this.connection);
+                
+                const tokenMintPk = new PublicKey(swapDetails.inputMint);
+                const global = await sdk.fetchGlobal();
+                const { bondingCurve } = await sdk.fetchSellState(tokenMintPk, new PublicKey(swapDetails.userPublicKey));
+                
+                // Use the SDK's calculation method
+                const { getSellSolAmountFromTokenAmount } = require('@pump-fun/pump-sdk');
+                const expectedSol = getSellSolAmountFromTokenAmount(global, bondingCurve, tokenAmountBN);
+                
+                return expectedSol;
+                
+            } else if (platform.includes('Raydium')) {
+                // For Raydium, we would need pool state to calculate accurately
+                // For now, use a conservative estimate
+                console.log(`[UNIVERSAL-CLONER] ⚠️ Raydium SOL output calculation not implemented, using conservative estimate`);
+                return tokenAmountBN.mul(new BN(1000000)); // 0.001 SOL per token estimate
+                
+            } else if (platform.includes('Meteora')) {
+                // For Meteora, we would need pool state to calculate accurately
+                // For now, use a conservative estimate
+                console.log(`[UNIVERSAL-CLONER] ⚠️ Meteora SOL output calculation not implemented, using conservative estimate`);
+                return tokenAmountBN.mul(new BN(1000000)); // 0.001 SOL per token estimate
+                
+            } else {
+                // Generic fallback calculation
+                console.log(`[UNIVERSAL-CLONER] ⚠️ Platform ${platform} SOL output calculation not implemented, using conservative estimate`);
+                return tokenAmountBN.mul(new BN(500000)); // 0.0005 SOL per token (very conservative)
+            }
+            
+        } catch (error) {
+            console.warn(`[UNIVERSAL-CLONER] ⚠️ Error calculating expected SOL output: ${error.message}`);
+            // Return conservative fallback
+            const BN = require('bn.js');
+            return new BN(tokenAmount.toString()).mul(new BN(500000)); // 0.0005 SOL per token
         }
     }
 }

@@ -10,7 +10,7 @@ class SingaporeSenderManager {
     constructor() {
         // ULTRA-FAST Singapore regional endpoints (optimized for Asia-Pacific)
         this.singaporeEndpoints = {
-            rpc: 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com',
+            rpc: 'https://mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769',
             sender: 'https://sender.helius-rpc.com/fast', // ULTRA-FAST global sender
             laserstream: 'wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769'
         };
@@ -136,18 +136,11 @@ class SingaporeSenderManager {
         const startTime = Date.now();
         
         try {
-            console.log(`[SINGAPORE-SENDER] 🚀 Starting ULTRA-FAST execution...`);
-            
-            // VALIDATE TRANSACTION
-            if (!this.validateTransaction(transaction)) {
-                throw new Error('Invalid transaction format');
-            }
+            // ULTRA-FAST execution - minimal validation and logging for speed
             
             // GET DYNAMIC TIP AMOUNT
             const tipAmountSOL = await this.getDynamicTipAmount();
             const tipAccount = new PublicKey(this.tipAccounts[Math.floor(Math.random() * this.tipAccounts.length)]);
-            
-            console.log(`[SINGAPORE-SENDER] 💰 Using tip amount: ${tipAmountSOL} SOL to ${shortenAddress(tipAccount)}`);
             
             // BUILD OPTIMIZED TRANSACTION
             const optimizedTransaction = await this.buildOptimizedTransaction(
@@ -158,8 +151,8 @@ class SingaporeSenderManager {
                 options
             );
             
-            // EXECUTE VIA SENDER ENDPOINT
-            const signature = await this.sendViaSender(optimizedTransaction);
+            // EXECUTE VIA DIRECT RPC (more reliable than Sender endpoint)
+            const signature = await this.sendViaDirectRPC(optimizedTransaction);
             
             // CONFIRM TRANSACTION AND VALIDATE SUCCESS
             const confirmationResult = await this.confirmTransaction(signature);
@@ -239,8 +232,7 @@ class SingaporeSenderManager {
     // Build optimized transaction with tip and compute budget
     async buildOptimizedTransaction(originalTransaction, keypair, tipAccount, tipAmountSOL, options = {}) {
         try {
-            console.log(`[SINGAPORE-SENDER] 🔧 Building optimized transaction...`);
-            console.log(`[SINGAPORE-SENDER] 📊 Original instructions: ${originalTransaction.instructions.length}`);
+            // Building optimized transaction - minimal logging for speed
             
             // Get recent blockhash
             const { value: { blockhash, lastValidBlockHeight } } = await this.connection.getLatestBlockhashAndContext('confirmed');
@@ -281,15 +273,9 @@ class SingaporeSenderManager {
             // Sign transaction
             optimizedTransaction.sign([keypair]);
             
-            console.log(`[SINGAPORE-SENDER] ✅ Optimized transaction built with ${allInstructions.length} instructions`);
-            console.log(`[SINGAPORE-SENDER] 🔧 Compute units: ${computeUnits}, Priority fee: ${priorityFee} microLamports`);
-            console.log(`[SINGAPORE-SENDER] 📝 Transaction size: ${optimizedTransaction.serialize().length} bytes`);
+            // Optimized transaction built - minimal logging for speed
             
-            return {
-                transaction: optimizedTransaction,
-                blockhash,
-                lastValidBlockHeight
-            };
+            return optimizedTransaction;
             
         } catch (error) {
             console.error(`[SINGAPORE-SENDER] ❌ Error building optimized transaction:`, error);
@@ -353,8 +339,47 @@ class SingaporeSenderManager {
         throw new Error('All retry attempts failed');
     }
 
+    // Send transaction via direct RPC (more reliable than Sender endpoint)
+    async sendViaDirectRPC(transactionData, retries = 3) {
+        const startTime = Date.now();
+        
+        for (let attempt = 0; attempt < retries; attempt++) {
+            try {
+                console.log(`[SINGAPORE-SENDER] 📤 Sending via direct RPC (attempt ${attempt + 1}/${retries})...`);
+                
+                // Send the transaction directly via RPC
+                // VersionedTransaction has serialize() method
+                const signature = await this.connection.sendRawTransaction(
+                    transactionData.serialize(), 
+                    {
+                        skipPreflight: true, // Skip preflight for speed
+                        preflightCommitment: 'confirmed',
+                        maxRetries: 0 // We handle retries ourselves
+                    }
+                );
+                
+                const executionTime = Date.now() - startTime;
+                console.log(`[SINGAPORE-SENDER] ✅ Transaction sent via direct RPC in ${executionTime}ms: ${signature}`);
+                
+                return signature;
+                
+            } catch (error) {
+                console.error(`[SINGAPORE-SENDER] ❌ Direct RPC attempt ${attempt + 1} failed:`, error.message);
+                
+                if (attempt === retries - 1) {
+                    throw error;
+                }
+                
+                // Wait before retry
+                await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+            }
+        }
+        
+        throw new Error('All direct RPC retry attempts failed');
+    }
+
     // Confirm transaction with timeout and validate success
-    async confirmTransaction(signature, timeout = 15000) {
+    async confirmTransaction(signature, timeout = 60000) {
         const startTime = Date.now();
         const interval = 1000; // Check every 1 second
         
@@ -397,16 +422,39 @@ class SingaporeSenderManager {
                     return { confirmationTime, success: true };
                 }
                 
-                // Log progress
-                if (Date.now() - startTime > 5000) { // After 5 seconds
-                    console.log(`[SINGAPORE-SENDER] ⏳ Still waiting for confirmation... (${Date.now() - startTime}ms elapsed)`);
+                // Log progress more frequently
+                const elapsed = Date.now() - startTime;
+                if (elapsed > 3000 && elapsed % 3000 < interval) { // Every 3 seconds after initial 3s
+                    console.log(`[SINGAPORE-SENDER] ⏳ Still waiting for confirmation... (${elapsed}ms elapsed)`);
                 }
                 
             } catch (error) {
                 console.warn('[SINGAPORE-SENDER] ⚠️ Status check failed:', error.message);
             }
             
-            await new Promise(resolve => setTimeout(resolve, interval));
+            // Use faster polling in the first 10 seconds, then slower
+            const elapsed = Date.now() - startTime;
+            const checkInterval = elapsed < 10000 ? 500 : 1000; // 500ms for first 10s, then 1s
+            await new Promise(resolve => setTimeout(resolve, checkInterval));
+        }
+        
+        // Final check before giving up - sometimes transactions succeed but confirmation is slow
+        console.log(`[SINGAPORE-SENDER] ⏰ Timeout reached, doing final confirmation check...`);
+        try {
+            const finalStatus = await this.connection.getSignatureStatuses([signature]);
+            const finalSignatureStatus = finalStatus?.value[0];
+            
+            if (finalSignatureStatus?.confirmationStatus === 'confirmed' || finalSignatureStatus?.confirmationStatus === 'finalized') {
+                const confirmationTime = Date.now() - startTime;
+                if (finalSignatureStatus?.err) {
+                    console.error(`[SINGAPORE-SENDER] ❌ Transaction failed on-chain (final check): ${JSON.stringify(finalSignatureStatus.err)}`);
+                    return { confirmationTime, success: false, error: finalSignatureStatus.err };
+                }
+                console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed successfully in final check (${confirmationTime}ms)`);
+                return { confirmationTime, success: true };
+            }
+        } catch (finalError) {
+            console.warn(`[SINGAPORE-SENDER] ⚠️ Final status check failed: ${finalError.message}`);
         }
         
         throw new Error(`Transaction confirmation timeout after ${timeout}ms`);
@@ -515,35 +563,12 @@ class SingaporeSenderManager {
     // ULTRA-FAST copy trade execution
     async executeCopyTrade(instructions, keypair, options = {}) {
         try {
-            console.log(`[SINGAPORE-SENDER] 🚀 Starting ULTRA-FAST copy trade execution...`);
-            
-            // Debug: Log instruction structure
-            // console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length);
-            if (instructions.length > 0) {
-                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0]));
-                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId);
-                
-                // Validate instruction structure
-                for (let i = 0; i < instructions.length; i++) {
-                    const ix = instructions[i];
-                    if (!ix.programId) {
-                        console.error(`[SINGAPORE-SENDER] ❌ Instruction ${i} missing programId:`, ix);
-                        throw new Error(`Instruction ${i} is missing programId - invalid instruction format`);
-                    }
-                    if (!ix.programId.equals) {
-                        console.error(`[SINGAPORE-SENDER] ❌ Instruction ${i} programId is not a PublicKey:`, ix.programId);
-                        throw new Error(`Instruction ${i} programId is not a valid PublicKey object`);
-                    }
-                }
+            // ULTRA-FAST execution - minimal validation for speed
+            if (instructions.length === 0) {
+                throw new Error('No instructions provided');
             }
             
-            // Validate user hasn't included compute budget instructions
-            const hasComputeBudget = instructions.some(ix => 
-                ix.programId && ix.programId.equals && ix.programId.equals(ComputeBudgetProgram.programId)
-            );
-            if (hasComputeBudget) {
-                throw new Error('Do not include compute budget instructions - they are added automatically');
-            }
+            // Skip validation for speed - we'll add our own optimized compute budget
             
             // Get recent blockhash
             const { value: blockhashInfo } = await this.connection.getLatestBlockhashAndContext('confirmed');
@@ -552,17 +577,15 @@ class SingaporeSenderManager {
             // Use much higher compute units for Pump.fun trades (they are very compute-intensive)
             const computeUnits = 3_000_000; // Significantly increased for Pump.fun operations
             
-            // Get dynamic priority fee
+            // Get dynamic priority fee with higher base rate for better confirmation
             const priorityFee = await this.getDynamicPriorityFee(instructions, keypair.publicKey, blockhash);
+            const boostedPriorityFee = Math.max(priorityFee, 500000); // Minimum 500k microLamports for better confirmation
             
             // Get dynamic tip amount
             const tipAmountSOL = await this.getDynamicTipAmount();
             const tipAccount = new PublicKey(this.tipAccounts[Math.floor(Math.random() * this.tipAccounts.length)]);
             
-            console.log(`[SINGAPORE-SENDER] 🔧 Copy trade optimization complete:`);
-            console.log(`[SINGAPORE-SENDER]   - Compute units: ${computeUnits}`);
-            console.log(`[SINGAPORE-SENDER]   - Priority fee: ${priorityFee} microLamports`);
-            console.log(`[SINGAPORE-SENDER]   - Tip amount: ${tipAmountSOL} SOL`);
+            // Optimization complete - minimal logging for speed
             
             // Execute with optimized parameters
             return await this.executeTransactionWithSender(
@@ -570,7 +593,7 @@ class SingaporeSenderManager {
                 keypair,
                 {
                     computeUnits,
-                    priorityFee,
+                    priorityFee: boostedPriorityFee,
                     tipAmount: tipAmountSOL,
                     tipAccount: tipAccount.toString(),
                     ...options

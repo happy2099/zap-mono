@@ -268,7 +268,111 @@ async startTraderMonitoringStream(tradingEngine) {
   //   }
   // }
 
-   async getSwapTransactionFromJupiter({ inputMint, outputMint, amount, userWallet, slippageBps }) {
+   async getTokenAmountFromHeliusData({ inputMint, outputMint, amount, tradeType }) {
+    console.log(`[Helius] Getting token amount estimate: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
+    
+    try {
+      // Use Helius Enhanced Parse Transaction API to get recent similar transactions
+      const response = await axios.get(`https://api.helius.xyz/v0/addresses/${inputMint}/transactions?api-key=${config.HELIUS_API_KEY}&limit=5&type=SWAP&source=PUMP_FUN`, {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 3000 // Fast timeout for copy trading
+      });
+
+      if (response.data && response.data.length > 0) {
+        // Analyze recent transactions to estimate conversion rate
+        let totalInputAmount = 0;
+        let totalOutputAmount = 0;
+        let validTransactions = 0;
+
+        for (const tx of response.data.slice(0, 3)) { // Use last 3 transactions
+          if (tx.tokenTransfers && tx.tokenTransfers.length >= 2) {
+            const solTransfer = tx.tokenTransfers.find(t => t.mint === 'So11111111111111111111111111111111111111112');
+            const tokenTransfer = tx.tokenTransfers.find(t => t.mint === outputMint);
+            
+            if (solTransfer && tokenTransfer) {
+              totalInputAmount += Math.abs(solTransfer.tokenAmount);
+              totalOutputAmount += Math.abs(tokenTransfer.tokenAmount);
+              validTransactions++;
+            }
+          }
+        }
+
+        if (validTransactions > 0) {
+          const averageRate = totalOutputAmount / totalInputAmount;
+          const estimatedOutput = Math.floor(amount * averageRate);
+          
+          console.log(`[Helius] ✅ Estimated from ${validTransactions} recent transactions: ${amount} -> ${estimatedOutput}`);
+          return {
+            inputAmount: amount,
+            outputAmount: estimatedOutput,
+            source: 'helius_historical',
+            validTransactions: validTransactions
+          };
+        }
+      }
+      
+      // Fallback to conservative estimate based on typical Pump.fun rates
+      console.log(`[Helius] ⚠️ No recent transaction data, using conservative estimate`);
+      const conservativeOutput = tradeType === 'buy' 
+        ? Math.floor(amount * 50000) // More realistic: 1 SOL = 50K tokens (0.02 SOL per token)
+        : Math.floor(amount / 50000); // More realistic: 50K tokens = 1 SOL
+        
+      return {
+        inputAmount: amount,
+        outputAmount: conservativeOutput,
+        source: 'conservative_estimate'
+      };
+
+    } catch (err) {
+      console.error(`[Helius] ❌ Error getting token amount:`, err.message);
+      // Fallback to conservative estimate
+      const conservativeOutput = tradeType === 'buy' 
+        ? Math.floor(amount * 50000) // More realistic rate
+        : Math.floor(amount / 50000); // More realistic rate
+        
+      return {
+        inputAmount: amount,
+        outputAmount: conservativeOutput,
+        source: 'error_fallback'
+      };
+    }
+  }
+
+  async getQuoteFromJupiter({ inputMint, outputMint, amount, slippageBps }) {
+    console.log(`[Jupiter] Getting quote: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
+    const jupiterApi = createJupiterApiClient({ apiEndpoint: "https://dark-evocative-owl.solana-mainnet.quiknode.pro/497fc975da6984a5a05cb7ab9da031ca4ecea653/jup/v6" });
+
+    try {
+      // Get the quote for the swap
+      const quote = await jupiterApi.quoteGet({
+        inputMint: inputMint,
+        outputMint: outputMint,
+        amount: Number(amount), // Jupiter SDK expects a number for amount
+        slippageBps: slippageBps || 2500,
+        onlyDirectRoutes: false, // Set to true for simpler routes if needed
+      });
+
+      if (!quote) {
+        throw new Error("Jupiter failed to find a route.");
+      }
+
+      console.log(`[Jupiter] ✅ Quote received: ${quote.inAmount} -> ${quote.outAmount}`);
+      return {
+        inputAmount: quote.inAmount,
+        outputAmount: quote.outAmount,
+        priceImpactPct: quote.priceImpactPct,
+        quote: quote
+      };
+
+    } catch (err) {
+      console.error(`[Jupiter] ❌ Error during Jupiter quote:`, err.message);
+      throw new Error(`Jupiter quote failed: ${err.message}`);
+    }
+  }
+
+  async getSwapTransactionFromJupiter({ inputMint, outputMint, amount, userWallet, slippageBps }) {
     console.log(`[Jupiter] Getting swap quote: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
     const jupiterApi = createJupiterApiClient({ apiEndpoint: "https://dark-evocative-owl.solana-mainnet.quiknode.pro/497fc975da6984a5a05cb7ab9da031ca4ecea653/jup/v6" });
 

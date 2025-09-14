@@ -61,7 +61,7 @@ class TradingEngine {
         this.singaporeSenderManager = new SingaporeSenderManager();
         
         // Initialize Universal Cloner for platform-agnostic copy trading
-        this.universalCloner = new UniversalCloner(this.solanaManager.connection);
+        this.universalCloner = new UniversalCloner(this.solanaManager.connection, this.apiManager);
         
         // Initialize current blockhash
         this.initializeCurrentBlockhash();
@@ -999,16 +999,31 @@ async _getOnChainTokenBalance(walletAddress, tokenMint) {
         // Get the associated token account address
         const tokenAccountAddress = getAssociatedTokenAddressSync(mintPublicKey, userPublicKey);
         
-        // Get the token account info
+        // First check if the token account exists
+        const accountInfo = await this.solanaManager.connection.getAccountInfo(tokenAccountAddress);
+        
+        if (!accountInfo) {
+            console.log(`[ON-CHAIN-BALANCE] Token account for ${shortenAddress(tokenMint)} does not exist - user has never held this token`);
+            return new BN(0);
+        }
+        
+        // If account exists, get the balance
         const tokenAccountInfo = await this.solanaManager.connection.getTokenAccountBalance(tokenAccountAddress);
         
         if (tokenAccountInfo.value) {
-            return new BN(tokenAccountInfo.value.amount);
+            const balance = new BN(tokenAccountInfo.value.amount);
+            console.log(`[ON-CHAIN-BALANCE] Found ${balance.toString()} tokens for ${shortenAddress(tokenMint)}`);
+            return balance;
         }
         
         return new BN(0);
     } catch (error) {
-        console.warn(`[ON-CHAIN-BALANCE] Failed to get balance for ${shortenAddress(tokenMint)}: ${error.message}`);
+        // Handle specific error cases
+        if (error.message.includes('could not find account') || error.message.includes('Invalid param')) {
+            console.log(`[ON-CHAIN-BALANCE] Token account for ${shortenAddress(tokenMint)} does not exist - user has never held this token`);
+        } else {
+            console.warn(`[ON-CHAIN-BALANCE] Failed to get balance for ${shortenAddress(tokenMint)}: ${error.message}`);
+        }
         return new BN(0);
     }
 }
@@ -2025,7 +2040,32 @@ async checkPumpFunMigration(tokenMint) {
                 const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                 
                 if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
-                    console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
+                    console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens in database.`);
+                    console.log(`[SINGAPORE-SENDER] 🔍 Attempting to check on-chain balance as fallback...`);
+                    
+                    // Fallback: Check on-chain balance
+                    try {
+                        const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+                        if (walletPacket) {
+                            const { keypair } = walletPacket;
+                            const onChainBalance = await this._getOnChainTokenBalance(keypair.publicKey.toBase58(), tradeDetails.inputMint);
+                            
+                            if (onChainBalance.gt(new BN(0))) {
+                                console.log(`[SINGAPORE-SENDER] ✅ Found ${onChainBalance.toString()} tokens on-chain, using this amount`);
+                                
+                                // Record the position for future reference
+                                await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                                console.log(`[SINGAPORE-SENDER] 📝 Recorded on-chain position in database`);
+                                
+                                return onChainBalance;
+                            } else {
+                                console.log(`[SINGAPORE-SENDER] ❌ No tokens found on-chain either. Skipping trade.`);
+                            }
+                        }
+                    } catch (onChainError) {
+                        console.error(`[SINGAPORE-SENDER] ❌ Error checking on-chain balance: ${onChainError.message}`);
+                    }
+                    
                     return null; // Return null to indicate no position
                 }
                 
@@ -2045,6 +2085,45 @@ async checkPumpFunMigration(tokenMint) {
 
 
     async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, config) {
+        // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
+        const isBuy = tradeDetails.tradeType === 'buy';
+        if (isBuy) {
+            const userPositions = await this.databaseManager.getUserPositions(String(userChatId));
+            const tokenToBuy = tradeDetails.outputMint;
+
+            // Check if the user ALREADY has a position and it's not empty.
+            if (userPositions.has(tokenToBuy) && userPositions.get(tokenToBuy).amountRaw > 0n) {
+                const reason = `You already have an active position for ${shortenAddress(tokenToBuy)}. One buy per token is allowed.`;
+                console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
+                
+                // Notify the user why the copy was skipped.
+                if (this.notificationManager) {
+                    await this.notificationManager.notifyNoCopy(userChatId, traderName, "N/A", reason);
+                }
+                
+                // CRITICAL: Stop the function here to prevent the buy.
+                return; 
+            }
+        }
+        // ===========================================
+        // 🚀 PERFORMANCE TRACKING: Start timing the entire copy trade process
+        const performanceTracker = {
+            startTime: Date.now(),
+            steps: {},
+            logStep: function(stepName) {
+                const now = Date.now();
+                const elapsed = now - this.startTime;
+                this.steps[stepName] = {
+                    timestamp: now,
+                    elapsed: elapsed,
+                    stepDuration: stepName === 'start' ? 0 : elapsed - (this.lastStepTime || this.startTime)
+                };
+                this.lastStepTime = now;
+                console.log(`[PERF-TRACKER] ⏱️ ${stepName}: ${elapsed}ms total, ${this.steps[stepName].stepDuration}ms since last step`);
+            }
+        };
+        
+        performanceTracker.logStep('start');
         // Prevent race conditions by checking if user is already being processed
         if (this.userProcessing.has(userChatId)) {
             console.log(`[SINGAPORE-SENDER] ⚠️ User ${userChatId} is already being processed, skipping to prevent race condition`);
@@ -2052,6 +2131,7 @@ async checkPumpFunMigration(tokenMint) {
         }
         
         this.userProcessing.add(userChatId);
+        performanceTracker.logStep('race_condition_check');
         
         // Set a timeout to automatically clear the user from processing state after 30 seconds
         const timeoutId = setTimeout(() => {
@@ -2064,6 +2144,7 @@ async checkPumpFunMigration(tokenMint) {
         try {
             console.log(`[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
             console.log(`[SINGAPORE-SENDER] 🚀 COPY TRADE: ${tradeDetails.tradeType.toUpperCase()} ${tradeDetails.dexPlatform} | Token: ${shortenAddress(tradeDetails.outputMint)} | User: ${userChatId}`);
+            performanceTracker.logStep('trade_start');
             // console.log(`[SINGAPORE-SENDER] 🔑 Master signature: ${masterSignature}`);
             // console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
             // console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
@@ -2076,6 +2157,7 @@ async checkPumpFunMigration(tokenMint) {
 
             const { keypair, wallet } = walletPacket;
             console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
+            performanceTracker.logStep('wallet_retrieval');
 
             // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
             console.log(`[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
@@ -2091,6 +2173,7 @@ async checkPumpFunMigration(tokenMint) {
 
             // Calculate user's copy trade amount based on trade type FIRST
             const userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
+            performanceTracker.logStep('amount_calculation');
             
             // If user has no position for SELL trade, skip gracefully
             if (userAmountBN === null) {
@@ -2249,150 +2332,11 @@ async checkPumpFunMigration(tokenMint) {
                 userAmountBN: userAmountBN.toString()
             };
 
-            // ✅ PRE-FLIGHT SIMULATION: Test the transaction before sending
-            console.log(`[SINGAPORE-SENDER] 🔍 Performing pre-flight simulation...`);
-            console.log(`[SINGAPORE-SENDER] 📊 Simulation details:`);
-            console.log(`[SINGAPORE-SENDER]   - Instructions: ${instructions.length}`);
-            console.log(`[SINGAPORE-SENDER]   - User wallet: ${shortenAddress(keypair.publicKey.toString())}`);
-            console.log(`[SINGAPORE-SENDER]   - Nonce info: ${nonceInfo ? 'YES' : 'NO'}`);
+            // ULTRA-FAST execution - minimal logging for speed
+            performanceTracker.logStep('pre_execution');
             
             try {
-                // Enhanced logging for each instruction
-                instructions.forEach((ix, index) => {
-                    console.log(`[SINGAPORE-SENDER]   Instruction ${index}:`);
-                    console.log(`[SINGAPORE-SENDER]     - Program: ${shortenAddress(ix.programId.toString())}`);
-                    console.log(`[SINGAPORE-SENDER]     - Accounts: ${ix.keys.length}`);
-                    console.log(`[SINGAPORE-SENDER]     - Data length: ${ix.data.length} bytes`);
-                    
-                    // Log account details for debugging
-                    ix.keys.forEach((key, keyIndex) => {
-                        if (keyIndex < 3) { // Only log first 3 accounts to avoid spam
-                            console.log(`[SINGAPORE-SENDER]       Account ${keyIndex}: ${shortenAddress(key.pubkey.toString())} (signer: ${key.isSigner}, writable: ${key.isWritable})`);
-                        }
-                    });
-                });
-                
-                // Create proper versioned transaction for simulation
-                const { VersionedTransaction, TransactionMessage, ComputeBudgetProgram } = require('@solana/web3.js');
-                
-                // Add compute budget instructions for proper simulation
-                const computeInstructions = [
-                    ComputeBudgetProgram.setComputeUnitLimit({ units: 800000 }),
-                    ComputeBudgetProgram.setComputeUnitPrice({ microLamports: 100000 })
-                ];
-                
-                const allInstructions = [...computeInstructions, ...instructions];
-                console.log(`[SINGAPORE-SENDER] 🔧 Total instructions for simulation: ${allInstructions.length} (${computeInstructions.length} compute + ${instructions.length} trade)`);
-                
-                // CRITICAL FIX: Always use recent blockhash for simulation, nonce for actual submission
-                const { blockhash } = await this.solanaManager.connection.getLatestBlockhash('confirmed');
-                let recentBlockhash = blockhash;
-                
-                if (nonceInfo && nonceInfo.nonce) {
-                    console.log(`[SINGAPORE-SENDER] 🔐 Using recent blockhash for simulation: ${shortenAddress(recentBlockhash)}`);
-                    console.log(`[SINGAPORE-SENDER] 🔐 Nonce available for actual submission: ${shortenAddress(nonceInfo.nonce)}`);
-                } else {
-                    console.log(`[SINGAPORE-SENDER] ⏰ Using fresh blockhash: ${shortenAddress(recentBlockhash)}`);
-                }
-                
-                // Create versioned transaction message
-                const message = new TransactionMessage({
-                    payerKey: keypair.publicKey,
-                    recentBlockhash: recentBlockhash,
-                    instructions: allInstructions
-                }).compileToV0Message();
-                
-                const versionedTx = new VersionedTransaction(message);
-                
-                // Sign the transaction for simulation
-                versionedTx.sign([keypair]);
-                console.log(`[SINGAPORE-SENDER] ✍️ Transaction signed for simulation`);
-                
-                // DEBUG: Log the exact instruction data being sent to simulation
-                console.log(`[SINGAPORE-SENDER] 🔍 SIMULATION DEBUG: Transaction instructions:`);
-                for (let i = 0; i < instructions.length; i++) {
-                    const instr = instructions[i];
-                    console.log(`[SINGAPORE-SENDER]   Instruction ${i}: Program ${instr.programId.toBase58().substring(0, 8)}..., Data: ${instr.data.toString('hex')}`);
-                }
-                
-                // Simulate the versioned transaction
-                console.log(`[SINGAPORE-SENDER] 🧪 Running Solana simulation...`);
-                const simulationResult = await this.solanaManager.connection.simulateTransaction(versionedTx, {
-                    commitment: 'processed',
-                    sigVerify: false,
-                    replaceRecentBlockhash: !nonceInfo, // Don't replace if using nonce
-                    accounts: {
-                        encoding: 'base64',
-                        addresses: [] // Let Solana determine which accounts to return
-                    }
-                });
-                
-                console.log(`[SINGAPORE-SENDER] 📊 Simulation completed`);
-                
-                if (simulationResult.value.err) {
-                    console.error(`[SINGAPORE-SENDER] ❌ PRE-FLIGHT SIMULATION FAILED!`);
-                    console.error(`[SINGAPORE-SENDER] 🔍 Error details:`, JSON.stringify(simulationResult.value.err, null, 2));
-                    console.error(`[SINGAPORE-SENDER] 📋 Full simulation logs:`);
-                    if (simulationResult.value.logs) {
-                        simulationResult.value.logs.forEach((log, index) => {
-                            console.error(`[SINGAPORE-SENDER]   ${index + 1}. ${log}`);
-                        });
-                    }
-                    
-                    // Enhanced error analysis
-                    const errorType = Object.keys(simulationResult.value.err)[0];
-                    console.error(`[SINGAPORE-SENDER] 🎯 Error type: ${errorType}`);
-                    
-                    if (errorType === 'InstructionError') {
-                        const [instructionIndex, instructionError] = simulationResult.value.err.InstructionError;
-                        console.error(`[SINGAPORE-SENDER] 📍 Failed at instruction ${instructionIndex}:`);
-                        if (instructionIndex < allInstructions.length) {
-                            const failedInstruction = allInstructions[instructionIndex];
-                            console.error(`[SINGAPORE-SENDER]   - Program: ${shortenAddress(failedInstruction.programId.toString())}`);
-                            console.error(`[SINGAPORE-SENDER]   - Accounts: ${failedInstruction.keys.length}`);
-                            console.error(`[SINGAPORE-SENDER]   - Data: ${failedInstruction.data.length} bytes`);
-                        }
-                        console.error(`[SINGAPORE-SENDER] 🔍 Instruction error:`, JSON.stringify(instructionError, null, 2));
-                    }
-                    
-                    throw new Error(`Transaction failed pre-flight simulation: ${JSON.stringify(simulationResult.value.err)}`);
-                }
-                
-                console.log(`[SINGAPORE-SENDER] ✅ Pre-flight simulation passed!`);
-                console.log(`[SINGAPORE-SENDER] ⚡ Units consumed: ${simulationResult.value.unitsConsumed}`);
-                console.log(`[SINGAPORE-SENDER] 📊 Accounts read: ${simulationResult.value.accounts?.length || 0}`);
-                
-                if (simulationResult.value.logs && simulationResult.value.logs.length > 0) {
-                    console.log(`[SINGAPORE-SENDER] 📜 Success logs (first 3):`);
-                    simulationResult.value.logs.slice(0, 3).forEach((log, index) => {
-                        console.log(`[SINGAPORE-SENDER]   ${index + 1}. ${log}`);
-                    });
-                }
-                
-            } catch (simulationError) {
-                console.error(`[SINGAPORE-SENDER] ❌ Pre-flight simulation error:`, simulationError.message);
-                console.error(`[SINGAPORE-SENDER] 🔍 Error stack:`, simulationError.stack);
-                
-                // Additional debugging info
-                console.error(`[SINGAPORE-SENDER] 🔧 Debug info:`);
-                console.error(`[SINGAPORE-SENDER]   - Instructions count: ${instructions.length}`);
-                console.error(`[SINGAPORE-SENDER]   - User wallet: ${keypair.publicKey.toString()}`);
-                console.error(`[SINGAPORE-SENDER]   - Connection endpoint: ${this.solanaManager.connection.rpcEndpoint}`);
-                
-                throw new Error(`Pre-flight simulation failed: ${simulationError.message}`);
-            }
-
-            // Execute via Singapore Sender (ULTRA-FAST EXECUTION)
-            console.log(`[SINGAPORE-SENDER] 🚀 Executing ULTRA-FAST copy trade...`);
-            console.log(`[SINGAPORE-SENDER] ⚡ Target execution time: <200ms`);
-            
-            try {
-                // Use the new ultra-fast execution method
-                // Pass ALL instructions (including ATA creation) - Singapore Sender will handle compute budget
-                console.log(`[SINGAPORE-SENDER] 📋 Passing ${instructions.length} instructions to Singapore Sender`);
-                instructions.forEach((ix, index) => {
-                    console.log(`[SINGAPORE-SENDER]   ${index}: ${ix.programId.toString().substring(0, 8)}... (${ix.keys.length} accounts)`);
-                });
+                // Use the new ultra-fast execution method - minimal logging for speed
                 const result = await this.singaporeSenderManager.executeCopyTrade(
                     instructions, // Pass ALL instructions - don't filter out ATA creation!
                     keypair,

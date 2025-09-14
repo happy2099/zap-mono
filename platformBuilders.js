@@ -814,8 +814,12 @@ async function buildPumpFunSellInstructionManually({ user, mint, creator, tokenA
 
 async function buildPumpFunInstruction(builderOptions) {
     // This builder is for BONDING CURVE (BC) trades on Pump.fun
-    const { connection, keypair, swapDetails, amountBN, slippageBps } = builderOptions;
+    const { connection, keypair, swapDetails, amountBN, slippageBps, apiManager } = builderOptions;
     const userWalletPk = keypair.publicKey;
+    
+    // Initialize Pump.fun SDK
+    const { PumpSdk } = require('@pump-fun/pump-sdk');
+    const sdk = new PumpSdk(connection);
 
     try {
         const isBuy = swapDetails.tradeType === 'buy';
@@ -824,29 +828,26 @@ async function buildPumpFunInstruction(builderOptions) {
             // HYBRID SELL APPROACH: Use SDK simulation + manual instruction building
             // =============================================================================
             console.log(`[PUMP_BUILDER_BC] 🔄 Engineering HYBRID SELL for ${shortenAddress(swapDetails.inputMint)}...`);
-            
-            const { sdk } = builderOptions;
             const tokenMintPk = new PublicKey(swapDetails.inputMint);
             const tokenAmountBN = amountBN;
             
             // TACTIC 1: REAL-TIME RECONNAISSANCE for sell simulation
             console.log(`[PUMP_BUILDER_BC] Querying live bonding curve for sell quote...`);
             
-            const global = await sdk.fetchGlobal();
-            const { bondingCurveAccountInfo, bondingCurve } = await sdk.fetchSellState(tokenMintPk, userWalletPk);
+            // Let Singapore Sender handle the calculations and use simple SDK approach
+            console.log(`[PUMP_BUILDER_BC] 💰 Using token amount: ${tokenAmountBN.toString()} tokens for SELL trade`);
+            console.log(`[PUMP_BUILDER_BC] 🚀 Singapore Sender will handle SOL calculations and leader selection`);
             
-            const sellInstructions = await sdk.sellInstructions({
-                global,
-                bondingCurveAccountInfo,
-                bondingCurve,
+            // Use the SDK's simple sell method that handles everything internally
+            const sellInstructions = await sdk.getSellInstructionRaw({
                 mint: tokenMintPk,
                 user: userWalletPk,
                 amount: tokenAmountBN,
-                slippage: Math.floor((slippageBps || 4000) / 100), // Convert BPS to percentage
+                slippage: Math.floor((slippageBps || 4000) / 100) // Convert BPS to percentage
             });
 
-            if (!sellInstructions || sellInstructions.length === 0) {
-                throw new Error('SDK sell reconnaissance failed: Could not generate sell instructions.');
+            if (!sellInstructions) {
+                throw new Error('SDK failed to generate sell instructions.');
             }
 
             console.log(`[PUMP_BUILDER_BC] ✅ SDK SELL reconnaissance complete`);
@@ -864,38 +865,27 @@ async function buildPumpFunInstruction(builderOptions) {
         // =============================================================================
         // TACTIC 1: REAL-TIME RECONNAISSANCE to solve Error 6002 (TooMuchSolRequired)
         // =============================================================================
-        const { sdk } = builderOptions;
         console.log(`[PUMP_BUILDER_BC] Querying live bonding curve for quote...`);
         
-        // This SDK call acts as our targeting computer. It returns the precise values needed.
-        const global = await sdk.fetchGlobal();
-        const { bondingCurveAccountInfo, bondingCurve, associatedUserAccountInfo } = 
-            await sdk.fetchBuyState(tokenMintPk, userWalletPk);
+        // Let Singapore Sender handle the calculations and use simple SDK approach
+        console.log(`[PUMP_BUILDER_BC] 💰 Using SOL amount: ${solInLamports} lamports for BUY trade`);
+        console.log(`[PUMP_BUILDER_BC] 🚀 Singapore Sender will handle token calculations and leader selection`);
         
-        // Calculate token amount from SOL amount using the helper function
-        const { getBuyTokenAmountFromSolAmount } = require('@pump-fun/pump-sdk');
-        const tokenAmount = getBuyTokenAmountFromSolAmount(global, bondingCurve, new BN(solInLamports));
-        
-        const buyInstructions = await sdk.buyInstructions({
-            global,
-            bondingCurveAccountInfo,
-            bondingCurve,
-            associatedUserAccountInfo,
+        // Use the SDK's simple buy method that handles everything internally
+        const buyInstructions = await sdk.getBuyInstructionRaw({
             mint: tokenMintPk,
             user: userWalletPk,
             solAmount: new BN(solInLamports),
-            amount: tokenAmount,
-            slippage: Math.floor((slippageBps || 2500) / 100), // Convert BPS to percentage
+            slippage: Math.floor((slippageBps || 2500) / 100) // Convert BPS to percentage
         });
 
-        if (!buyInstructions || buyInstructions.length === 0) {
-            throw new Error('SDK reconnaissance failed: Could not generate buy instructions.');
+        if (!buyInstructions) {
+            throw new Error('SDK failed to generate buy instructions.');
         }
 
-        console.log(`[PUMP_BUILDER_BC] ✅ SDK Live Reconnaissance Complete:`);
+        console.log(`[PUMP_BUILDER_BC] ✅ SDK Buy Instructions Generated:`);
         console.log(`[PUMP_BUILDER_BC]   📊 SOL amount: ${solInLamports / 1e9} SOL (${solInLamports} lamports)`);
-        console.log(`[PUMP_BUILDER_BC]   🪙 Expected tokens: ${tokenAmount.toNumber()}`);
-        console.log(`[PUMP_BUILDER_BC]   📋 Instructions generated: ${buyInstructions.length}`);
+        console.log(`[PUMP_BUILDER_BC]   📋 Instructions generated: ${Array.isArray(buyInstructions) ? buyInstructions.length : 1}`);
 
         // =============================================================================
         // RETURN SDK-GENERATED INSTRUCTIONS - They are already perfect!
@@ -1763,7 +1753,7 @@ async function buildRaydiumClmmInstruction(builderOptions) {
         if (!poolState) throw new Error(`Failed to fetch live CLMM pool state for ${poolIdPk.toBase58()}`);
         await traceLogger.appendTrace(swapDetails.masterTxSignature, 'clmm_pool_state_fetched', { status: 'OK' });
         
-        // STEP 2: RUN SWAP SIMULATION - Use SDK math helpers to determine outcome and required tick arrays
+        // STEP 2: PRE-CALCULATE SWAP AMOUNTS - Use SDK math helpers to determine outcome and required tick arrays
         const swapResult = SwapMath.swapCompute(
             programId, poolIdPk, tickArraysRpc, poolState.tickArrayBitmap, 
             exBitmapAccountRpc ? RaydiumV2.TickArrayBitmapExtensionLayout.decode(exBitmapAccountRpc.data) : null,
@@ -1774,6 +1764,13 @@ async function buildRaydiumClmmInstruction(builderOptions) {
         );
         const amountOut = swapResult.amountCalculated.mul(new BN(-1));
         const amountOutWithSlippage = amountOut.mul(new BN(10000 - slippageBps)).div(new BN(10000));
+        
+        console.log(`[RAYDIUM_CLMM_SDK] 🧮 PRE-CALCULATED AMOUNTS:`);
+        console.log(`[RAYDIUM_CLMM_SDK]   📊 Input amount: ${amountBN.toString()}`);
+        console.log(`[RAYDIUM_CLMM_SDK]   🪙 Expected output: ${amountOut.toString()}`);
+        console.log(`[RAYDIUM_CLMM_SDK]   📋 Min amount out: ${amountOutWithSlippage.toString()}`);
+        console.log(`[RAYDIUM_CLMM_SDK]   📈 Slippage: ${slippageBps} BPS`);
+        
         await traceLogger.appendTrace(swapDetails.masterTxSignature, 'clmm_swap_simulated', { amountOut: amountOut.toString(), neededAccounts: swapResult.accounts.length });
         
         // STEP 3: ASSEMBLE BATTLE-HARDENED KEY LIST - Mirrors instrument.ts perfectly
@@ -1926,12 +1923,18 @@ async function buildRaydiumCpmmInstruction(builderOptions) {
             quoteReserve: poolState.quoteReserve.toString()
         });
 
-        // STEP 3: CALCULATE MINIMUM AMOUNT OUT - Use the SDK's battle-tested math helper.
+        // STEP 3: PRE-CALCULATE AMOUNTS - Use the SDK's battle-tested math helper.
         const { amountOut, minAmountOut } = Cpmm.computeAmountOut({
             poolState,
             amountIn: new TokenAmount(new Token(TOKEN_PROGRAM_ID, swapDetails.inputMint, poolState.baseMint.equals(swapDetails.inputMint) ? poolState.baseDecimal : poolState.quoteDecimal), amountBN),
             slippage: new Percent(slippageBps, 10000),
         });
+        
+        console.log(`[RAYDIUM_CPMM_SDK] 🧮 PRE-CALCULATED AMOUNTS:`);
+        console.log(`[RAYDIUM_CPMM_SDK]   📊 Input amount: ${amountBN.toString()}`);
+        console.log(`[RAYDIUM_CPMM_SDK]   🪙 Expected output: ${amountOut.amount.toString()}`);
+        console.log(`[RAYDIUM_CPMM_SDK]   📋 Min amount out: ${minAmountOut.amount.toString()}`);
+        console.log(`[RAYDIUM_CPMM_SDK]   📈 Slippage: ${slippageBps} BPS`);
 
         // STEP 4: DERIVE PDAs AND GET ATAs - Assemble all required accounts.
         const { publicKey: authority } = Cpmm.getAssociatedAuthority({ programId });
@@ -2031,12 +2034,39 @@ async function buildMeteoraDBCInstruction(builderOptions) {
         
         const inAmount = amountBN;
 
-        // 3. Use the SDK's built-in swap instruction builder. This is the safest method.
+        // 3. PRE-CALCULATE EXPECTED OUTPUT - Use SDK to get accurate quote
+        let expectedOutput, minAmountOut;
+        try {
+            // Get quote from the SDK to calculate expected output
+            const quote = await client.pool.getQuote({
+                pool: poolIdPk,
+                poolConfig: poolState.config,
+                amountIn: inAmount,
+                swapBaseForQuote: !isBuy,
+            });
+            
+            expectedOutput = quote.amountOut;
+            // Apply slippage to get minimum amount out
+            const slippageBps = slippageBps || 5000; // Default 50% slippage
+            minAmountOut = expectedOutput.mul(new BN(10000 - slippageBps)).div(new BN(10000));
+            
+            console.log(`[METEORA_DBC_SDK] 🧮 PRE-CALCULATED AMOUNTS:`);
+            console.log(`[METEORA_DBC_SDK]   📊 Input amount: ${inAmount.toString()}`);
+            console.log(`[METEORA_DBC_SDK]   🪙 Expected output: ${expectedOutput.toString()}`);
+            console.log(`[METEORA_DBC_SDK]   📋 Min amount out: ${minAmountOut.toString()}`);
+            console.log(`[METEORA_DBC_SDK]   📈 Slippage: ${slippageBps} BPS`);
+        } catch (quoteError) {
+            console.warn(`[METEORA_DBC_SDK] ⚠️ Could not get quote, using conservative minimum: ${quoteError.message}`);
+            // Fallback to conservative estimate
+            minAmountOut = new BN(1);
+        }
+
+        // 4. Use the SDK's built-in swap instruction builder with pre-calculated amounts
         const swapTransaction = await client.pool.swap({
             pool: poolIdPk,
             poolConfig: poolState.config,
             amountIn: inAmount,
-            minimumAmountOut: new BN(1), // Use low min for sniping/copying
+            minimumAmountOut: minAmountOut,
             swapBaseForQuote: !isBuy, // If we're BUYING the base token, we are swapping QUOTE for BASE, so isBuy=true -> swapBaseForQuote=false
             owner: new PublicKey(userPublicKey),
             payer: new PublicKey(userPublicKey), // Payer and owner are the same
@@ -2079,12 +2109,18 @@ async function buildMeteoraDLMMInstruction(builderOptions) {
         // 1. Instantiate DLMM instance
         const dlmmPool = await Dlmm.create(connection, poolIdPk, { commitment: 'confirmed' });
         
-        // 2. Get a swap quote from the SDK
+        // 2. PRE-CALCULATE SWAP QUOTE - Get accurate amounts from SDK
         const swapQuote = await dlmmPool.getSwapQuote(
             inputMintPk,
             amountIn,
             slippageBps || 5000 // High default slippage for copy trades
         );
+        
+        console.log(`[METEORA_DLMM_SDK] 🧮 PRE-CALCULATED AMOUNTS:`);
+        console.log(`[METEORA_DLMM_SDK]   📊 Input amount: ${amountIn.toString()}`);
+        console.log(`[METEORA_DLMM_SDK]   🪙 Expected output: ${swapQuote.outAmount.toString()}`);
+        console.log(`[METEORA_DLMM_SDK]   📋 Min amount out: ${swapQuote.minOutAmount.toString()}`);
+        console.log(`[METEORA_DLMM_SDK]   📈 Slippage: ${slippageBps || 5000} BPS`);
 
         // 3. Build the swap transaction object from the quote
         const { txs } = await dlmmPool.swap(swapQuote, new PublicKey(userPublicKey));
@@ -2141,8 +2177,8 @@ async function buildMeteoraCpAmmInstruction(builderOptions) {
             throw new Error(`Could not fetch state for Meteora CP-AMM pool: ${poolIdPk.toBase58()}`);
         }
 
-        // 3. Get a swap quote from the SDK to calculate min amount out
-        const { minSwapOutAmount } = cpAmm.getQuote({
+        // 3. PRE-CALCULATE SWAP QUOTE - Get accurate amounts from SDK
+        const quote = cpAmm.getQuote({
             inAmount: amountIn,
             inputTokenMint: new PublicKey(swapDetails.inputMint),
             slippage: (slippageBps || 1000) / 100, // SDK expects slippage as a percentage (e.g., 10 for 10%)
@@ -2151,6 +2187,14 @@ async function buildMeteoraCpAmmInstruction(builderOptions) {
             currentTime: Math.floor(Date.now() / 1000), 
             currentSlot: 0, // Not strictly needed for basic swaps
         });
+        
+        const { minSwapOutAmount, outAmount } = quote;
+        
+        console.log(`[METEORA_CP-AMM_SDK] 🧮 PRE-CALCULATED AMOUNTS:`);
+        console.log(`[METEORA_CP-AMM_SDK]   📊 Input amount: ${amountIn.toString()}`);
+        console.log(`[METEORA_CP-AMM_SDK]   🪙 Expected output: ${outAmount.toString()}`);
+        console.log(`[METEORA_CP-AMM_SDK]   📋 Min amount out: ${minSwapOutAmount.toString()}`);
+        console.log(`[METEORA_CP-AMM_SDK]   📈 Slippage: ${slippageBps || 1000} BPS`);
         
         // 4. Use the SDK's high-level swap method to build the transaction object
         const swapTx = await cpAmm.swap({

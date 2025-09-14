@@ -187,7 +187,24 @@ class TelegramUI {
                 });
             }
         });
-        this.bot.on('polling_error', e => console.error(`❌ Telegram Polling Error: ${e.code} - ${e.message}`));
+        this.bot.on('polling_error', e => {
+            console.error(`❌ Telegram Polling Error: ${e.code} - ${e.message}`);
+            
+            // Handle specific error codes
+            if (e.code === 409) {
+                console.log(`🔄 Telegram Conflict (409): Another bot instance detected. Attempting to resolve...`);
+                // Don't restart immediately, let the error handler manage it
+                setTimeout(() => {
+                    console.log(`🔄 Attempting to restart Telegram polling after conflict resolution...`);
+                    this.bot.stopPolling();
+                    setTimeout(() => {
+                        this.bot.startPolling().catch(err => {
+                            console.error(`❌ Failed to restart polling: ${err.message}`);
+                        });
+                    }, 2000);
+                }, 5000);
+            }
+        });
     }
 
     async requestNewUserChatId(chatId) {

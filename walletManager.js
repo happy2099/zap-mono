@@ -30,6 +30,13 @@ class WalletManager extends EventEmitter {
     this.solanaManager = null; 
     this.initialized = false;
     this.encryptionKey = WALLET_ENCRYPTION_KEY;
+    
+    // ULTRA-FAST CACHE: In-memory keypair cache for instant retrieval
+    this.keypairCache = new Map(); // walletId -> { keypair, timestamp }
+    this.cacheTimeout = 5 * 60 * 1000; // 5 minutes cache timeout
+    
+    // Start cache cleanup interval
+    setInterval(() => this.cleanupCache(), 60000); // Clean every minute
 
     if (!this.encryptionKey) {
       console.error("FATAL: WALLET_ENCRYPTION_KEY is not set in environment variables. Wallet operations will fail.");
@@ -541,8 +548,15 @@ class WalletManager extends EventEmitter {
     }
   }
 
-  // Returns Keypair object using ID - searches internal state
+  // Returns Keypair object using ID - ULTRA-FAST with cache
   async getKeypairById(id) {
+    // ULTRA-FAST CACHE CHECK: Return cached keypair if available
+    const cached = this.keypairCache.get(id);
+    if (cached && (Date.now() - cached.timestamp) < this.cacheTimeout) {
+      console.log(`[DIAGNOSTIC] ⚡ CACHE HIT: Instant keypair retrieval for wallet ID: ${id}`);
+      return cached.keypair;
+    }
+    
     console.log(`[DIAGNOSTIC] Attempting to get Keypair for wallet ID: ${id}`);
     const privateKeyBs58 = await this.getDecryptedPrivateKeyBs58(id);
     try {
@@ -550,11 +564,25 @@ class WalletManager extends EventEmitter {
       if (secretKeyBytes.length !== 64) {
         throw new Error(`[DIAGNOSTIC] Invalid secret key length after decode: ${secretKeyBytes.length} bytes. Expected 64.`);
       }
-      console.log(`[DIAGNOSTIC] ✅ Keypair successfully derived for wallet ID: ${id}`);
-      return Keypair.fromSecretKey(secretKeyBytes);
+      const keypair = Keypair.fromSecretKey(secretKeyBytes);
+      
+      // CACHE THE KEYPAIR for instant future access
+      this.keypairCache.set(id, { keypair, timestamp: Date.now() });
+      console.log(`[DIAGNOSTIC] ✅ Keypair successfully derived and cached for wallet ID: ${id}`);
+      return keypair;
     } catch (error) {
       console.error(`❌ [DIAGNOSTIC] Failed to derive Keypair for ID ${id}:`, error.message);
       throw new Error(`Could not reconstruct Keypair for wallet ID ${id}. The private key may be corrupt.`);
+    }
+  }
+
+  // Clean up expired cache entries
+  cleanupCache() {
+    const now = Date.now();
+    for (const [id, cached] of this.keypairCache.entries()) {
+      if ((now - cached.timestamp) > this.cacheTimeout) {
+        this.keypairCache.delete(id);
+      }
     }
   }
 
