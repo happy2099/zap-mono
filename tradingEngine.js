@@ -2231,16 +2231,146 @@ async checkPumpFunMigration(tokenMint) {
             // 3. Extract the actual transaction from LaserStream response
             let actualTransaction = originalTransaction;
             if (originalTransaction && originalTransaction.transaction && originalTransaction.transaction.transaction) {
-                // Go one level deeper - the actual transaction is at transaction.transaction.transaction
+                // Go to the deepest level - the actual transaction is at transaction.transaction.transaction
                 const nestedTransaction = originalTransaction.transaction.transaction;
                 if (nestedTransaction && nestedTransaction.transaction) {
                     actualTransaction = nestedTransaction.transaction;
                     console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (4 levels deep)`);
                     console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
+                    
+                    // If still no instructions, try to get them from the message
+                    if (!actualTransaction.instructions && actualTransaction.message && actualTransaction.message.instructions) {
+                        // Convert LaserStream instruction format to Solana SDK format
+                        const laserStreamInstructions = actualTransaction.message.instructions;
+                        
+                        // Convert Buffer accountKeys to base58 strings if needed (same as Universal Analyzer)
+                        let accountKeys = actualTransaction.message.accountKeys || [];
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKeys type check: length=${accountKeys.length}, first element type=${typeof accountKeys[0]}, isBuffer=${Buffer.isBuffer(accountKeys[0])}, constructor=${accountKeys[0]?.constructor?.name}`);
+                        if (accountKeys.length > 0 && typeof accountKeys[0] !== 'string') {
+                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 Converting ${accountKeys.length} Buffer accountKeys to base58 strings`);
+                            const bs58 = require('bs58');
+                            accountKeys = accountKeys.map((key, index) => {
+                                // Check if it's a Buffer or Uint8Array or similar
+                                if (Buffer.isBuffer(key) || (key && typeof key === 'object' && key.constructor && (key.constructor.name === 'Uint8Array' || key.constructor.name === 'Buffer'))) {
+                                    try {
+                                        // Convert to Buffer if it's not already
+                                        const buffer = Buffer.isBuffer(key) ? key : Buffer.from(key);
+                                        const encoded = bs58.encode(buffer);
+                                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKey[${index}]: ${encoded}`);
+                                        return encoded;
+                                    } catch (error) {
+                                        console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to encode Buffer at index ${index}:`, error);
+                                        return null;
+                                    }
+                                }
+                                // If it's already a string, return as-is
+                                if (typeof key === 'string') {
+                                    return key;
+                                }
+                                // For any other type, try to convert to Buffer first
+                                try {
+                                    const buffer = Buffer.from(key);
+                                    const encoded = bs58.encode(buffer);
+                                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKey[${index}] (converted): ${encoded}`);
+                                    return encoded;
+                                } catch (error) {
+                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to convert to Buffer at index ${index}:`, error);
+                                    return null;
+                                }
+                            }).filter(key => key !== null); // Remove any failed conversions
+                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 After conversion: ${accountKeys.length} accountKeys, first few: ${accountKeys.slice(0, 3).join(', ')}`);
+                        }
+                        
+                        const convertedInstructions = laserStreamInstructions.map((instruction, index) => {
+                            // Convert programIdIndex to actual programId
+                            if (instruction.programIdIndex >= accountKeys.length) {
+                                console.error(`[DIRECT-SOLANA-SENDER] ❌ ProgramIdIndex ${instruction.programIdIndex} out of bounds (max: ${accountKeys.length - 1})`);
+                                return null; // Skip this instruction
+                            }
+                            const programId = accountKeys[instruction.programIdIndex];
+                            if (!programId) {
+                                console.error(`[DIRECT-SOLANA-SENDER] ❌ No programId found for programIdIndex ${instruction.programIdIndex}`);
+                                return null; // Skip this instruction
+                            }
+                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 Instruction ${index} programId: ${programId}`);
+                            
+                            // Convert accounts object to array
+                            const accounts = Object.keys(instruction.accounts).map(key => {
+                                const accountIndex = instruction.accounts[key];
+                                // Check if accountIndex is within bounds
+                                if (accountIndex >= accountKeys.length) {
+                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Account index ${accountIndex} out of bounds (max: ${accountKeys.length - 1})`);
+                                    return null; // Skip this account
+                                }
+                                const pubkey = accountKeys[accountIndex];
+                                if (!pubkey) {
+                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ No pubkey found for accountIndex ${accountIndex}`);
+                                    return null; // Skip this account
+                                }
+                                try {
+                                    return {
+                                        pubkey: new PublicKey(pubkey),
+                                        isSigner: accountIndex === 0, // First account is usually the signer
+                                        isWritable: true // Default to writable, could be refined
+                                    };
+                                } catch (error) {
+                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to create PublicKey for accountIndex ${accountIndex}, pubkey: ${pubkey}`, error);
+                                    return null; // Skip this account instead of throwing
+                                }
+                            }).filter(account => account !== null); // Remove null accounts
+                            
+                            // Convert data object to Buffer
+                            const dataArray = Object.keys(instruction.data).map(key => instruction.data[key]);
+                            const data = Buffer.from(dataArray);
+                            
+                            return {
+                                programId: new PublicKey(programId),
+                                keys: accounts,
+                                data: data
+                            };
+                        });
+                        
+                        actualTransaction.instructions = convertedInstructions;
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Converted ${convertedInstructions.length} LaserStream instructions to Solana SDK format`);
+                    }
                 } else {
                     actualTransaction = nestedTransaction;
                     console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (3 levels deep)`);
                     console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
+                    
+                    // If still no instructions, try to get them from the message
+                    if (!actualTransaction.instructions && actualTransaction.message && actualTransaction.message.instructions) {
+                        // Convert LaserStream instruction format to Solana SDK format
+                        const laserStreamInstructions = actualTransaction.message.instructions;
+                        const convertedInstructions = laserStreamInstructions.map((instruction, index) => {
+                            // Convert programIdIndex to actual programId
+                            const programId = actualTransaction.message.accountKeys[instruction.programIdIndex];
+                            
+                            // Convert accounts object to array
+                            const accounts = Object.keys(instruction.accounts).map(key => {
+                                const accountIndex = instruction.accounts[key];
+                                const pubkey = actualTransaction.message.accountKeys[accountIndex];
+                                return {
+                                    pubkey: new PublicKey(pubkey),
+                                    isSigner: accountIndex === 0, // First account is usually the signer
+                                    isWritable: true // Default to writable, could be refined
+                                };
+                            });
+                            
+                            // Convert data object to Buffer
+                            const dataArray = Object.keys(instruction.data).map(key => instruction.data[key]);
+                            const data = Buffer.from(dataArray);
+                            
+                            return {
+                                programId: new PublicKey(programId),
+                                keys: accounts,
+                                data: data
+                            };
+                        });
+                        
+                        actualTransaction.instructions = convertedInstructions;
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Converted ${convertedInstructions.length} LaserStream instructions to Solana SDK format`);
+                    }
                 }
             }
 
@@ -2347,7 +2477,8 @@ async checkPumpFunMigration(tokenMint) {
                         userSolAmount: userAmountToSpend.toNumber(), // Pass the calculated SOL amount in lamports
                         computeUnits: 'dynamic', // Let directSolanaSender handle compute units
                         simulate: true, // Enable simulation for debugging (non-blocking)
-                        nonceInfo: nonceInfo // Pass nonce info for durable transactions
+                        nonceInfo: nonceInfo, // Pass nonce info for durable transactions
+                        skipConfirmation: true // Ultra-fast mode: Skip confirmation for millisecond precision
                     }
                 );
     

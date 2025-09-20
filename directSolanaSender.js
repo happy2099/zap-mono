@@ -117,10 +117,14 @@ class DirectSolanaSender {
 
             // 🎯 TARGET CURRENT LEADER (for faster confirmation)
             const currentLeader = leaderTracker.getCurrentLeader();
+            const isHealthy = leaderTracker.isHealthy();
             let targetConnection = this.primaryConnection;
             let targetDescription = 'Helius RPC (primary)';
             
-            if (currentLeader && leaderTracker.isHealthy()) {
+            // Debug leader tracker status
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 Leader tracker status: isMonitoring=${leaderTracker.isMonitoring}, isHealthy=${isHealthy}, currentLeader=${currentLeader ? currentLeader.substring(0, 8) + '...' : 'null'}`);
+            
+            if (currentLeader && isHealthy) {
                 console.log(`[DIRECT-SOLANA-SENDER] 🎯 Current leader: ${currentLeader}`);
                 
                 // Try to use leader-specific connection if available
@@ -153,15 +157,36 @@ class DirectSolanaSender {
             console.log(`[DIRECT-SOLANA-SENDER] ⏳ Confirming transaction...`);
             
             // Add timeout to prevent hanging
-            const confirmationPromise = targetConnection.confirmTransaction({
-                signature,
-                lastValidBlockHeight,
-                commitment: 'confirmed'
+            let confirmationPromise;
+            if (options.nonceInfo) {
+                // For nonce transactions, use custom confirmation without block height check
+                console.log(`[DIRECT-SOLANA-SENDER] 🔐 Confirming nonce transaction (custom polling method)`);
+                confirmationPromise = this._confirmNonceTransaction(targetConnection, signature);
+            } else {
+                // For regular transactions, use block height check
+                confirmationPromise = targetConnection.confirmTransaction({
+                    signature,
+                    lastValidBlockHeight,
+                    commitment: 'confirmed'
+                });
+            }
+            
+            // Add a race condition with a timeout to prevent hanging
+            const timeoutPromise = new Promise((_, reject) => {
+                setTimeout(() => {
+                    reject(new Error('Transaction confirmation timeout - proceeding without confirmation'));
+                }, 1500); // 1.5 second timeout for ultra-fast copy trading
             });
             
-            const timeoutPromise = new Promise((_, reject) => {
-                setTimeout(() => reject(new Error('Confirmation timeout after 30 seconds')), 30000);
-            });
+            // Ultra-fast mode: Skip confirmation entirely if requested
+            if (options.skipConfirmation) {
+                console.log(`[DIRECT-SOLANA-SENDER] ⚡ Ultra-fast mode: Skipping confirmation, transaction sent successfully`);
+                return {
+                    signature,
+                    success: true,
+                    confirmation: { value: { err: null, slot: null, confirmations: null } }
+                };
+            }
             
             const confirmation = await Promise.race([confirmationPromise, timeoutPromise]);
             
@@ -285,6 +310,93 @@ class DirectSolanaSender {
         }
         
         return this.leaderConnections.get(leaderPublicKey);
+    }
+
+    /**
+     * Custom confirmation method for nonce transactions (no block height check)
+     * @private
+     */
+    async _confirmNonceTransaction(connection, signature) {
+        console.log(`[DIRECT-SOLANA-SENDER] 🔐 Starting custom nonce transaction confirmation for ${signature.substring(0, 8)}...`);
+        
+        const startTime = Date.now();
+        const maxWaitTime = 1000; // 1 second max for ultra-fast copy trading
+        const pollInterval = 50; // Poll every 50ms for ultra-fast response
+        
+        let lastStatus = null;
+        let consecutiveNotFound = 0;
+        
+        while (Date.now() - startTime < maxWaitTime) {
+            try {
+                // Try multiple confirmation methods
+                const status = await connection.getSignatureStatus(signature, {
+                    searchTransactionHistory: true
+                });
+                
+                if (status && status.value) {
+                    const { confirmationStatus, err, slot } = status.value;
+                    lastStatus = status.value;
+                    
+                    if (err) {
+                        console.error(`[DIRECT-SOLANA-SENDER] ❌ Nonce transaction failed:`, err);
+                        throw new Error(`Transaction failed: ${JSON.stringify(err)}`);
+                    }
+                    
+                    if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
+                        const confirmationTime = Date.now() - startTime;
+                        console.log(`[DIRECT-SOLANA-SENDER] ✅ Nonce transaction confirmed in ${confirmationTime}ms (status: ${confirmationStatus}, slot: ${slot})`);
+                        return {
+                            value: {
+                                err: null,
+                                slot: slot,
+                                confirmations: status.value.confirmations || 1,
+                                confirmationStatus
+                            }
+                        };
+                    }
+                    
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔄 Nonce transaction status: ${confirmationStatus}, waiting...`);
+                    consecutiveNotFound = 0; // Reset counter when we find the transaction
+                } else {
+                    consecutiveNotFound++;
+                    if (consecutiveNotFound <= 3) {
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔄 Nonce transaction not found yet (attempt ${consecutiveNotFound}), waiting...`);
+                    } else if (consecutiveNotFound % 5 === 0) {
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔄 Nonce transaction still not found after ${consecutiveNotFound} attempts...`);
+                    }
+                }
+                
+                // Wait before next poll
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+                
+            } catch (error) {
+                console.error(`[DIRECT-SOLANA-SENDER] ❌ Error polling nonce transaction status:`, error.message);
+                consecutiveNotFound++;
+                
+                // If we get too many errors, give up
+                if (consecutiveNotFound > 10) {
+                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Too many polling errors, giving up on nonce confirmation`);
+                    break;
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+            }
+        }
+        
+        // If we have a last status, return it even if not fully confirmed
+        if (lastStatus) {
+            console.log(`[DIRECT-SOLANA-SENDER] ⚠️ Nonce transaction confirmation timeout, but transaction exists. Returning last known status.`);
+            return {
+                value: {
+                    err: lastStatus.err,
+                    slot: lastStatus.slot,
+                    confirmations: lastStatus.confirmations || 0,
+                    confirmationStatus: lastStatus.confirmationStatus || 'unknown'
+                }
+            };
+        }
+        
+        throw new Error(`Nonce transaction confirmation timed out after ${maxWaitTime/1000} seconds - transaction may not have been sent successfully`);
     }
 
     /**
