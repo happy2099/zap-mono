@@ -1,278 +1,472 @@
-// File: laserstreamManager.js (ENHANCED - Singapore Regional + Refined Data)
-// Description: Advanced Helius LaserStream manager with Singapore regional endpoints and refined transaction data extraction
+// File: laserstreamManager.js (PROFESSIONAL PLAN - LaserStream gRPC)
+// Description: Advanced Helius LaserStream manager using gRPC for Professional plan users
 
 const { subscribe, CommitmentLevel, decodeSubscribeUpdate } = require('helius-laserstream');
 const { EventEmitter } = require('events');
+const { PublicKey } = require('@solana/web3.js');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
+const bs58 = require('bs58');
+
 
 // Add fetch for Node.js compatibility
 const fetch = require('node-fetch');
 
 class LaserStreamManager extends EventEmitter {
-    constructor(tradingEngineOrWorker) {
+    constructor(tradingEngineOrWorker, mainConfig = null, redisManager = null) {
         super();
         if (!tradingEngineOrWorker) {
             throw new Error("LaserStreamManager requires a tradingEngine or worker instance.");
         }
 
-        // This makes the manager flexible for both threaded and non-threaded use
+        // --- THE FIX: Store the main config ---
+        this.config = mainConfig || config; // Use passed config or fallback to require('./config.js')
+        this.redisManager = redisManager; // 🚀 REDIS ENHANCEMENT: Store for caching pre-fetched data
+        // --- END OF FIX ---
+
+        // Parent worker will be the TraderMonitorWorker instance.
+        // It's still important for cleanup context.
+        this.parentWorker = tradingEngineOrWorker; 
         if(tradingEngineOrWorker instanceof require('./tradingEngine.js').TradingEngine) {
             this.tradingEngine = tradingEngineOrWorker;
-            this.parentWorker = null; // We are in single-thread mode
+            // if single-threaded, it might also register this as a general callback system if you wish.
         } else {
-            this.parentWorker = tradingEngineOrWorker; // The worker is passed in
-            this.tradingEngine = null; // Will be set separately in the worker
+            // It's the Worker (e.g. TraderMonitorWorker)
+            this.tradingEngine = null; // will be set externally later.
         }
         
         this.stream = null;
         this.activeTraderWallets = new Set();
         this.streamStatus = 'idle';
-        this.singaporeEndpoints = {
-            laserstream: 'wss://sgp-laserstream.helius-rpc.com',
-            rpc: 'https://sgp.helius-rpc.com',
-            sender: 'https://sgp-sender.helius-rpc.com/fast'
+        
+        // Safety check to ensure activeTraderWallets is always a Set
+        if (!this.activeTraderWallets) {
+            this.activeTraderWallets = new Set();
+        }
+    }
+
+    // Getter method to ensure activeTraderWallets is always a Set
+    get activeTraderWallets() {
+        if (!this._activeTraderWallets) {
+            this._activeTraderWallets = new Set();
+        }
+        return this._activeTraderWallets;
+    }
+
+    // Setter method to ensure activeTraderWallets is always a Set
+    set activeTraderWallets(value) {
+        this._activeTraderWallets = value instanceof Set ? value : new Set(value || []);
+        
+        // Initialize PumpFun template cache
+       
+        
+        // Professional Plan: LaserStream gRPC Configuration
+        this.laserstreamConfig = {
+            apiKey: this.config.HELIUS_API_KEY, // Use the dynamically loaded API key from config.js
+            endpoint: this.config.HELIUS_ENDPOINTS.laserstream_grpc, // Primary: Singapore
+            fallbackEndpoint: this.config.HELIUS_ENDPOINTS.laserstream_grpc_alt // Fallback: EWR
         };
         
-        console.log('[LASERSTREAM-ENHANCED] 🚀 Manager initialized with Singapore regional endpoints.');
+        // Legacy endpoints are for RPC/WebSocket services, NOT LaserStream gRPC.
+        // They are retained for compatibility if `getSingaporeEndpoints` or `healthCheck` were ever to access RPC/sender related tasks.
+        this.singaporeEndpoints = {
+            // No direct 'laserstream' field here as the actual LaserStream uses gRPC endpoints defined in this.laserstreamConfig
+            rpc: this.config.HELIUS_ENDPOINTS.rpc, // Using the centralized RPC URL
+            sender: this.config.HELIUS_ENDPOINTS.sender // Using the centralized SENDER URL
+        };
+        
+        // Ensure Pump.fun program IDs are pre-converted to strings for consistent comparisons
+        this.pumpFunMainProgramIdStr = this.config.PLATFORM_IDS.PUMP_FUN.toBase58();
+        this.pumpFunAMMProgramIdStr = this.config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58();
+        
+        console.log('[LASERSTREAM-PROFESSIONAL] 🚀 Manager initialized with LaserStream gRPC (Professional Plan).');
+        console.log(`[LASERSTREAM-PROFESSIONAL] 🌏 Primary Endpoint (Singapore): ${this.laserstreamConfig.endpoint}`);
+        console.log(`[LASERSTREAM-PROFESSIONAL] 🌏 Fallback Endpoint (EWR): ${this.laserstreamConfig.fallbackEndpoint}`);
     }
 
-    async startMonitoring() {
+    // ===== TREASURE HUNTER (BATTLE-TESTED) =====
+    // This version intelligently finds the correct transaction object,
+    // regardless of how deeply it is nested by Helius.
+    getCoreTransaction(updateObject) {
+        
+        // Handle the specific Helius LaserStream structure we just discovered
+        if (updateObject && updateObject.transaction && updateObject.transaction.transaction) {
+            const nestedTx = updateObject.transaction.transaction;
+            if (nestedTx.meta && nestedTx.message) {
+                return {
+                    message: nestedTx.message,
+                    meta: nestedTx.meta,
+                    signature: updateObject.signature || nestedTx.signature || null
+                };
+            }
+        }
+        
+        // Fallback to original logic for other structures
+        let current = updateObject;
+        let metaObject = null;
+        let messageObject = null;
+        
+        // Search for meta and message at different levels
+        for (let i = 0; i < 5; i++) {
+            if (current && current.meta && !metaObject) {
+                metaObject = current.meta;
+            }
+            if (current && current.message && !messageObject) {
+                messageObject = current.message;
+            }
+            
+            if (current && current.transaction) {
+                current = current.transaction;
+            } else {
+                break;
+            }
+        }
+        
+        if (metaObject && messageObject) {
+            return {
+                message: messageObject,
+                meta: metaObject,
+                signature: updateObject.signature || null
+            };
+        }
+        return null;
+    }
+
+    // ===== WORKING VERSION - Based on live_debug.js =====
+    async startMonitoring(walletsToMonitor = null) {
         if (this.stream) {
-            console.log('[LASERSTREAM-ENHANCED] 🔄 Stream is already active. Restarting to apply latest trader list...');
+            console.log('[LASERSTREAM-PRO] 🔄 Stream is already active. Restarting to apply latest trader list...');
             await this.stop();
         }
-   
+
         try {
-            const walletsToMonitor = await this.tradingEngine.getMasterTraderWallets();
-            if (walletsToMonitor.length === 0) {
-                console.log('[LASERSTREAM-ENHANCED] ⚠️ No active traders to monitor.');
-                this.streamStatus = 'connected'; 
-                this.emit('status_change', { status: 'connected', reason: 'No active traders' });
+            const traderWallets = walletsToMonitor || Array.from(this.activeTraderWallets);
+            if (traderWallets.length === 0) {
+                this.streamStatus = 'connected';
+                console.log('[LASERSTREAM-PRO] ⚠️ No active traders to monitor. Standing by.');
                 return;
             }
-   
-            this.activeTraderWallets = new Set(walletsToMonitor);
-            console.log(`[LASERSTREAM-ENHANCED] 🎯 Subscribing to ${this.activeTraderWallets.size} master trader wallets...`);
-            console.log(`[LASERSTREAM-ENHANCED] 📍 Traders: ${Array.from(this.activeTraderWallets).map(w => shortenAddress(w)).join(', ')}`);
-   
+            this.activeTraderWallets = new Set(traderWallets.map(w => w.toString()));
+            const finalWalletsToSubscribe = Array.from(this.activeTraderWallets);
+            
+            console.log(`[LASERSTREAM-PRO] 🎯 Subscribing to ${finalWalletsToSubscribe.length} active trader wallets...`);
+            console.log(`[LASERSTREAM-PRO] 🔍 Wallets to monitor: ${finalWalletsToSubscribe.map(w => shortenAddress(w)).join(', ')}`);
+
+            if (!this.config.HELIUS_API_KEY) {
+                throw new Error("Cannot subscribe: HELIUS_API_KEY is missing.");
+            }
+
+            // ✅ USE EXACT SAME CONFIG AS WORKING live_debug.js
             const laserstreamConfig = {
-                apiKey: config.HELIUS_API_KEY,
-                endpoint: this.singaporeEndpoints.laserstream, // Use Singapore endpoint
-                maxReconnectAttempts: 15, // Increased for reliability
-                channelOptions: {
-                    'grpc.max_send_message_length': 64 * 1024 * 1024,      // 64MB
-                    'grpc.max_receive_message_length': 100 * 1024 * 1024,  // 100MB (within i32 limit)
-                    'grpc.keepalive_time_ms': 20000,           // Ping every 20s to stay alive
-                    'grpc.keepalive_timeout_ms': 10000,        // Wait 10s for response
-                    'grpc.keepalive_permit_without_calls': 1,  // Send pings even when idle
-                    'grpc.http2.min_time_between_pings_ms': 15000,
-                    'grpc.http2.write_buffer_size': 1024 * 1024,           // 1MB write buffer
-                    'grpc-node.max_session_memory': 64 * 1024 * 1024,      // 64MB session memory
-                    'grpc.initial_stream_window_size': 16 * 1024 * 1024,   // 16MB stream window
-                    'grpc.initial_connection_window_size': 32 * 1024 * 1024, // 32MB connection window
-                }
+                apiKey: this.config.HELIUS_API_KEY,
+                endpoint: "https://laserstream-mainnet-sgp.helius-rpc.com", // Same as working live_debug.js
             };
-   
-            if (!laserstreamConfig.apiKey) {
-                const errorMsg = "Cannot subscribe: HELIUS_API_KEY is missing.";
-                console.error(`❌ [LASERSTREAM-ENHANCED] ${errorMsg}`);
-                this.streamStatus = 'error';
-                this.emit('status_change', { status: 'disconnected', error: errorMsg });
-                return;
-            }
-   
-            // Enhanced subscription request with refined filtering
-            const subscriptionRequest = {
-                // Monitor specific trader accounts for balance changes
-                accounts: {
-                    "trader-accounts": {
-                        account: walletsToMonitor,
-                        owner: [],
-                        filters: []
-                    }
-                },
-                // Monitor transactions involving trader wallets
-                transactions: { 
-                    "copy-trade-detection": { 
-                        accountRequired: walletsToMonitor, 
+
+            // No DEX filtering - monitor all transactions from tracked wallets
+            console.log(`[LASERSTREAM-PRO] Subscribing to ${finalWalletsToSubscribe.length} trader wallets (no DEX filtering).`);
+
+            const subscription = {
+                transactions: {
+                    "zap-copy-trades": {
+                        // BATTLE-TESTED: Use accountIncludes (not accountInclude)
+                        accountIncludes: finalWalletsToSubscribe,
+                        
+                        // Standard noise reduction
                         vote: false,
                         failed: false,
-                        accountInclude: [], // Include all accounts in transaction
-                        accountExclude: []  // Don't exclude any accounts
                     }
                 },
-                // Get transaction status updates
-                transactionsStatus: {
-                    "trade-confirmation": {
-                        accountRequired: walletsToMonitor
-                    }
-                },
+                // Use PROCESSED for the absolute fastest notification speed.
                 commitment: CommitmentLevel.PROCESSED,
-                // Enhanced data slicing for quick analysis
-                accountsDataSlice: [
-                    {
-                        offset: 0,   // Start of account data
-                        length: 128  // First 128 bytes for quick token/balance analysis
-                    }
-                ]
             };
-            
-            console.log(`[LASERSTREAM-ENHANCED] 🔧 Using enhanced subscription with data slicing and Singapore endpoint`);
-            
-            // Enhanced callback with refined data extraction
-            const streamCallback = (error, rawUpdateData) => {
-                if (error) {
-                    console.error('[LASERSTREAM-ENHANCED] ❌ Stream encountered a critical error:', error);
-                    this.streamStatus = 'error';
-                    this.emit('status_change', { status: 'disconnected', error: error.message });
-                    return;
-                }
 
+            console.log("[LASERSTREAM-PRO] ✅ Using accountIncludes filtering. Connecting...");
+
+            // ✅ USE BATTLE-TESTED LOGIC FROM test-pipeline.js
+            const streamCallback = async (update) => {
                 try {
-                    // Decode the raw binary data into a usable object
-                    const update = decodeSubscribeUpdate(rawUpdateData);
-                    
-                    // Handle different types of updates
-                    if (update.transaction) {
-                        this.handleTransactionUpdate(update.transaction);
-                        // NEW: Also check for universal trader identification
-                        this.handleUniversalTraderDetection(update.transaction);
-                    } else if (update.account) {
-                        this.handleAccountUpdate(update.account);
-                    } else if (update.transactionStatus) {
-                        this.handleTransactionStatusUpdate(update.transactionStatus);
+                    // 1. Safety check: Ensure the update object and its nested transaction exist.
+                    if (typeof update !== 'object' || update === null || !update.transaction) {
+                        return; // Ignore invalid or non-transactional updates.
                     }
                     
-                } catch (decodeError) {
-                    console.error('[LASERSTREAM-ENHANCED] ❌ Error decoding update:', decodeError);
+                    // BATTLE-TESTED: Use Treasure Hunter to find the correct data structure
+                    const coreTx = this.getCoreTransaction(update.transaction);
+                    
+                    if (!coreTx) {
+                        console.warn('[LASERSTREAM-PRO] ❌ Treasure Hunter could not find core transaction block.');
+                        return;
+                    }
+                    
+                    // BATTLE-TESTED: Access accountKeys from the correct structure
+                    const accountKeyBuffers = coreTx.message?.accountKeys;
+                    
+                    if (!accountKeyBuffers || accountKeyBuffers.length === 0) {
+                        console.warn('[LASERSTREAM-PRO] ❌ Transaction received with an empty accountKeys array.');
+                        return;
+                    }
+                    
+                    // BATTLE-TESTED: Convert to strings and find trader
+                    const accountKeyStrings = accountKeyBuffers.map(bs58.encode);
+                    if (!this.activeTraderWallets || this.activeTraderWallets.size === 0) {
+                        return; // Skip if no active trader wallets
+                    }
+                    const sourceWallet = accountKeyStrings.find(keyStr => this.activeTraderWallets && this.activeTraderWallets.has(keyStr));
+
+                    if (!sourceWallet) {
+                        // This will now correctly ignore transactions that are not from your followed traders.
+                        return;
+                    }
+
+                    // If we reach this point, WE HAVE A MATCH. The pipeline is working.
+                    // Signature found at nested path: update.transaction.transaction.signature
+                    
+                    // BATTLE-TESTED: Get the raw signature Buffer (nested path!)
+                    const signatureBuffer = update.transaction?.transaction?.signature;
+                    if (!signatureBuffer) {
+                        console.log('[LASERSTREAM-PRO] ⚠️ Could not find signature, but transaction data is available');
+                        return; // Skip if no signature
+                    }
+                    
+                    // For logging purposes, encode to string
+                    const signatureString = bs58.encode(signatureBuffer);
+                    console.log(`[LASERSTREAM-PRO] ✅ Source Wallet Identified: ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureString)}`);
+                    
+                    // The handoff to the traderMonitorWorker's handler.
+                    if (this.parentWorker && typeof this.parentWorker.handleTraderActivity === 'function') {
+                        // Pass the raw Buffer to handleTraderActivity - it will encode it
+                        this.parentWorker.handleTraderActivity(sourceWallet, signatureBuffer, update); // Pass the whole 'update' object 
+                    } else {
+                         console.warn(`[LASERSTREAM-PRO] ⚠️ No valid 'handleTraderActivity' handler found.`);
+                    }
+
+                } catch (handlerError) {
+                    console.error('❌❌ FATAL ERROR in LaserStream streamCallback ❌❌', {
+                        errorMessage: handlerError?.message || 'Unknown Error',
+                        errorStack: handlerError?.stack || 'No Stack'
+                    });
                 }
             };
-   
+
+            const errorCallback = (error) => {
+                console.error('[LASERSTREAM-PRO] 🚨 SDK-LEVEL STREAM ERROR:', error);
+            };
+
             this.stream = await subscribe(
-                laserstreamConfig, 
-                subscriptionRequest, 
-                streamCallback
+                laserstreamConfig,
+                subscription,
+                streamCallback,
+                errorCallback
             );
-            
-            console.log(`[LASERSTREAM-ENHANCED] ✅ Stream connected to Singapore endpoint. ID: ${this.stream.id}`);
+
+            console.log(`[LASERSTREAM-PRO] ✅ LaserStream connected using WORKING approach. ID: ${this.stream.id}. Monitoring...`);
+            console.log(`[LASERSTREAM-PRO] 🔧 Using proven live_debug.js method with ${finalWalletsToSubscribe.length} wallets`);
             this.streamStatus = 'connected';
-            this.emit('status_change', { status: 'connected', reason: 'Stream successfully subscribed to Singapore region' });
-   
+    
         } catch (error) {
-            const errorMsg = `Failed to subscribe: ${error.message || error}`;
-            console.error('[LASERSTREAM-ENHANCED] ❌', errorMsg);
-            
-            // Log specific gRPC errors for debugging
-            if (error.message && error.message.includes('invalid value')) {
-                console.error('[LASERSTREAM-ENHANCED] 🔧 This appears to be a gRPC configuration error. Check channel options.');
-            }
-            
+            console.error(`[LASERSTREAM-PRO] ❌ Failed to subscribe:`, error);
             this.streamStatus = 'error';
-            this.emit('status_change', { status: 'disconnected', error: errorMsg });
         }
     }
+    
 
-    // Enhanced transaction handling with refined data extraction and filtering
-    handleTransactionUpdate(transactionUpdate) {
+    // Enhanced transaction handling with refined data extraction
+    async handleTransactionUpdate(transactionUpdate) { // Now accepts the full update object
         try {
+            // DEBUG: Check activeTraderWallets state
+            console.log(`[LASERSTREAM-DEBUG] activeTraderWallets type: ${typeof this.activeTraderWallets}, size: ${this.activeTraderWallets ? this.activeTraderWallets.size : 'undefined'}`);
+            
+            // THE FIX: The transaction data is directly on the object passed in.
             const transaction = transactionUpdate.transaction;
             if (!transaction || !transaction.signatures || transaction.signatures.length === 0) {
                 return;
             }
 
             const signature = transaction.signatures[0];
-            const signatureStr = typeof signature === 'string' ? signature : signature.toString('base64');
+            const signatureStr = typeof signature === 'string' ? signature : bs58.encode(signature); // Use bs58 for buffers
             
-            // ✅ TIME-BASED FILTERING: Check if transaction is recent enough
-            if (!this.isTransactionRecent(transaction, signatureStr)) {
-                return; // Skip old transactions
-            }
-            
-            // ✅ BLOCKHASH-BASED FILTERING: Check if blockhash is recent
-            if (!this.isBlockhashRecent(transaction, signatureStr)) {
-                return; // Skip transactions with stale blockhash
-            }
-            
-            // Extract account keys with proper handling
+            // Extract account keys with proper Helius LaserStream format handling
             let accountKeys = [];
+            
+            // According to Helius docs, account keys are in transaction.message.accountKeys
+            // But they might be in different formats - let's handle all cases
             if (transaction.message && transaction.message.accountKeys) {
                 accountKeys = transaction.message.accountKeys.map(key => {
-                    if (typeof key === 'string') return key;
-                    if (key && key.pubkey) return key.pubkey.toString();
-                    if (Buffer.isBuffer(key)) return key.toString('base64');
-                    return key.toString();
+                    try {
+                        // Case 1: Direct buffer/bytes
+                        if (Buffer.isBuffer(key)) {
+                            return new PublicKey(key).toBase58();
+                        }
+                        // Case 2: Object with pubkey field
+                        if (key && key.pubkey) {
+                            return new PublicKey(key.pubkey).toBase58();
+                        }
+                        // Case 3: String format
+                        if (typeof key === 'string') {
+                            return key;
+                        }
+                        // Case 4: Already a PublicKey
+                        if (key instanceof PublicKey) {
+                            return key.toBase58();
+                        }
+                        // Case 5: Try to convert directly
+                        return new PublicKey(key).toBase58();
+                    } catch (error) {
+                        console.log(`[LASERSTREAM-DEBUG] Failed to parse account key:`, key, error.message);
+                        return null;
+                    }
+                }).filter(key => key !== null);
+            }
+            
+            // Alternative: Check if account keys are in a different location
+            if (accountKeys.length === 0 && transaction.message && transaction.message.instructions) {
+                // Sometimes account keys might be referenced in instructions
+                const allKeys = new Set();
+                transaction.message.instructions.forEach(instruction => {
+                    if (instruction.accounts) {
+                        instruction.accounts.forEach(accountIndex => {
+                            if (transaction.message.accountKeys && transaction.message.accountKeys[accountIndex]) {
+                                const key = transaction.message.accountKeys[accountIndex];
+                                try {
+                                    if (Buffer.isBuffer(key)) {
+                                        allKeys.add(new PublicKey(key).toBase58());
+                                    } else if (key && key.pubkey) {
+                                        allKeys.add(new PublicKey(key.pubkey).toBase58());
+                                    } else if (typeof key === 'string') {
+                                        allKeys.add(key);
+                                    }
+                                } catch (e) {
+                                    // Skip invalid keys
+                                }
+                            }
+                        });
+                    }
                 });
+                accountKeys = Array.from(allKeys);
             }
 
             // Find which trader wallet is involved
-            const sourceWallet = accountKeys.find(key => this.activeTraderWallets.has(key));
+            if (!this.activeTraderWallets || this.activeTraderWallets.size === 0) {
+                console.log(`[LASERSTREAM-DEBUG] ⚠️ No active trader wallets set, skipping transaction`);
+                return;
+            }
+            const sourceWallet = accountKeys.find(key => this.activeTraderWallets && this.activeTraderWallets.has(key));
+            
+            // DEBUG: Log transaction structure and wallet detection details
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction Structure Debug:`);
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction keys:`, Object.keys(transaction));
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Message keys:`, transaction.message ? Object.keys(transaction.message) : 'No message');
+            console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys type:`, transaction.message?.accountKeys ? typeof transaction.message.accountKeys : 'No accountKeys');
+            console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys length:`, transaction.message?.accountKeys?.length || 0);
+            console.log(`[LASERSTREAM-DEBUG] 🔍 First accountKey sample:`, transaction.message?.accountKeys?.[0]);
+            
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Wallet Detection Debug:`);
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Active Trader Wallets: ${Array.from(this.activeTraderWallets).join(', ')}`);
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Account Keys in Transaction: ${accountKeys.slice(0, 5).join(', ')}${accountKeys.length > 5 ? '...' : ''}`);
+            console.log(`[LASERSTREAM-DEBUG] 🔍 Source Wallet Found: ${sourceWallet || 'NONE'}`);
             
             if (sourceWallet) {
-                console.log(`[LASERSTREAM-ENHANCED] 🎯 Copy trade detected for ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureStr)}`);
-                
-                // Extract refined transaction data for copy trading
-                const refinedData = this.extractRefinedTransactionData(transactionUpdate, sourceWallet);
-                
-                // Emit enhanced event with refined data
-                this.emit('copy_trade_detected', {
-                    sourceWallet,
-                    signature: signatureStr,
-                    refinedData,
-                    timestamp: Date.now(),
-                    endpoint: 'singapore-laserstream'
-                });
-
-                // Call parent handler if available
-                if (this.parentWorker && typeof this.parentWorker.handleTraderActivity === 'function') {
-                    this.parentWorker.handleTraderActivity(sourceWallet, signatureStr, refinedData);
+                // --- START OF NEW MASTER PLAN LOGIC ---
+                // The transaction age check can happen first, as it's the cheapest.
+                const ageInSeconds = (Date.now() - (transactionUpdate.blockTime * 1000)) / 1000;
+                if (ageInSeconds > this.config.TRANSACTION_FILTERING.MAX_AGE_SECONDS) {
+                    this.parentWorker.logInfo(`[FILTER] ⏰ Skipping old transaction. Sig: ${signatureStr.slice(0,10)}... (age: ${ageInSeconds.toFixed(0)}s)`);
+                    return; // Kill it immediately.
                 }
+                this.parentWorker.logInfo(`[FILTER] ✅ Transaction age: ${ageInSeconds.toFixed(0)}s - within acceptable range.`);
+
+                // --- NOISE FILTERING DISABLED in config.js, so we don't check here ---
+
+                // If we reach this point, the transaction is FRESH and it is NOT noise.
+                console.log(`[LASERSTREAM-PROFESSIONAL] 🎯 High-quality transaction detected for ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureStr)}`);
+                
+                // 🚀 REDIS CACHE ENHANCEMENT: Store pre-fetched data for instant access
+                try {
+                    const preFetchedData = this.extractRefinedTransactionData(transactionUpdate, sourceWallet);
+                    
+                    // Cache for 30 seconds (enough for analysis)
+                    const cacheKey = `laserstream:prefetch:${signatureStr}`;
+                    if (this.redisManager) {
+                        await this.redisManager.setWithExpiry(cacheKey, JSON.stringify(preFetchedData), 30);
+                        console.log(`[LASERSTREAM-PROFESSIONAL] 💎 Pre-fetched data cached for ${shortenAddress(signatureStr)}`);
+                    }
+                } catch (cacheError) {
+                    console.error('[LASERSTREAM-PROFESSIONAL] ⚠️ Failed to cache pre-fetched data:', cacheError.message);
+                }
+
+                // Call the explicitly registered callback instead of parentWorker (more reliable context)
+                if (typeof this.transactionNotificationCallback === 'function') { // <--- USE THE NEW CALLBACK
+                    this.transactionNotificationCallback(sourceWallet, signatureStr, transactionUpdate);
+                } else if (this.parentWorker && typeof this.parentWorker.handleTraderActivity === 'function') { // Fallback for old callers
+                    this.parentWorker.handleTraderActivity(sourceWallet, signatureStr, transactionUpdate);
+                } else {
+                    console.warn(`[LASERSTREAM-PROFESSIONAL] ⚠️ No valid handler found for transaction update.`);
+                }
+            } else {
+                // DEBUG: Log when no source wallet is found
+                console.log(`[LASERSTREAM-DEBUG] 🚫 No active trader wallet found in transaction. Skipping.`);
             }
             
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error handling transaction update:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error handling transaction update:', error);
         }
     }
 
-    // Extract refined transaction data for copy trading
+    // ====================================================================
+    // ====== EXTRACT REFINED DATA (vFINAL - With Treasure Hunter) ======
+    // ====================================================================
     extractRefinedTransactionData(transactionUpdate, sourceWallet) {
         try {
-            const transaction = transactionUpdate.transaction;
-            const meta = transactionUpdate.meta;
+            // --- DEBUG: Let's see what we're actually getting ---
+            console.log(`[LASERSTREAM-DEBUG] 🔍 TransactionUpdate structure:`, {
+                hasTransaction: !!transactionUpdate.transaction,
+                hasMeta: !!transactionUpdate.meta,
+                hasMessage: !!transactionUpdate.message,
+                keys: Object.keys(transactionUpdate)
+            });
             
+            if (transactionUpdate.transaction) {
+                console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction structure:`, {
+                    hasMeta: !!transactionUpdate.transaction.meta,
+                    hasMessage: !!transactionUpdate.transaction.message,
+                    keys: Object.keys(transactionUpdate.transaction)
+                });
+            }
+            
+            // --- THIS IS THE FINAL FIX ---
+            // We use our proven "Treasure Hunter" to find the real core transaction data.
+            const coreTx = this.getCoreTransaction(transactionUpdate);
+
+            if (!coreTx) {
+                // If we can't find the core data, we return a copyable=false object
+                // to prevent empty data from being cached.
+                return { isCopyable: false, reason: "Treasure Hunter could not find core transaction block in Laserstream update." };
+            }
+            // --- END OF FINAL FIX ---
+            
+            // Now, we can safely and reliably extract data from the coreTx object.
             const refinedData = {
-                // Basic transaction info
-                signature: transaction.signatures[0],
+                signature: bs58.encode(transactionUpdate.signature), // Signature is on the root object
                 slot: transactionUpdate.slot,
                 blockTime: transactionUpdate.blockTime,
                 
-                // Account information
-                accountKeys: transaction.message?.accountKeys || [],
-                numRequiredSignatures: transaction.message?.header?.numRequiredSignatures || 0,
-                numReadonlySignedAccounts: transaction.message?.header?.numReadonlySignedAccounts || 0,
-                numReadonlyUnsignedAccounts: transaction.message?.header?.numReadonlyUnsignedAccounts || 0,
+                // All other data comes from the coreTx object found by the Treasure Hunter
+                accountKeys: coreTx.message?.accountKeys || [],
+                instructions: coreTx.message?.instructions || [],
+                innerInstructions: coreTx.meta?.innerInstructions || [],
+                preBalances: coreTx.meta?.preBalances || [],
+                postBalances: coreTx.meta?.postBalances || [],
+                preTokenBalances: coreTx.meta?.preTokenBalances || [],
+                postTokenBalances: coreTx.meta?.postTokenBalances || [],
+                fee: coreTx.meta?.fee || 0,
+                computeUnitsConsumed: coreTx.meta?.computeUnitsConsumed || 0,
+                err: coreTx.meta?.err || null,
+                logMessages: coreTx.meta?.logMessages || [],
                 
-                // Instructions analysis
-                instructions: transaction.message?.instructions || [],
-                innerInstructions: meta?.innerInstructions || [],
-                
-                // Balance changes (if available)
-                preBalances: meta?.preBalances || [],
-                postBalances: meta?.postBalances || [],
-                preTokenBalances: meta?.preTokenBalances || [],
-                postTokenBalances: meta?.postTokenBalances || [],
-                
-                // Transaction metadata
-                fee: meta?.fee || 0,
-                computeUnitsConsumed: meta?.computeUnitsConsumed || 0,
-                err: meta?.err || null,
-                logMessages: meta?.logMessages || [],
-                
-                // Enhanced data for copy trading
                 isCopyable: true,
                 sourceWallet,
                 detectedAt: Date.now(),
-                dataSource: 'singapore-laserstream-enhanced'
+                dataSource: 'singapore-laserstream-v-final'
             };
 
             // Add platform detection hints
@@ -281,7 +475,7 @@ class LaserStreamManager extends EventEmitter {
             return refinedData;
             
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error extracting refined data:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error extracting refined data:', error);
             return { error: error.message, isCopyable: false };
         }
     }
@@ -335,7 +529,7 @@ class LaserStreamManager extends EventEmitter {
             }
 
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error detecting platform hints:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error detecting platform hints:', error);
             hints.unknown = true;
         }
 
@@ -347,8 +541,8 @@ class LaserStreamManager extends EventEmitter {
         try {
             if (accountUpdate.account && accountUpdate.account.pubkey) {
                 const pubkey = accountUpdate.account.pubkey.toString();
-                if (this.activeTraderWallets.has(pubkey)) {
-                    console.log(`[LASERSTREAM-ENHANCED] 💰 Balance update for trader ${shortenAddress(pubkey)}`);
+                if (this.activeTraderWallets && this.activeTraderWallets.has(pubkey)) {
+                    console.log(`[LASERSTREAM-PROFESSIONAL] 💰 Balance update for trader ${shortenAddress(pubkey)}`);
                     
                     this.emit('trader_balance_update', {
                         wallet: pubkey,
@@ -359,7 +553,7 @@ class LaserStreamManager extends EventEmitter {
                 }
             }
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error handling account update:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error handling account update:', error);
         }
     }
 
@@ -367,7 +561,7 @@ class LaserStreamManager extends EventEmitter {
     handleTransactionStatusUpdate(statusUpdate) {
         try {
             if (statusUpdate.signature && statusUpdate.err === null) {
-                console.log(`[LASERSTREAM-ENHANCED] ✅ Transaction confirmed: ${shortenAddress(statusUpdate.signature)}`);
+                console.log(`[LASERSTREAM-PROFESSIONAL] ✅ Transaction confirmed: ${shortenAddress(statusUpdate.signature)}`);
                 
                 this.emit('transaction_confirmed', {
                     signature: statusUpdate.signature,
@@ -376,7 +570,7 @@ class LaserStreamManager extends EventEmitter {
                 });
             }
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error handling status update:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error handling status update:', error);
         }
     }
 
@@ -387,28 +581,28 @@ class LaserStreamManager extends EventEmitter {
 
     // Refresh subscriptions when traders are added/removed
     async refreshSubscriptions() {
-        console.log('[LASERSTREAM-ENHANCED] 🔄 Refreshing trader subscriptions...');
+        console.log('[LASERSTREAM-PROFESSIONAL] 🔄 Refreshing trader subscriptions...');
         try {
             const currentWallets = await this.tradingEngine.getMasterTraderWallets();
             const currentWalletSet = new Set(currentWallets);
             
             // Check if wallets have changed
-            const walletsChanged = currentWallets.length !== this.activeTraderWallets.size ||
-                                 !currentWallets.every(wallet => this.activeTraderWallets.has(wallet));
+            const walletsChanged = currentWallets.length !== (this.activeTraderWallets ? this.activeTraderWallets.size : 0) ||
+                                 !currentWallets.every(wallet => this.activeTraderWallets && this.activeTraderWallets.has(wallet));
             
             if (walletsChanged) {
-                console.log('[LASERSTREAM-ENHANCED] 📊 Trader list changed. Restarting stream...');
-                console.log(`[LASERSTREAM-ENHANCED] Old: ${this.activeTraderWallets.size} traders`);
-                console.log(`[LASERSTREAM-ENHANCED] New: ${currentWallets.length} traders`);
+                console.log('[LASERSTREAM-PROFESSIONAL] 📊 Trader list changed. Restarting stream...');
+                console.log(`[LASERSTREAM-PROFESSIONAL] Old: ${this.activeTraderWallets ? this.activeTraderWallets.size : 0} traders`);
+                console.log(`[LASERSTREAM-PROFESSIONAL] New: ${currentWallets.length} traders`);
                 
                 await this.startMonitoring(); // This will restart with new list
                 return true;
             } else {
-                console.log('[LASERSTREAM-ENHANCED] ✅ No changes in trader list');
+                console.log('[LASERSTREAM-PROFESSIONAL] ✅ No changes in trader list');
                 return false;
             }
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Error refreshing subscriptions:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Error refreshing subscriptions:', error);
             return false;
         }
     }
@@ -416,7 +610,7 @@ class LaserStreamManager extends EventEmitter {
     // Health check for Singapore connection
     async healthCheck() {
         try {
-            const response = await fetch(`${this.singaporeEndpoints.rpc}`, {
+            const response = await fetch(`${this.config.HELIUS_ENDPOINTS.rpc}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -429,7 +623,7 @@ class LaserStreamManager extends EventEmitter {
             const result = await response.json();
             return result.result === 'ok';
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ Health check failed:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ Health check failed:', error);
             return false;
         }
     }
@@ -437,12 +631,12 @@ class LaserStreamManager extends EventEmitter {
     // Test gRPC configuration before subscribing
     async testGrpcConfiguration() {
         try {
-            console.log('[LASERSTREAM-ENHANCED] 🔧 Testing gRPC configuration...');
+            console.log('[LASERSTREAM-PROFESSIONAL] 🔧 Testing gRPC configuration...');
             
             // Test if the channel options are valid
             const testConfig = {
-                apiKey: config.HELIUS_API_KEY,
-                endpoint: this.singaporeEndpoints.laserstream,
+                apiKey: this.config.HELIUS_API_KEY, // Ensure consistent API key
+                endpoint: this.config.HELIUS_ENDPOINTS.laserstream_grpc, // Point to the correct gRPC endpoint
                 maxReconnectAttempts: 1,
                 channelOptions: {
                     'grpc.max_send_message_length': 64 * 1024 * 1024,
@@ -452,17 +646,17 @@ class LaserStreamManager extends EventEmitter {
                 }
             };
             
-            console.log('[LASERSTREAM-ENHANCED] ✅ gRPC configuration test passed');
+            console.log('[LASERSTREAM-PROFESSIONAL] ✅ gRPC configuration test passed');
             return true;
         } catch (error) {
-            console.error('[LASERSTREAM-ENHANCED] ❌ gRPC configuration test failed:', error);
+            console.error('[LASERSTREAM-PROFESSIONAL] ❌ gRPC configuration test failed:', error);
             return false;
         }
     }
 
     async stop() {
         if (this.stream) {
-            console.log('[LASERSTREAM-ENHANCED] 🛑 Shutting down Singapore stream...');
+            console.log('[LASERSTREAM-PROFESSIONAL] 🛑 Shutting down Singapore stream...');
             this.stream.cancel();
             this.stream = null;
             this.streamStatus = 'disconnected';
@@ -470,89 +664,16 @@ class LaserStreamManager extends EventEmitter {
         }
     }
 
-    // ===============================================
-    // ========== TRANSACTION FILTERING METHODS ===========
-    // ===============================================
-    
-    /**
-     * Check if transaction is recent enough for copy trading
-     * @param {Object} transaction - The transaction object
-     * @param {string} signature - Transaction signature for logging
-     * @returns {boolean} - True if transaction is recent enough
-     */
-    isTransactionRecent(transaction, signature) {
-        try {
-            const config = require('./config.js');
-            if (!config.TRANSACTION_FILTERING.ENABLED) {
-                return true; // Filtering disabled
-            }
-            
-            const currentTime = Date.now();
-            const maxAge = config.TRANSACTION_FILTERING.MAX_AGE_SECONDS * 1000; // Convert to milliseconds
-            
-            // Check blockTime if available (most reliable)
-            if (transaction.blockTime) {
-                const transactionTime = transaction.blockTime * 1000; // Convert to milliseconds
-                const age = currentTime - transactionTime;
-                
-                if (age > maxAge) {
-                    if (config.TRANSACTION_FILTERING.LOG_FILTERED_TRANSACTIONS) {
-                        console.log(`[FILTER] ⏰ Skipping old transaction: ${shortenAddress(signature)} (age: ${Math.round(age/1000)}s)`);
-                    }
-                    return false;
-                }
-                
-                if (config.TRANSACTION_FILTERING.LOG_FILTERED_TRANSACTIONS) {
-                    console.log(`[FILTER] ✅ Transaction age: ${Math.round(age/1000)}s - within acceptable range`);
-                }
-                return true;
-            }
-            
-            // If no blockTime, assume it's recent (LaserStream typically sends fresh transactions)
-            console.log(`[FILTER] ⚠️ No blockTime available for ${shortenAddress(signature)} - assuming recent`);
-            return true;
-            
-        } catch (error) {
-            console.error(`[FILTER] ❌ Error checking transaction age for ${shortenAddress(signature)}:`, error.message);
-            // On error, allow the transaction through to avoid missing trades
-            return true;
-        }
-    }
-    
-    /**
-     * Check if transaction blockhash is recent enough
-     * @param {Object} transaction - The transaction object
-     * @param {string} signature - Transaction signature for logging
-     * @returns {boolean} - True if blockhash is recent enough
-     */
-    isBlockhashRecent(transaction, signature) {
-        try {
-            // Get the transaction's blockhash
-            const transactionBlockhash = transaction.message?.recentBlockhash;
-            if (!transactionBlockhash) {
-                console.log(`[FILTER] ⚠️ No blockhash found for ${shortenAddress(signature)} - allowing through`);
-                return true; // Allow through if no blockhash (shouldn't happen)
-            }
-            
-            // For now, we'll use a simple approach: if we have a blockhash, assume it's recent
-            // In a production system, you might want to check against current blockhash
-            // and allow transactions within the last ~150 slots (roughly 1 minute)
-            
-            console.log(`[FILTER] ✅ Blockhash validation passed for ${shortenAddress(signature)}`);
-            return true;
-            
-        } catch (error) {
-            console.error(`[FILTER] ❌ Error checking blockhash for ${shortenAddress(signature)}:`, error.message);
-            // On error, allow the transaction through to avoid missing trades
-            return true;
-        }
+    // PROFESSIONAL PLAN: Check if LaserStream is connected (required for worker priority logic)
+    isConnected() {
+        return this.streamStatus === 'connected' && this.stream !== null;
     }
 
     // COMPATIBILITY METHODS - For old code that expects these methods
     
     // Legacy method name for compatibility
     async initializeCopyTradingStream(onTransaction, onError, traderWallets = []) {
-        console.log('[LASERSTREAM-ENHANCED] 🔄 Legacy method called - redirecting to startMonitoring...');
+        console.log('[LASERSTREAM-PROFESSIONAL] 🔄 Legacy method called - redirecting to startMonitoring...');
         
         // Store callbacks for legacy compatibility
         this.onTransactionCallback = onTransaction;
@@ -569,7 +690,7 @@ class LaserStreamManager extends EventEmitter {
 
     // Legacy method for shutting down all streams  
     async shutdownAllStreams() {
-        console.log('[LASERSTREAM-ENHANCED] 🔄 Legacy shutdownAllStreams called...');
+        console.log('[LASERSTREAM-PROFESSIONAL] 🔄 Legacy shutdownAllStreams called...');
         await this.stop();
     }
 
@@ -611,6 +732,15 @@ class LaserStreamManager extends EventEmitter {
                     console.log(`[UNIVERSAL-DETECTION] 🔍 Complete program IDs: ${Array.from(programIds).join(', ')}`);
                     
                     // Emit event for copy trade processing
+                    this.emit('copy_trade_detected', {
+                        signature: signatureStr,
+                        sourceWallet: sourceWallet,
+                        programIds: Array.from(programIds),
+                        transaction: transactionUpdate,
+                        timestamp: Date.now()
+                    });
+                    
+                    // Also emit legacy event for backward compatibility
                     this.emit('universal_trader_detected', {
                         signature: signatureStr,
                         programIds: Array.from(programIds),
@@ -621,6 +751,112 @@ class LaserStreamManager extends EventEmitter {
             }
         } catch (error) {
             console.error('[UNIVERSAL-DETECTION] ❌ Error in universal trader detection:', error);
+        }
+    }
+
+    
+
+    /**
+     * Calculate price impact from recent transactions
+     */
+    calculatePriceImpact(transactions) {
+        try {
+            if (transactions.length < 2) return 0;
+            
+            // Simplified price impact calculation
+            // In reality, you'd parse the transaction logs more carefully
+            const priceChanges = [];
+            
+            for (let i = 1; i < transactions.length; i++) {
+                const prevTx = transactions[i-1];
+                const currTx = transactions[i];
+                
+                // Extract price changes from transaction data
+                // This is simplified - you'd need more sophisticated parsing
+                // const priceChange = Math.random() * 0.1; // Placeholder - COMMENTED OUT
+                const priceChange = 0.05; // Default small price change
+                priceChanges.push(priceChange);
+            }
+            
+            const avgPriceChange = priceChanges.reduce((sum, change) => sum + change, 0) / priceChanges.length;
+            return avgPriceChange;
+            
+        } catch (error) {
+            console.error('[LASERSTREAM] ❌ Error calculating price impact:', error.message);
+            return 0;
+        }
+    }
+
+    /**
+     * Calculate liquidity ratio from recent transactions
+     */
+    calculateLiquidityRatio(transactions) {
+        try {
+            if (transactions.length === 0) return 1.0;
+            
+            // Calculate average transaction size relative to pool liquidity
+            // This is simplified - you'd need actual pool liquidity data
+            const avgTxSize = this.calculateAverageTxSize(transactions);
+            // const estimatedPoolLiquidity = 1000000000; // 1 SOL in lamports (placeholder) - COMMENTED OUT
+            const estimatedPoolLiquidity = 1000000000; // Default 1 SOL in lamports
+            
+            return Math.min(avgTxSize / estimatedPoolLiquidity, 1.0);
+            
+        } catch (error) {
+            console.error('[LASERSTREAM] ❌ Error calculating liquidity ratio:', error.message);
+            return 1.0;
+        }
+    }
+
+    /**
+     * Calculate average transaction size
+     */
+    calculateAverageTxSize(transactions) {
+        try {
+            if (transactions.length === 0) return 0;
+            
+            let totalSize = 0;
+            for (const tx of transactions) {
+                // Extract transaction size from meta data
+                // This is simplified - you'd need actual size calculation
+                // totalSize += Math.random() * 100000000; // Placeholder - COMMENTED OUT
+                totalSize += 50000000; // Default transaction size
+            }
+            
+            return totalSize / transactions.length;
+            
+        } catch (error) {
+            console.error('[LASERSTREAM] ❌ Error calculating average tx size:', error.message);
+            return 0;
+        }
+    }
+
+    /**
+     * Calculate volatility from recent transactions
+     */
+    calculateVolatility(transactions) {
+        try {
+            if (transactions.length < 2) return 0;
+            
+            // Calculate price volatility from transaction data
+            // This is simplified - you'd need actual price data
+            const priceChanges = [];
+            
+            for (let i = 1; i < transactions.length; i++) {
+                // const priceChange = Math.random() * 0.2; // Placeholder - COMMENTED OUT
+                const priceChange = 0.1; // Default price change
+                priceChanges.push(priceChange);
+            }
+            
+            const avgChange = priceChanges.reduce((sum, change) => sum + change, 0) / priceChanges.length;
+            const variance = priceChanges.reduce((sum, change) => sum + Math.pow(change - avgChange, 2), 0) / priceChanges.length;
+            const volatility = Math.sqrt(variance);
+            
+            return volatility;
+            
+        } catch (error) {
+            console.error('[LASERSTREAM] ❌ Error calculating volatility:', error.message);
+            return 0;
         }
     }
 }

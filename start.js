@@ -4,12 +4,15 @@
 // File: start.js
 // Description: Main startup script for ZapBot with database and Redis initialization
 
-const { DatabaseManager } = require('./database/databaseManager');
+const { DataManager } = require('./dataManager');
 const { RedisManager } = require('./redis/redisManager');
 const config = require('./config.js');
 
 // Initialize performance monitoring for ULTRA-LOW LATENCY optimizations
 const performanceMonitor = require('./performanceMonitor.js');
+
+// Import the leader tracker for ultra-low latency execution
+const leaderTracker = require('./leaderTracker.js');
 
 // Start periodic metrics saving
 performanceMonitor.startPeriodicSaving(60000); // Save every minute
@@ -23,9 +26,8 @@ console.log('📊 Performance monitoring active');
 
 class ZapBotStartup {
     constructor() {
-        this.databaseManager = null;
-        this.redisManager = null;
         this.dataManager = null;
+        this.redisManager = null;
         this.isInitialized = false;
         this.healthServer = null;
         this.healthPort = null;
@@ -37,11 +39,11 @@ class ZapBotStartup {
     async initialize() {
         
         try {
-            // Step 1: Initialize Database
-            console.log('📊 Initializing SQLite database...');
-            this.databaseManager = new DatabaseManager();
-            await this.databaseManager.initialize();
-            console.log('✅ Database initialized successfully');
+            // Step 1: Initialize Data Manager
+            console.log('📊 Initializing JSON data manager...');
+            this.dataManager = new DataManager();
+            await this.dataManager.initialize();
+            console.log('✅ Data manager initialized successfully');
 
             // Step 2: Initialize Redis (optional)
             console.log('🔴 Initializing Redis for flight data...');
@@ -60,13 +62,11 @@ class ZapBotStartup {
                                    process.env.THREADING_ENABLED === 'true';
             
             if (isThreadingMode) {
-                console.log('🧵 Threaded mode: Skipping legacy DataManager initialization');
-                // In threaded mode, we only use DatabaseManager
-                this.dataManager = null;
+                console.log('🧵 Threaded mode: Using JSON DataManager');
+                // In threaded mode, we use the JSON DataManager
             } else {
-                // Step 3: Single-threaded mode - no legacy DataManager needed
-                console.log('📁 Single-threaded mode: Using DatabaseManager only');
-                this.dataManager = null;
+                // Step 3: Single-threaded mode - using JSON DataManager
+                console.log('📁 Single-threaded mode: Using JSON DataManager');
             }
 
             // Step 4: Migrate data if needed (only in threaded mode)
@@ -74,7 +74,17 @@ class ZapBotStartup {
                 await this.migrateDataIfNeeded();
             }
 
-            // Step 5: Start the main application
+            // Step 5: Initialize Leader Tracker for ultra-low latency
+            console.log('🎯 Initializing proactive leader tracking...');
+            try {
+                await leaderTracker.startMonitoring();
+                console.log('✅ Proactive leader tracking has been activated.');
+            } catch (error) {
+                console.warn('⚠️ Leader tracker failed to start:', error.message);
+                console.warn('⚠️ Continuing without leader tracking - performance may be reduced.');
+            }
+
+            // Step 6: Start the main application
             await this.startMainApplication();
 
             this.isInitialized = true;
@@ -91,27 +101,15 @@ class ZapBotStartup {
     try {
         console.log('🔄 Checking for data migration...');
         
-        // This is a more robust check. It ensures the table exists before querying it.
-        // The DatabaseManager's initialize() should have already created it.
-        const userCountResult = await this.databaseManager.get("SELECT name FROM sqlite_master WHERE type='table' AND name='users';");
-
-        if (!userCountResult) {
-            // This case should ideally not be hit if initialize() works, but it's a good safeguard.
-            console.log('📦 Users table not found. Assuming first-time run. Starting migration...');
-            console.log('📦 No legacy data to migrate - using DatabaseManager only');
-            console.log('✅ Data migration completed on fresh DB.');
-            return;
-        }
-
-        // Now that we know the table exists, we can safely check the count.
-        const rowCount = await this.databaseManager.get('SELECT COUNT(id) as count FROM users');
+        // Check if we have any existing data in JSON files
+        const users = await this.dataManager.loadUsers();
+        const userCount = Object.keys(users).length;
         
-        if (rowCount && rowCount.count === 0) {
-            console.log('📦 Database is empty, starting migration from JSON files...');
-            console.log('📦 No legacy data to migrate - using DatabaseManager only');
-            console.log('✅ Data migration completed.');
+        if (userCount === 0) {
+            console.log('📦 No existing data found. Starting fresh with JSON data manager...');
+            console.log('✅ Data migration completed - using JSON files.');
         } else {
-            console.log('✅ Database already contains data, skipping migration.');
+            console.log(`✅ Found ${userCount} existing users in JSON files, no migration needed.`);
         }
         
     } catch (error) {
@@ -150,7 +148,7 @@ class ZapBotStartup {
             
             // Create threaded bot instance
             const bot = new ThreadedZapBot({
-                databaseManager: this.databaseManager,
+                dataManager: this.dataManager,
                 redisManager: this.redisManager,
                 dataManager: this.dataManager,
                 maxWorkerMemory: process.env.MAX_WORKER_MEMORY || '1GB',
@@ -183,10 +181,10 @@ class ZapBotStartup {
 
             // CRITICAL FIX: Instantiate the bot, THEN give it the real managers.
             const bot = new ZapBot();
-            bot.setDatabaseManager(this.databaseManager); // Inject the one true DB manager.
+            bot.setdataManager(this.dataManager); // Inject the JSON data manager.
             // Note: notificationManager is null in single-threaded mode (handled by telegramWorker in threaded mode)
             if (bot.notificationManager) {
-                bot.notificationManager.setDatabaseManager(this.databaseManager); // Also inject it into the notification manager for PnL calcs.
+                bot.notificationManager.setdataManager(this.dataManager); // Also inject it into the notification manager for PnL calcs.
             }
             // bot.setRedisManager(this.redisManager); // Optional for future Redis use
 
@@ -221,9 +219,9 @@ class ZapBotStartup {
             }
             
             // Close database connection, using the captured 'self' context
-            if (self.databaseManager && self.databaseManager.isInitialized) {
+            if (self.dataManager && self.dataManager.isInitialized) {
                 console.log('🚪 Closing database connection to force disk write...');
-                await self.databaseManager.close();
+                await self.dataManager.close();
                 console.log('✅ Database connection closed.');
             }
             
@@ -266,8 +264,16 @@ class ZapBotStartup {
         console.log('🧹 Cleaning up resources...');
         
         try {
-            if (this.databaseManager) {
-                await this.databaseManager.close();
+            // Stop leader tracker monitoring
+            try {
+                await leaderTracker.stopMonitoring();
+                console.log('✅ Leader tracker stopped');
+            } catch (error) {
+                console.warn('⚠️ Leader tracker cleanup warning:', error.message);
+            }
+            
+            if (this.dataManager) {
+                await this.dataManager.close();
             }
             
             if (this.redisManager) {
@@ -292,7 +298,7 @@ class ZapBotStartup {
 
         try {
             // Check database
-            const dbHealth = await this.databaseManager.get('SELECT 1 as health');
+            const dbHealth = await this.dataManager.loadUsers();
             health.services.database = dbHealth ? 'healthy' : 'unhealthy';
             
             // Check Redis
@@ -380,10 +386,10 @@ class ZapBotStartup {
             }
 
             // 5. Close database connection
-            if (this.databaseManager) {
+            if (this.dataManager) {
                 console.log('📊 Closing database connection...');
                 try {
-                    await this.databaseManager.shutdown();
+                    await this.dataManager.shutdown();
                     console.log('✅ Database connection closed');
                 } catch (error) {
                     console.error('❌ Error closing database:', error.message);

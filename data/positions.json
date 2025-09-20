@@ -1,0 +1,43 @@
+{
+  "user_positions": {
+    "6032767351": {
+      "0x1234567890abcdef1234567890abcdef12345678": {
+        "amountRaw": "0n",
+        "solSpent": 0.00300028,
+        "soldAmountRaw": "5671181722n",
+        "buyTimestamp": 1750776529208,
+        "sellTimestamp": 1750776551484
+      },
+      "0xabcdef1234567890abcdef1234567890abcdef12": {
+        "amountRaw": "1000000000n",
+        "solSpent": 0.00500000,
+        "soldAmountRaw": "0n",
+        "buyTimestamp": 1750776600000,
+        "sellTimestamp": null
+      },
+      "0x9876543210fedcba9876543210fedcba98765432": {
+        "amountRaw": "500000000n",
+        "solSpent": 0.00250000,
+        "soldAmountRaw": "0n",
+        "buyTimestamp": 1750776700000,
+        "sellTimestamp": null
+      },
+      "0xfedcba0987654321fedcba0987654321fedcba09": {
+        "amountRaw": "0n",
+        "solSpent": 0.00100000,
+        "soldAmountRaw": "250000000n",
+        "buyTimestamp": 1750776800000,
+        "sellTimestamp": 1750776850000
+      }
+    },
+    "935192726": {
+      "0x1111111111111111111111111111111111111111": {
+        "amountRaw": "2000000000n",
+        "solSpent": 0.01000000,
+        "soldAmountRaw": "0n",
+        "buyTimestamp": 1750776900000,
+        "sellTimestamp": null
+      }
+    }
+  }
+}

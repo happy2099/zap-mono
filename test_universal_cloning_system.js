@@ -10,7 +10,7 @@ const { UniversalCloner } = require('./universalCloner.js');
 const { TradingEngine } = require('./tradingEngine.js');
 const { SolanaManager } = require('./solanaManager.js');
 const WalletManager = require('./walletManager.js');
-const { DatabaseManager } = require('./database/databaseManager.js');
+const { dataManager } = require('./database/dataManager.js');
 const BN = require('bn.js');
 const fs = require('fs');
 const path = require('path');
@@ -21,8 +21,8 @@ class UniversalCloningTestSuite {
     constructor() {
         this.connection = new Connection(config.RPC_URL);
         this.solanaManager = new SolanaManager();
-        this.databaseManager = new DatabaseManager();
-        this.walletManager = new WalletManager(this.databaseManager);
+        this.dataManager = new dataManager();
+        this.walletManager = new WalletManager(this.dataManager);
         this.walletManager.setSolanaManager(this.solanaManager);
         
         // Centralized test wallets for easier management
@@ -42,11 +42,11 @@ class UniversalCloningTestSuite {
         console.log('🔧 Initializing test suite with real database connection...');
         try {
             // Initialize database connection
-            await this.databaseManager.initialize();
+            await this.dataManager.initialize();
             console.log('✅ Database initialized successfully');
             
             // Test database connection by checking for users
-            const testQuery = await this.databaseManager.db.prepare('SELECT COUNT(*) as count FROM users').get();
+            const testQuery = await this.dataManager.db.prepare('SELECT COUNT(*) as count FROM users').get();
             console.log(`📊 Database has ${testQuery.count} users`);
             
             return true;

@@ -1,0 +1,159 @@
+{
+  "traders": {
+    "1758133086172": {
+      "Eu": {
+        "id": "1758133773522",
+        "user_id": "1758133086172",
+        "name": "Eu",
+        "wallet": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
+        "active": false,
+        "created_at": "2025-05-24T08:37:53.854Z",
+        "updated_at": "2025-09-20T14:03:27.409Z"
+      },
+      "H": {
+        "id": "1758133933150",
+        "user_id": "1758133086172",
+        "name": "H",
+        "wallet": "Av3xWHJ5EsoLZag6pr7LKbrGgLRTaykXomDD5kBhL9YQ",
+        "active": true,
+        "created_at": "2025-05-24T08:38:53.150Z",
+        "updated_at": "2025-09-20T14:18:22.981Z"
+      },
+      "oz": {
+        "id": "1758133961125",
+        "user_id": "1758133086172",
+        "name": "oz",
+        "wallet": "DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam",
+        "active": true,
+        "created_at": "2025-05-24T08:39:21.125Z",
+        "updated_at": "2025-09-20T07:40:38.250Z"
+      },
+      "Orange": {
+        "id": "1758133989617",
+        "user_id": "1758133086172",
+        "name": "Orange",
+        "wallet": "96sErVjEN7LNJ6Uvj63bdRWZxNuBngj56fnT9biHLKBf",
+        "active": false,
+        "created_at": "2025-05-24T08:39:49.617Z",
+        "updated_at": "2025-09-18T11:31:21.790Z"
+      },
+      "L": {
+        "id": "1758134019260",
+        "user_id": "1758133086172",
+        "name": "L",
+        "wallet": "7iabBMwmSvS4CFPcjW2XYZY53bUCHzXjCFEFhxeYP4CY",
+        "active": false,
+        "created_at": "2025-05-24T08:40:19.260Z",
+        "updated_at": "2025-06-11T17:35:52.901Z"
+      },
+      "K": {
+        "id": "1758134052005",
+        "user_id": "1758133086172",
+        "name": "K",
+        "wallet": "BCnqsPEtA1TkgednYEebRpkmwFRJDCjMQcKZMMtEdArc",
+        "active": false,
+        "created_at": "2025-05-24T08:41:12.005Z",
+        "updated_at": "2025-09-20T07:47:01.916Z"
+      },
+      "Y": {
+        "id": "1758190762494",
+        "user_id": "1758133086172",
+        "name": "Y",
+        "wallet": "EKDDjxzJ39Bjkr47NiARGJDKFVxiiV9WNJ5XbtEhPEXP",
+        "active": false,
+        "created_at": "2025-06-08T10:59:22.494Z",
+        "updated_at": "2025-09-20T07:46:47.182Z"
+      },
+      "alo": {
+        "id": "1758191707068",
+        "user_id": "1758133086172",
+        "name": "alo",
+        "wallet": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
+        "active": false,
+        "created_at": "2025-06-09T15:35:07.068Z",
+        "updated_at": "2025-09-20T14:03:19.047Z"
+      },
+      "otta": {
+        "id": "1758191590310",
+        "user_id": "1758133086172",
+        "name": "otta",
+        "wallet": "As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5",
+        "active": false,
+        "created_at": "2025-06-12T13:53:10.301Z",
+        "updated_at": "2025-09-20T07:46:52.672Z"
+      },
+      "Ea": {
+        "id": "1758191879274",
+        "user_id": "1758133086172",
+        "name": "Ea",
+        "wallet": "F2SuErm4MviWJ2HzKXk2nuzBC6xe883CFWUDCPz6cyWm",
+        "active": false,
+        "created_at": "2025-06-12T14:37:59.274Z",
+        "updated_at": "2025-09-20T07:46:41.860Z"
+      },
+      "cup": {
+        "id": "1758192500262",
+        "user_id": "1758133086172",
+        "name": "cup",
+        "wallet": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
+        "active": false,
+        "created_at": "2025-06-12T19:08:20.262Z",
+        "updated_at": "2025-09-19T16:19:25.322Z"
+      },
+      "A": {
+        "id": "1758191755947",
+        "user_id": "1758133086172",
+        "name": "A",
+        "wallet": "ByXk1FEfaaX9sf9hSwFfkuZLBRZ7S9cutZsWMRQw2TjR",
+        "active": false,
+        "created_at": "2025-06-29T11:25:54.947Z",
+        "updated_at": "2025-07-04T15:37:37.763Z"
+      },
+      "axiom": {
+        "id": "1758191856416",
+        "user_id": "1758133086172",
+        "name": "axiom",
+        "wallet": "GEZgmU3PbKWKG9Yp4iDuH6uh3LnodBa9PdeD7RJ8P7B",
+        "active": false,
+        "created_at": "2025-09-05T08:44:16.926Z",
+        "updated_at": "2025-09-20T14:03:23.016Z"
+      },
+      "tu": {
+        "id": "1758191871514",
+        "user_id": "1758133086172",
+        "name": "tu",
+        "wallet": "5T229oePmJGE5Cefys8jE9Jq8C7qfGNNWy3RVA7SmwEP",
+        "active": false,
+        "created_at": "2025-09-05T09:27:51.431Z",
+        "updated_at": "2025-09-18T10:47:26.055Z"
+      },
+      "Jijo": {
+        "id": "1758212020974",
+        "user_id": "1758133086172",
+        "name": "Jijo",
+        "wallet": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
+        "active": true,
+        "created_at": "2025-09-18T16:13:40.974Z",
+        "updated_at": "2025-09-20T07:41:32.916Z"
+      },
+      "cupsey-2": {
+        "id": "1758297968429",
+        "user_id": "1758133086172",
+        "name": "cupsey-2",
+        "wallet": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
+        "active": true,
+        "created_at": "2025-09-19T16:06:08.429Z",
+        "updated_at": "2025-09-20T14:03:42.621Z"
+      },
+      "TestTrader": {
+        "id": "1758354254455",
+        "user_id": "1758133086172",
+        "name": "TestTrader",
+        "wallet": "TestWallet123456789",
+        "active": false,
+        "created_at": "2025-09-20T07:44:14.455Z",
+        "updated_at": "2025-09-20T07:44:14.487Z"
+      }
+    }
+  }
+}

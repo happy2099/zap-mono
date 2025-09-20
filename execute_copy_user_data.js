@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
 // Script to execute the copy user data SQL commands
-const { DatabaseManager } = require('./database/databaseManager');
+const { dataManager } = require('./database/dataManager');
 const fs = require('fs');
 const path = require('path');
 
 async function copyUserData() {
-    const dbManager = new DatabaseManager();
+    const dbManager = new dataManager();
     
     try {
         console.log('🔄 Starting copy operation: User 2 → User 3');

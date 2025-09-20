@@ -8,7 +8,7 @@ const { Connection, PublicKey, Keypair } = require('@solana/web3.js');
 const UniversalCloner = require('./universalCloner.js');
 const SolanaManager = require('./solanaManager.js');
 const WalletManager = require('./walletManager.js');
-const DatabaseManager = require('./databaseManager.js');
+const dataManager = require('./dataManager.js');
 const { shortenAddress } = require('./utils.js');
 const fs = require('fs');
 const path = require('path');
@@ -21,8 +21,8 @@ async function testNonceFunctionality() {
         const connection = new Connection('https://api.mainnet-beta.solana.com');
         const universalCloner = new UniversalCloner(connection);
         const solanaManager = new SolanaManager();
-        const databaseManager = new DatabaseManager();
-        const walletManager = new WalletManager(databaseManager);
+        const dataManager = new dataManager();
+        const walletManager = new WalletManager(dataManager);
         walletManager.setSolanaManager(solanaManager);
 
         // Get a real user wallet with nonce account

@@ -160,7 +160,7 @@ class WebSocketManager {
             jsonrpc: '2.0',
             id: requestId,
             method: 'accountSubscribe',
-            params: [ walletAddress, { encoding: 'jsonParsed', commitment: 'confirmed' } ]
+            params: [ walletAddress, { encoding: 'jsonParsed', commitment: 'processed' } ]
         }));
     }
 

@@ -16,9 +16,10 @@ class TelegramWorker extends BaseWorker {
     constructor() {
         super();
         this.telegramUi = null;
-        this.databaseManager = null;
+        this.dataManager = null;
         this.solanaManager = null;
         this.walletManager = null;
+        this.redisManager = null;
         this.actionHandlers = new Map();
     }
 
@@ -40,21 +41,26 @@ class TelegramWorker extends BaseWorker {
             this.logInfo('✅ This worker marked as active Telegram instance');
             
             // Initialize core managers - dynamic require to avoid caching
-            const { DatabaseManager } = require('../database/databaseManager');
-            this.databaseManager = new DatabaseManager();
-            await this.databaseManager.initialize();
+            const { DataManager } = require('../dataManager');
+            this.dataManager = new DataManager();
+            await this.dataManager.initialize();
             
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
             
-            this.walletManager = new WalletManager(this.databaseManager);
+            // Initialize RedisManager for active trader sync
+            const { RedisManager } = require('../redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+            
+            this.walletManager = new WalletManager(this.dataManager);
             this.walletManager.setSolanaManager(this.solanaManager);
             this.walletManager.setConnection(this.solanaManager.connection);
             await this.walletManager.initialize();
 
             // Initialize Telegram UI
             this.telegramUi = new TelegramUI(
-                this.databaseManager,
+                this.dataManager,
                 this.solanaManager,
                 this.walletManager
             );
@@ -76,6 +82,9 @@ class TelegramWorker extends BaseWorker {
                 const botReady = this.telegramUi.startPolling();
                 if (botReady) {
                     this.logInfo('Telegram UI initialized successfully in polling mode');
+                    
+                    // Sync existing active traders to Redis on startup
+                    await this.syncAllActiveTradersOnStartup();
                 } else {
                     this.logWarn('Telegram UI initialization failed');
                 }
@@ -215,30 +224,52 @@ class TelegramWorker extends BaseWorker {
         this.logInfo('Starting copy for trader', { chatId, traderName });
         try {
             // Get or create user first
-            let user = await this.databaseManager.getUser(chatId);
+            let user = await this.dataManager.getUser(chatId);
             if (!user) {
                 // Get user info from Telegram and create user with real username
                 const userInfo = await this.getUserInfoFromTelegram(chatId);
-                const userId = await this.databaseManager.createUser(chatId, {
+                const userId = await this.dataManager.createUser(chatId, {
                     username: userInfo.username,
                     firstName: userInfo.firstName,
                     lastName: userInfo.lastName,
                     telegramUsername: userInfo.telegramUsername,
                     active: true
                 });
-                user = await this.databaseManager.getUser(chatId);
+                user = await this.dataManager.getUser(chatId);
                 this.logInfo('Created new user with Telegram info', { chatId, userId, username: userInfo.username });
             }
 
+            // Check if user has trading wallets
+            const wallets = await this.dataManager.getUserWallets(String(chatId));
+            console.log(`[DEBUG] Wallet check for user ${chatId}: found ${wallets.length} wallets`);
+            if (wallets.length === 0) {
+                const message = `❌ *Cannot start copying*\n\nYou need to add a trading wallet first.\n\nPlease go to "Manage Wallets" to import or generate a wallet.`;
+                await this.telegramUi.sendOrEditMessage(chatId, message, {
+                    reply_markup: { 
+                        inline_keyboard: [
+                            [{ text: "🔧 Manage Wallets", callback_data: "wallet_list" }],
+                            [{ text: "🔙 Back to Main Menu", callback_data: "main_menu" }]
+                        ] 
+                    },
+                    parse_mode: 'Markdown'
+                });
+                return;
+            }
+
             // Update trader status to active
-            await this.databaseManager.updateTraderStatus(chatId, traderName, true);
+            await this.dataManager.updateTraderStatus(chatId, traderName, true);
             
-            const message = `✅ Started copying trader *${traderName}*`;
-            await this.telegramUi.sendOrEditMessage(chatId, message, {
-                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Main Menu", callback_data: "main_menu" }]] }
-            });
+            // Sync active traders to Redis for LaserStream monitoring
+            await this.syncActiveTradersToRedis(chatId);
             
+            // Show success message and redirect to main menu to refresh the UI
+            await this.telegramUi.showMainMenu(chatId, null, `✅ Started copying trader *${traderName}*! Your wallet is ready for trading.`);
+            
+            // Signal that trader was started
             this.signalMessage('TRADER_STARTED', { chatId, traderName });
+            
+            // Signal monitor to refresh subscriptions with new trader
+            this.signalMessage('TRADER_ADDED', { chatId, traderName });
         } catch (error) {
             this.logError('Failed to start copy', { chatId, traderName, error: error.message });
             await this.telegramUi.sendErrorMessage(chatId, `Failed to start copying: ${error.message}`);
@@ -249,30 +280,35 @@ class TelegramWorker extends BaseWorker {
         this.logInfo('Stopping copy for trader', { chatId, traderName });
         try {
             // Get or create user first
-            let user = await this.databaseManager.getUser(chatId);
+            let user = await this.dataManager.getUser(chatId);
             if (!user) {
                 // Get user info from Telegram and create user with real username
                 const userInfo = await this.getUserInfoFromTelegram(chatId);
-                const userId = await this.databaseManager.createUser(chatId, {
+                const userId = await this.dataManager.createUser(chatId, {
                     firstName: userInfo.firstName,
                     lastName: userInfo.lastName,
                     telegramUsername: userInfo.telegramUsername,
                     isActive: true,
                     isAdmin: false
                 });
-                user = await this.databaseManager.getUser(chatId);
+                user = await this.dataManager.getUser(chatId);
                 this.logInfo('Created new user with Telegram info', { chatId, userId, username: userInfo.username });
             }
 
             // Update trader status to inactive
-            await this.databaseManager.updateTraderStatus(chatId, traderName, false);
+            await this.dataManager.updateTraderStatus(chatId, traderName, false);
             
-            const message = `⛔ Stopped copying trader *${traderName}*`;
-            await this.telegramUi.sendOrEditMessage(chatId, message, {
-                reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Main Menu", callback_data: "main_menu" }]] }
-            });
+            // Sync active traders to Redis for LaserStream monitoring
+            await this.syncActiveTradersToRedis(chatId);
             
+            // Show success message and redirect to main menu to refresh the UI
+            await this.telegramUi.showMainMenu(chatId, null, `⛔ Stopped copying trader *${traderName}*`);
+            
+            // Signal that trader was stopped
             this.signalMessage('TRADER_STOPPED', { chatId, traderName });
+            
+            // Signal monitor to refresh subscriptions (remove trader from monitoring)
+            this.signalMessage('TRADER_REMOVED', { chatId, traderName });
         } catch (error) {
             this.logError('Failed to stop copy', { chatId, traderName, error: error.message });
             await this.telegramUi.sendErrorMessage(chatId, `Failed to stop copying: ${error.message}`);
@@ -283,15 +319,18 @@ class TelegramWorker extends BaseWorker {
         this.logInfo('Adding trader', { chatId, traderName, walletAddress });
         try {
             // Get user to get internal user ID
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found');
             }
             
             // Add trader to database
-            await this.databaseManager.addTrader(user.id, traderName, walletAddress);
+            await this.dataManager.addTrader(user.id, traderName, walletAddress);
             
             this.logInfo('Trader added successfully to database', { chatId, traderName, userId: user.id });
+            
+            // 🔧 FIX: Sync active traders to Redis after adding new trader
+            await this.syncActiveTradersToRedis(chatId);
             
             // Notify monitor worker to refresh LaserStream subscriptions
             this.sendMessage('TRADER_ADDED', { chatId, traderName, walletAddress }, 'monitor');
@@ -308,13 +347,13 @@ class TelegramWorker extends BaseWorker {
         this.logInfo('Removing trader', { chatId, traderName });
         try {
             // Get user to get internal user ID
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found');
             }
             
             // Remove trader from database
-            await this.databaseManager.deleteTrader(user.id, traderName);
+            await this.dataManager.deleteTrader(user.id, traderName);
             
             const message = `✅ Trader *${escapeMarkdownV2(traderName)}* has been removed successfully`; 
             await this.telegramUi.sendOrEditMessage(chatId, message, {
@@ -332,24 +371,24 @@ class TelegramWorker extends BaseWorker {
         this.logInfo('Setting SOL amount', { chatId, amount });
         try {
             // Get or create user first
-            let user = await this.databaseManager.getUser(chatId);
+            let user = await this.dataManager.getUser(chatId);
             if (!user) {
                 // Get user info from Telegram and create user with real username
                 const userInfo = await this.getUserInfoFromTelegram(chatId);
-                const userId = await this.databaseManager.createUser(chatId, {
+                const userId = await this.dataManager.createUser(chatId, {
                     firstName: userInfo.firstName,
                     lastName: userInfo.lastName,
                     telegramUsername: userInfo.telegramUsername,
                     isActive: true,
                     isAdmin: false
                 });
-                user = await this.databaseManager.getUser(chatId);
+                user = await this.dataManager.getUser(chatId);
                 this.logInfo('Created new user with Telegram info', { chatId, userId, username: userInfo.username });
             }
 
             const userSettings = JSON.parse(user.settings || '{}');
             userSettings.solAmount = amount;
-            await this.databaseManager.updateUserSettings(chatId, userSettings);
+            await this.dataManager.updateUserSettings(chatId, userSettings);
             this.logInfo('SOL amount updated successfully', { chatId, amount });
             
             // Show success message and refresh main menu
@@ -371,12 +410,12 @@ class TelegramWorker extends BaseWorker {
             const { walletInfo, privateKey } = await this.walletManager.generateAndAddWallet(label, 'trading', chatId);
             
             // Store wallet in database
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found in database');
             }
 
-            await this.databaseManager.createWallet(
+            await this.dataManager.createWallet(
                 user.id, 
                 label, 
                 walletInfo.publicKey.toBase58(), 
@@ -414,7 +453,7 @@ class TelegramWorker extends BaseWorker {
             }
 
             // Store wallet in database
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found in database');
             }
@@ -427,7 +466,7 @@ class TelegramWorker extends BaseWorker {
             });
 
             try {
-                const result = await this.databaseManager.createWallet(
+                const result = await this.dataManager.createWallet(
                     user.id, 
                     label, 
                     wallet.publicKey.toBase58(), 
@@ -442,10 +481,7 @@ class TelegramWorker extends BaseWorker {
             }
 
             // Verify wallet was created
-            const createdWallet = await this.databaseManager.get(
-                'SELECT * FROM user_wallets WHERE user_id = ? AND label = ?', 
-                [user.id, label]
-            );
+            const createdWallet = await this.dataManager.getWalletByLabel(chatId, label);
             console.log(`[DEBUG] Wallet created in database:`, createdWallet);
 
             this.logInfo('Wallet stored in database', { chatId, label, userId: user.id });
@@ -520,8 +556,13 @@ class TelegramWorker extends BaseWorker {
             }
             
             // Close database connection
-            if (this.databaseManager) {
-                await this.databaseManager.close();
+            if (this.dataManager) {
+                await this.dataManager.close();
+            }
+            
+            // Close Redis connection
+            if (this.redisManager) {
+                await this.redisManager.close();
             }
         } catch (error) {
             this.logError('Error during Telegram cleanup', { error: error.message });
@@ -537,6 +578,84 @@ class TelegramWorker extends BaseWorker {
         } catch (error) {
             this.logError('Health check failed', { error: error.message });
             return false;
+        }
+    }
+
+    async syncActiveTradersToRedis(chatId) {
+        try {
+            // Get user first to get internal ID
+            const user = await this.dataManager.getUser(chatId);
+            if (!user) {
+                this.logError('User not found for chatId', { chatId });
+                return;
+            }
+            
+            // Get all traders for this user using internal ID
+            const traders = await this.dataManager.getTraders(user.id);
+            
+            // Filter active traders and get their names
+            const activeTraderNames = traders
+                .filter(trader => trader.active === true || trader.active === 1)
+                .map(trader => trader.name);
+            
+            // Update Redis with active trader names
+            await this.redisManager.setActiveTraders(chatId.toString(), activeTraderNames);
+            
+            this.logInfo(`Synced ${activeTraderNames.length} active traders to Redis`, { 
+                chatId, 
+                activeTraders: activeTraderNames 
+            });
+            
+            // Signal the monitor worker to refresh its trader list
+            this.signalMessage('REFRESH_SUBSCRIPTIONS', { chatId });
+
+        } catch (error) {
+            this.logError('Failed to sync active traders to Redis', { 
+                chatId, 
+                error: error.message 
+            });
+        }
+    }
+
+    async syncAllActiveTradersOnStartup() {
+        try {
+            this.logInfo('🔄 Syncing all active traders to Redis on startup...');
+            
+            // Get all users
+            const usersData = await this.dataManager.loadUsers();
+            const allUsers = Object.values(usersData || {});
+            
+            let totalSynced = 0;
+            
+            // Sync active traders for each user
+            for (const user of allUsers) {
+                const chatId = user.chat_id.toString();
+                // 🔧 FIX: Use user.id (internal ID) not chatId for getTraders()
+                const traders = await this.dataManager.getTraders(user.id);
+                
+                const activeTraderNames = traders
+                    .filter(trader => trader.active === true || trader.active === 1)
+                    .map(trader => trader.name);
+                
+                if (activeTraderNames.length > 0) {
+                    await this.redisManager.setActiveTraders(chatId, activeTraderNames);
+                    totalSynced += activeTraderNames.length;
+                    this.logInfo(`Synced ${activeTraderNames.length} active traders for user ${chatId}`, { 
+                        chatId, 
+                        activeTraders: activeTraderNames 
+                    });
+                }
+            }
+            
+            this.logInfo(`✅ Startup sync completed: ${totalSynced} total active traders synced to Redis`);
+            
+            // Signal monitor worker to refresh subscriptions
+            this.signalMessage('REFRESH_SUBSCRIPTIONS', { chatId: 'all' });
+
+        } catch (error) {
+            this.logError('Failed to sync active traders on startup', { 
+                error: error.message 
+            });
         }
     }
 }

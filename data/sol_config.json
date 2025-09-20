@@ -1,0 +1,93 @@
+{
+  "rpcEndpoint": "https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com",
+  "wsEndpoint": "wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
+  "laserstreamEndpoint": "wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
+  "senderEndpoint": "https://sender.helius-rpc.com/fast",
+  "commitment": "confirmed",
+  "timeout": 30000,
+  "retries": 3,
+  "premiumEndpoints": {
+    "singapore": {
+      "rpc": "https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com",
+      "sender": "https://sender.helius-rpc.com/fast",
+      "laserstream": "wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769",
+      "websocket": "wss://atlas-mainnet.helius-rpc.com/?api-key=b9a69ad0-d823-429e-8c18-7cbea0e31769"
+    }
+  },
+  "leaderTracking": {
+    "enabled": true,
+    "scheduleFetchLimit": 5000,
+    "refreshThreshold": 2500,
+    "fallbackRefreshInterval": 1200000,
+    "endpoint": "https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com"
+  },
+  "ultraLowLatency": {
+    "enabled": true,
+    "targetDetectionLatency": 100,
+    "targetExecutionLatency": 200,
+    "targetOverallLatency": 300,
+    "performanceMonitoring": true
+  },
+  "mevProtection": {
+    "enabled": true,
+    "jitoTips": true,
+    "leaderTargeting": true,
+    "priorityFees": {
+      "low": 5000,
+      "normal": 20000,
+      "high": 100000,
+      "ultra": 500000
+    }
+  },
+  "grpcOptimizations": {
+    "maxSendMessageLength": 67108864,
+    "maxReceiveMessageLength": 104857600,
+    "keepaliveTimeMs": 20000,
+    "keepaliveTimeoutMs": 10000,
+    "keepalivePermitWithoutCalls": 1,
+    "minTimeBetweenPingsMs": 15000,
+    "writeBufferSize": 1048576,
+    "maxSessionMemory": 67108864,
+    "initialStreamWindowSize": 16777216,
+    "initialConnectionWindowSize": 33554432
+  },
+  "workerThreading": {
+    "enabled": true,
+    "maxConcurrentTrades": 50,
+    "maxQueueSize": 1000,
+    "heartbeatInterval": 30000,
+    "taskTimeout": 30000
+  },
+  "platformSupport": {
+    "pumpFun": true,
+    "raydium": true,
+    "meteora": true,
+    "jupiter": false,
+    "universalCloner": true,
+    "platformBuilders": false
+  },
+  "tradingRules": {
+    "oneBuyOneSell": {
+      "enabled": true,
+      "description": "One buy per token, complete sell on sell",
+      "buyRestriction": "Only one buy allowed per token per user",
+      "sellBehavior": "Always sells complete position (all tokens)",
+      "notifications": {
+        "skippedBuyNotification": false,
+        "description": "No notifications sent for skipped duplicate buys"
+      }
+    }
+  },
+  "version": "2.0.0",
+  "lastUpdated": "2025-09-17T20:20:00Z",
+  "upgrades": [
+    "Premium Singapore endpoints integration",
+    "Leader tracking for ultra-low latency",
+    "Universal cloner implementation",
+    "Platform builders removal",
+    "Jupiter API removal",
+    "Worker threading optimization",
+    "MEV protection enhancement",
+    "Performance monitoring integration"
+  ]
+}

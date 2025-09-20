@@ -1,0 +1,22 @@
+{
+  "botSettings": {
+    "autoTrade": false,
+    "maxSlippage": 0.1,
+    "minSolAmount": 0.001,
+    "maxSolAmount": 1,
+    "enableNotifications": true,
+    "enableLogging": true
+  },
+  "tradingSettings": {
+    "defaultSolAmount": 0.1,
+    "maxPositions": 10,
+    "stopLoss": 0.05,
+    "takeProfit": 0.1
+  },
+  "settings": {
+    "6032767351": {
+      "solAmount": 0.005,
+      "updated_at": "2025-09-17T19:36:42.373Z"
+    }
+  }
+}

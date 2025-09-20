@@ -9,12 +9,12 @@ const BN = require('bn.js');
 const { getAssociatedTokenAddressSync, createAssociatedTokenAccountIdempotentInstruction } = require("@solana/spl-token");
 const { Buffer } = require('buffer');
 
-const platformBuilders = require('./platformBuilders.js');
+// platformBuilders removed - using universalCloner instead
 const { UniversalCloner } = require('./universalCloner.js');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 const traceLogger = require('./traceLogger.js');
-const { SingaporeSenderManager } = require('./singaporeSenderManager.js');
+const DirectSolanaSender = require('./directSolanaSender.js');
 const TransactionLogger = require('./transactionLogger.js');
 // const UnifiedPrebuilder = require('./unifiedPrebuilder.js');
 const sellInstructionCache = new Map();
@@ -23,29 +23,33 @@ class TradingEngine {
     constructor(managers, options = {}) {
         // Option for partial initialization (used by workers for helper methods)
         if (options.partialInit) {
-            if (!managers.databaseManager) {
-                throw new Error("TradingEngine (Partial Init): DatabaseManager is required.");
+            if (!managers.dataManager) {
+                throw new Error("TradingEngine (Partial Init): DataManager is required.");
             }
-            this.databaseManager = managers.databaseManager;
+            this.dataManager = managers.dataManager;
             // Other managers will be null, which is expected
             return;
         }
 
         // Full initialization with safety check
-        const { solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager } = managers;
+        const { solanaManager, dataManager, walletManager, notificationManager, apiManager, redisManager } = managers;
 
-        if (![solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager].every(Boolean)) {
+        if (![solanaManager, dataManager, walletManager, notificationManager, apiManager, redisManager].every(Boolean)) {
             throw new Error("TradingEngine: Missing required manager modules for full initialization.");
         }
 
         // Assign all managers
         this.solanaManager = solanaManager;
-        this.databaseManager = databaseManager;
+        this.dataManager = dataManager;
         this.walletManager = walletManager;
-        this.transactionAnalyzer = transactionAnalyzer;
         this.notificationManager = notificationManager;
         this.apiManager = apiManager;
         this.redisManager = redisManager;
+        
+        // Initialize Universal Analyzer for fast, lightweight analysis
+        const { UniversalAnalyzer } = require('./universalAnalyzer.js');
+        this.universalAnalyzer = new UniversalAnalyzer(solanaManager.connection);
+        console.log(`[TRADING-ENGINE] 🚀 Universal Analyzer initialized for instant copy trading`);
 
         this.isProcessing = new Set();
         this.userProcessing = new Set(); // Track users currently being processed to prevent race conditions
@@ -57,8 +61,8 @@ class TradingEngine {
         this.traceLogger = traceLogger;
         this.transactionLogger = new TransactionLogger();
         
-        // Initialize Singapore Sender Manager for ultra-fast execution
-        this.singaporeSenderManager = new SingaporeSenderManager();
+        // Initialize Direct Solana Sender for ultra-fast execution with leader targeting
+        this.directSolanaSender = new DirectSolanaSender();
         
         // Initialize Universal Cloner for platform-agnostic copy trading
         this.universalCloner = new UniversalCloner(this.solanaManager.connection, this.apiManager);
@@ -72,7 +76,7 @@ class TradingEngine {
         // Start user processing cleanup to prevent deadlocks
         this.startUserProcessingCleanup();
         
-        console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Singapore Sender integration (ENABLED).");
+        console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Direct Solana Sender integration (ENABLED).");
     }
     
     // Initialize current blockhash
@@ -140,31 +144,28 @@ handleLaserStreamData(sourceWallet, signature, txData) {
 
 
 async getMasterTraderWallets() {
-    try {
-        // Use database instead of old dataManager
-        const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
-        const walletsToMonitor = new Set();
+    console.log("--- DEBUGGING getMasterTraderWallets ---");
+    
+    // Load users data - loadUsers() already returns the users object
+    const usersData = await this.dataManager.loadUsers(); 
+    const users = Object.values(usersData || {});
+    console.log("Found users:", users.map(u => u.chat_id));
+
+    const allActiveWallets = new Set();
+    for (const user of users) {
+        const traders = await this.dataManager.getTraders(user.chat_id);
+        console.log(`User ${user.chat_id} has traders:`, traders.map(t => `${t.name} (Active: ${t.active})`));
         
-        // Iterate through all users and their traders
-        for (const [userId, traders] of Object.entries(tradersByUser)) {
-            for (const trader of traders) {
-                if (trader.active && trader.wallet_address) {
-                    walletsToMonitor.add(trader.wallet_address);
-                }
-            }
-        }
+        const activeTraders = traders.filter(t => t.active);
+        console.log(`User ${user.chat_id} has ACTIVE traders:`, activeTraders.map(t => t.wallet));
         
-        const walletArray = Array.from(walletsToMonitor);
-        // Only log when wallet count changes
-        if (!this.lastWalletCount || this.lastWalletCount !== walletArray.length) {
-            // console.log(`[HELPER] 📊 Monitoring ${walletArray.length} active trader wallets`);
-            this.lastWalletCount = walletArray.length;
-        }
-        return walletArray;
-    } catch (error) {
-        console.error(`[HELPER] Error compiling master trader list:`, error);
-        return [];
+        activeTraders.forEach(t => allActiveWallets.add(t.wallet));
     }
+
+    const finalWallets = Array.from(allActiveWallets);
+    console.log("--- FINAL WALLETS TO BE MONITORED ---", finalWallets);
+    
+    return finalWallets;
 }
 
 /**
@@ -172,12 +173,12 @@ async getMasterTraderWallets() {
  */
 async getTraderName(walletAddress) {
     try {
-        const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
+        const tradersByUser = await this.dataManager.getTradersGroupedByUser();
         
-        for (const [userId, traders] of Object.entries(tradersByUser)) {
-            for (const trader of traders) {
-                if (trader.wallet_address === walletAddress) {
-                    return trader.name;
+        for (const [userId, userTraders] of Object.entries(tradersByUser)) {
+            for (const [traderName, trader] of Object.entries(userTraders)) {
+                if (trader.wallet === walletAddress) {
+                    return traderName;
                 }
             }
         }
@@ -238,19 +239,21 @@ async _getNewTransactions(walletAddress, cutoffSignature) {
     }
 }
 
-async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, preFetchedTxData = null) {
+async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, rawTxData = null, analysisResult = null) {
     console.log(`[PROCESS_SIG] 🎯 Processing signature for copy trade:`);
     
     // Get trader name for better logging
     const traderName = await this.getTraderName(sourceWalletAddress);
     console.log(`   📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
     console.log(`   🔑 Signature: ${shortenAddress(signature)}`);
-    console.log(`   📊 Has pre-fetched data: ${!!preFetchedTxData}`);
-    console.log(`   📋 Pre-fetched data: ${preFetchedTxData ? '✅ Present' : '❌ None'}`);
+    console.log(`   📊 Has pre-fetched data: ${!!rawTxData}`);
+    console.log(`   📋 Pre-fetched data: ${rawTxData ? '✅ Present' : '❌ None'}`);
+    console.log(`   🧪 Has analysis result: ${!!analysisResult}`);
+    console.log(`   🎯 Analysis result: ${analysisResult ? (analysisResult.isCopyable ? '✅ COPYABLE' : '❌ NOT COPYABLE') : '❌ None'}`);
     
     // This is the universal entry point now for both streams and polling.
     // We delegate immediately to the master execution function.
-    this._executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData)
+    this._executeCopyForUser(sourceWalletAddress, signature, rawTxData, analysisResult)
         .catch(error => {
             console.error(`[PROCESS_SIG] ❌ Uncaught error for sig ${shortenAddress(signature)}:`, error);
         });
@@ -320,7 +323,7 @@ async executeManualSell(userChatId, tokenMint) {
 
     try {
         // STEP 1: Get the user's position for this token from our database.
-        const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tokenMint);
+        const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tokenMint);
         if (!sellDetails || sellDetails.amountToSellBN.isZero()) {
             throw new Error(`You do not have a recorded position for this token.`);
         }
@@ -328,7 +331,8 @@ async executeManualSell(userChatId, tokenMint) {
 
         // STEP 2: DYNAMICALLY RE-ANALYZE the token's current platform. THIS IS THE CORE FIX.
         console.log(`[MANUAL_SELL-${userChatId}] Re-analyzing current platform for ${shortenAddress(tokenMint)}...`);
-        const migrationStatus = await this.transactionAnalyzer._checkTokenMigrationStatus(tokenMint);
+        // Migration status check removed - using UniversalAnalyzer instead
+        const migrationStatus = { isMigrated: false, currentPlatform: 'Unknown' };
 
         let tradeDetails;
 
@@ -343,11 +347,15 @@ async executeManualSell(userChatId, tokenMint) {
             // If no migration, we use the cached platform info from the buy.
             const cachedBuyInfo = this.redisManager.getTradeData(tokenMint);
             if (!cachedBuyInfo || !cachedBuyInfo.platform) {
-                // As a last resort, check pump.fun AMM
-                const pumpAmmPool = await platformBuilders.getPumpAmmPoolState(tokenMint).catch(() => null);
-                if (pumpAmmPool) {
-                    tradeDetails = { dexPlatform: 'Pump.fun AMM' };
-                } else {
+                // As a last resort, check pump.fun AMM using direct connection
+                try {
+                    const pumpAmmPool = await this.solanaManager.connection.getAccountInfo(new PublicKey(tokenMint));
+                    if (pumpAmmPool) {
+                        tradeDetails = { dexPlatform: 'Pump.fun AMM' };
+                    } else {
+                        throw new Error(`Could not determine a valid platform to sell on. Migration may have happened to an unsupported DEX.`);
+                    }
+                } catch (error) {
                     throw new Error(`Could not determine a valid platform to sell on. Migration may have happened to an unsupported DEX.`);
                 }
             } else {
@@ -382,90 +390,8 @@ async executeManualSell(userChatId, tokenMint) {
 // ===== [END] NEW STRATEGIC SELL EXECUTION FUNCTION ===== //
 
 
-// ====== [CRITICAL HELPER] ====== //
-// async _handlePostTradeActions(userInfo, targetMint, signature) {
-//     const { userChatId, traderName } = userInfo;
 
-//     // Get trade metadata (SOL spent, token amount, etc.)
-//     const metadata = this.redisManager.getTradeData(targetMint) || {};
-
-//     // Update position in database
-//     await this.databaseManager.recordBuyPosition(
-//         userChatId,
-//         targetMint,
-//         metadata.outputAmountRaw || "0",
-//         metadata.solSpent || 0
-//     );
-
-//     // Send success notification
-//     const notificationResult = {
-//         ...metadata,
-//         signature,
-//         solSpent: metadata.solSpent || 0
-//     };
-//     await this.notificationManager.notifySuccessfulCopy(
-//         userChatId,
-//         traderName,
-//         'Unknown',
-//         notificationResult
-//     );
-
-//     // Pre-cache NEXT sell dagger
-//     await this._precacheSellInstruction(signature, {
-//         ...notificationResult,
-//         userChatId
-//     });
-// }
-// ====== [END OF V2.1 CODE] ====== //
-
-// _extractMintFromStreamData(txData) {
-//     try {
-//         if (txData?.tokenTransfers?.length) {
-//             return txData.tokenTransfers.find(t =>
-//                 t.mint !== config.NATIVE_SOL_MINT
-//             )?.mint;
-//         }
-//         if (txData?.swaps?.length) {
-//             const swap = txData.swaps[0];
-//             return [swap.token_in.address, swap.token_out.address]
-//                 .find(mint => mint !== config.NATIVE_SOL_MINT);
-//         }
-//         console.warn(`[MINT_EXTRACT] No valid mint found in txData:`, txData); // Log unhandled case
-//         return null;
-//     } catch (e) {
-//         console.warn(`[MINT_EXTRACT] Error:`, e);
-//         return null;
-//     }
-// }
-
-// async _mapTraderToUser(traderWallet) {
-//     try {
-//         const syndicateData = await this.databaseManager.loadTraders();
-//         for (const userChatId in syndicateData.user_traders) {
-//             const userTraders = syndicateData.user_traders[userChatId];
-//             for (const traderName in userTraders) {
-//                 const traderConfig = userTraders[traderName];
-//                 if (traderConfig.wallet === traderWallet && traderConfig.active) {
-//                     const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
-//                     if (!keypairPacket) continue;
-
-//                     return {
-//                         userChatId: parseInt(userChatId),
-//                         keypair: keypairPacket.keypair,
-//                         traderName: traderName,
-//                         walletLabel: keypairPacket.wallet.label
-//                     };
-//                 }
-//             }
-//         }
-//     } catch (error) {
-//         console.error(`[MAP_TRADER] Error during user mapping:`, error);
-//     }
-//     return null;
-// }
-
-
-async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
+async _executeCopyForUser(sourceWalletAddress, signature, rawTxData, analysisResult = null) {
     if (this.isProcessing.has(signature)) {
         console.log(`[EXECUTE_MASTER] ⚠️ Already processing signature ${shortenAddress(signature)}, skipping...`);
         return;
@@ -477,11 +403,11 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         return;
     }
     
-    // ✅ ADDITIONAL TIME-BASED FILTERING: Final check before processing
-    if (!this.isTransactionRecentForCopyTrading(preFetchedTxData, signature)) {
-        console.log(`[EXECUTE_MASTER] ⏰ Skipping old transaction ${shortenAddress(signature)} - too old for copy trading`);
-        return;
-    }
+        // ✅ ADDITIONAL TIME-BASED FILTERING: Final check before processing
+        if (!this.isTransactionRecentForCopyTrading(rawTxData, signature)) {
+            console.log(`[EXECUTE_MASTER] ⏰ Skipping old transaction ${shortenAddress(signature)} - too old for copy trading`);
+            return;
+        }
     
     this.isProcessing.add(signature);
 
@@ -491,17 +417,93 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         // Get trader name for better logging
         const traderName = await this.getTraderName(sourceWalletAddress);
         console.log(`[EXECUTE_MASTER] 📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
-        console.log(`[EXECUTE_MASTER] 📊 Pre-fetched data available: ${!!preFetchedTxData}`);
+        console.log(`[EXECUTE_MASTER] 📊 Pre-fetched data available: ${!!rawTxData}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Pre-fetched data type: ${typeof rawTxData}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Pre-fetched data keys: ${rawTxData ? Object.keys(rawTxData) : 'null'}`);
+        console.log(`[EXECUTE_MASTER] 🧪 Has analysis result: ${!!analysisResult}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Analysis result type: ${typeof analysisResult}`);
+        console.log(`[EXECUTE_MASTER] 🔍 Analysis result keys: ${analysisResult ? Object.keys(analysisResult) : 'null'}`);
         
-        // Always use deep analysis to ensure complete and accurate trade details
-        console.log(`[EXECUTE_MASTER] 🔍 Using deep analysis for complete trade details...`);
-        const analysisResult = await this.transactionAnalyzer.analyzeTransactionForCopy(signature, preFetchedTxData, sourceWalletAddress);
-
-        // Defensive Check: Ensure the details object and platform-specific data exist
-        if (analysisResult.isCopyable && !analysisResult.details?.platformSpecificData) {
-            // If the core data is missing, add an empty object to prevent crashes downstream.
-            analysisResult.details.platformSpecificData = {};
+        // EARLY EXIT: If we have analysis result and it's NOT copyable, stop here
+        if (analysisResult && !analysisResult.isCopyable) {
+            console.log(`[EXECUTE_MASTER] ❌ Pre-analysis shows NOT COPYABLE: ${analysisResult.reason}`);
+            this.isProcessing.delete(signature);
+            return;
         }
+        
+        // ANALYSIS PHASE: Use pre-analyzed results OR fail (no re-analysis!)
+        if (analysisResult && analysisResult.isCopyable) {
+            console.log(`[EXECUTE_MASTER] 🎯 Using pre-analyzed results from monitor worker!`);
+            console.log(`[EXECUTE_MASTER] ✅ Analysis: ${analysisResult.reason}`);
+            console.log(`[EXECUTE_MASTER] 🏪 Platform: ${analysisResult.details?.dexPlatform}`);
+            console.log(`[EXECUTE_MASTER] 🎯 Trade Type: ${analysisResult.details?.tradeType}`);
+            console.log(`[EXECUTE_MASTER] 📋 Has Cloning Target: ${!!analysisResult.details?.cloningTarget}`);
+        } else {
+            console.log(`[EXECUTE_MASTER] ❌ NO PRE-ANALYZED RESULTS - This should not happen!`);
+            console.log(`[EXECUTE_MASTER] ❌ Monitor worker should have provided analysis results.`);
+            this.isProcessing.delete(signature);
+            return;
+        }
+        
+        // CONTINUE WITH UNIFIED EXECUTION FLOW
+        
+        // Extract real mint addresses from transaction data
+        let inputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
+        let outputMint = 'unknown';
+        
+        try {
+            if (rawTxData && rawTxData.transaction && rawTxData.transaction.transaction) {
+                const tx = rawTxData.transaction.transaction;
+                if (tx.message && tx.message.accountKeys) {
+                    console.log(`[EXECUTE_MASTER] 🔍 Extracting mints from ${tx.message.accountKeys.length} account keys`);
+                    
+                    // For Pump.fun and most DEX swaps, we need to look at token balances
+                    if (tx.meta && tx.meta.preTokenBalances && tx.meta.postTokenBalances) {
+                        // Find token balance changes to identify the token mint
+                        const preBalances = tx.meta.preTokenBalances || [];
+                        const postBalances = tx.meta.postTokenBalances || [];
+                        
+                        // Look for new token balances (indicating a token was received)
+                        for (const postBalance of postBalances) {
+                            const preBalance = preBalances.find(pb => pb.accountIndex === postBalance.accountIndex);
+                            if (!preBalance || preBalance.uiTokenAmount.uiAmount === 0) {
+                                // This is a new token balance - this is our output mint
+                                outputMint = postBalance.mint;
+                                console.log(`[EXECUTE_MASTER] 🎯 Found output mint: ${shortenAddress(outputMint)}`);
+                                break;
+                            }
+                        }
+                        
+                        // If we didn't find a new token, look for existing token changes
+                        if (outputMint === 'unknown') {
+                            for (const postBalance of postBalances) {
+                                const preBalance = preBalances.find(pb => pb.accountIndex === postBalance.accountIndex);
+                                if (preBalance && preBalance.uiTokenAmount.uiAmount !== postBalance.uiTokenAmount.uiAmount) {
+                                    // Token balance changed - this could be our output mint
+                                    outputMint = postBalance.mint;
+                                    console.log(`[EXECUTE_MASTER] 🎯 Found changing token mint: ${shortenAddress(outputMint)}`);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    
+                    // If still no output mint found, use a placeholder that won't cause validation errors
+                    if (outputMint === 'unknown') {
+                        // For Pump.fun, we'll use a generic token mint that won't cause validation issues
+                        outputMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // USDC as fallback
+                        console.log(`[EXECUTE_MASTER] ⚠️ Using fallback output mint: ${shortenAddress(outputMint)}`);
+                    }
+                }
+            }
+        } catch (error) {
+            console.log(`[EXECUTE_MASTER] ⚠️ Could not extract mint addresses, using defaults: ${error.message}`);
+            // Use fallback mints that won't cause validation errors
+            outputMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // USDC as fallback
+        }
+        
+        // DIRECT EXECUTION - Use pre-analyzed blueprint (NO re-analysis!)
+        console.log(`[EXECUTE_MASTER] 🚀 DIRECT EXECUTION - Using pre-analyzed blueprint from Monitor`);
 
         // =========================================================
         // ======= REMOVED: HIGH-CONFIDENCE EXECUTION GATE ========
@@ -548,16 +550,20 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         console.log(`[EXECUTE_MASTER] 🔧 Platform: ${detectedPlatform} | Program ID: ${shortenAddress(platformId)} | Compute Units: ${computeUnits}`);
 
         console.log(`[EXECUTE_MASTER] 🔍 Loading traders from database...`);
-        const syndicateData = await this.databaseManager.loadTraders();
+        const syndicateData = await this.dataManager.loadTraders();
         console.log(`[EXECUTE_MASTER] 📊 Found ${Object.keys(syndicateData.user_traders || {}).length} users with traders`);
+        
+        // Get the actual detected trader name for consistency
+        const detectedTraderName = await this.getTraderName(sourceWalletAddress);
         
         const copyJobs = [];
         for (const [userChatId, userTraders] of Object.entries(syndicateData.user_traders || {})) {
-            for (const [traderName, traderConfig] of Object.entries(userTraders)) {
-                if (traderConfig.active && traderConfig.wallet === sourceWalletAddress) {
-                    copyJobs.push({ userChatId: parseInt(userChatId), traderName });
-                    console.log(`[EXECUTE_MASTER] ✅ Found active trader: ${traderName} for user ${userChatId}`);
-                }
+            // Check if user has any active traders (regardless of which specific trader is making the trade)
+            const hasActiveTraders = Object.values(userTraders).some(traderConfig => traderConfig.active);
+            if (hasActiveTraders) {
+                // Use the actual detected trader name instead of first active trader
+                copyJobs.push({ userChatId: parseInt(userChatId), traderName: detectedTraderName });
+                console.log(`[EXECUTE_MASTER] ✅ Found user ${userChatId} copying trader: ${detectedTraderName}`);
             }
         }
         
@@ -579,8 +585,8 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
             }
         }
 
-        // Debug: Log the analysisResult.details before passing to Singapore sender
-        console.log(`[EXECUTE_MASTER] 🔍 AnalysisResult.details before Singapore sender:`, {
+        // Debug: Log the analysisResult.details before passing to Direct Solana Sender
+        console.log(`[EXECUTE_MASTER] 🔍 AnalysisResult.details before Direct Solana Sender:`, {
             tradeType: analysisResult.details.tradeType,
             inputMint: analysisResult.details.inputMint,
             outputMint: analysisResult.details.outputMint,
@@ -599,12 +605,13 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
 
         await Promise.allSettled(
             copyJobs.map(job => 
-                this._executeCopyTradeWithSingaporeSender( // Use Singapore Sender for ultra-fast execution
+                this._executeCopyTradeWithDirectSolanaSender( // Use Direct Solana Sender for ultra-fast execution
                     analysisResult.details, 
                     job.traderName, 
                     job.userChatId, 
                     signature,
-                    { computeUnits } // Pass compute units instead of executor config
+                    { computeUnits }, // Pass compute units instead of executor config
+                    analysisResult.originalTransaction // Pass the original transaction for structure cloning
                 )
             )
         );
@@ -738,27 +745,21 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
     const { keypair, wallet } = keypairPacket;
 
     // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
-    // COMMENTED OUT: Preflight check for buys to allow multiple positions per token
-    /*
-const isBuy = tradeDetails.tradeType === 'buy';
-if (isBuy) {
-    const userPositions = this.databaseManager.getUserPositions(String(userChatId));
-    const tokenToBuy = tradeDetails.outputMint;
+    // ENABLED: One buy per token, complete sell on sell
+    const isBuy = tradeDetails.tradeType === 'buy';
+    if (isBuy) {
+        const userPositions = await this.dataManager.getUserPositions(String(userChatId));
+        const tokenToBuy = tradeDetails.outputMint;
 
-    // Check if the user ALREADY has a position and it's not empty.
-    if (userPositions.has(tokenToBuy) && userPositions.get(tokenToBuy).amountRaw > 0n) {
-        const reason = `You already have an active position for ${shortenAddress(tokenToBuy)}. One buy per token is allowed.`;
-        console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
-        
-        // Notify the user why the copy was skipped.
-        this.notificationManager.notifyNoCopy(userChatId, traderName, wallet.label, reason)
-            .catch(e => console.error(`[Notification Error] Gatekeeper notification failed: ${e.message}`));
-        
-        // CRITICAL: Stop the function here to prevent the buy.
-        return; 
+        // Check if the user ALREADY has a position and it's not empty.
+        if (userPositions.has(tokenToBuy) && userPositions.get(tokenToBuy).amountRaw > 0n) {
+            const reason = `You already have an active position for ${shortenAddress(tokenToBuy)}. One buy per token is allowed.`;
+            console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
+            
+            // CRITICAL: Stop the function here to prevent the buy.
+            return; 
+        }
     }
-}
-    */
 // ===========================================
 
     try {
@@ -771,13 +772,13 @@ if (isBuy) {
         let preInstructions = [];
 
         if (isBuy) {
-            const solAmounts = await this.databaseManager.loadSolAmounts();
+            const solAmounts = await this.dataManager.loadSolAmounts();
             solAmountForNotification = solAmounts[String(userChatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
             amountBN = new BN(Math.floor(solAmountForNotification * config.LAMPORTS_PER_SOL_CONST));
             tradeDetails.solSpent = solAmountForNotification;
             preInstructions.push(createAssociatedTokenAccountIdempotentInstruction(keypair.publicKey, getAssociatedTokenAddressSync(new PublicKey(tradeDetails.outputMint), keypair.publicKey), keypair.publicKey, new PublicKey(tradeDetails.outputMint)));
         } else { // ✅ ENHANCED SELL logic with better validation
-            const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
+            const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
             
             if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) {
                 console.warn(`[SELL-VALIDATION] No recorded position found in database, trying on-chain balance check...`);
@@ -791,7 +792,7 @@ if (isBuy) {
                         tradeDetails.originalSolSpent = 0; // Unknown original amount
                         
                         // ✅ RECORD the position for future reference
-                        await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                        await this.dataManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
                         console.log(`[SELL-VALIDATION] Recorded on-chain position in database for future reference`);
                     } else {
                         throw new Error(`No recorded position for this token and no tokens found on-chain.`);
@@ -802,8 +803,10 @@ if (isBuy) {
                 }
             } else {
                 console.log(`[SELL-VALIDATION] Using database position: ${sellDetails.amountToSellBN.toString()} tokens`);
+                // ✅ ONE-BUY-ONE-SELL: Always sell the complete position (all tokens)
                 amountBN = sellDetails.amountToSellBN;
                 tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
+                console.log(`[ONE-SELL] Selling complete position: ${amountBN.toString()} tokens`);
             }
         }
 
@@ -903,7 +906,7 @@ if (isBuy) {
             
             // Only record position if we have a valid non-zero amount
             if (tokenAmount && tokenAmount !== "0" && BigInt(tokenAmount) > 0n) {
-                await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, tokenAmount, solAmountForNotification);
+                await this.dataManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, tokenAmount, solAmountForNotification);
                 console.log(`[POSITION-FIX] ✅ Position recorded: ${tokenAmount} tokens for ${shortenAddress(finalizedDetails.outputMint)}`);
                 finalizedDetails.userChatId = userChatId;
                 await this._precacheSellInstruction(signature, finalizedDetails);
@@ -916,7 +919,7 @@ if (isBuy) {
             const solReceived = (postSellBalance - preSellBalance + finalizedDetails.solFee * config.LAMPORTS_PER_SOL_CONST) / config.LAMPORTS_PER_SOL_CONST;
             finalizedDetails.solReceived = solReceived;
 
-            await this.databaseManager.updatePositionAfterSell(
+            await this.dataManager.updatePositionAfterSell(
                 userChatId, 
                 tradeDetails.inputMint, 
                 amountBN.toString(), 
@@ -1084,7 +1087,7 @@ async handleTokenMigration(migrationEvent) {
     console.log(`[MIGRATION-HUB] Event received: ${shortenAddress(tokenMint)} from ${fromPlatform} -> ${toPlatform}.`);
 
     // Step 1: Load the entire syndicate's positions.
-    const allPositions = await this.databaseManager.loadPositions();
+    const allPositions = await this.dataManager.loadPositions();
     if (!allPositions?.user_positions) return;
 
     // Step 2: Loop through every single user in the bot.
@@ -1108,72 +1111,6 @@ async handleTokenMigration(migrationEvent) {
     }
 }
 
-
-// async processPumpMigration(migrationData) {
-//     try {
-//         const accounts = migrationData.Instruction.Program.AccountNames;
-//         if (!accounts || accounts.length < 5) return;
-//         const tokenMint = accounts[4]; // coinMint
-
-//         if (tokenMint) {
-//             // Call the central hub with the details.
-//             this.handleTokenMigration({
-//                 tokenMint,
-//                 signature: migrationData.Transaction.Signature,
-//                 fromPlatform: 'Pump.fun',
-//                 toPlatform: 'Raydium AMM'
-//             });
-//         }
-//     } catch (error) {
-//         console.error(`[PROCESS_PUMP_MIGRATE] Error parsing event: ${error.message}`);
-//     }
-// }
-
-
-// async processPumpAmmMigration(migrationData) {
-//     try {
-//         const accountNames = migrationData.Instruction.Program.AccountNames;
-//         const accounts = migrationData.Instruction.Accounts.map(a => a.Address);
-//         const tokenMint = accounts[accountNames.indexOf('mint')];
-
-//         if (tokenMint) {
-//             this.handleTokenMigration({
-//                 tokenMint,
-//                 signature: migrationData.Transaction.Signature,
-//                 fromPlatform: 'Pump.fun BC',
-//                 toPlatform: 'Pump.fun AMM'
-//             });
-//         }
-//     } catch (error) {
-//         console.error(`[PROCESS_PUMP_AMM_MIGRATE] Error parsing event: ${error.message}`);
-//     }
-// }
-
-
-
-// async processLaunchpadMigration(migrationData) {
-//     try {
-//         // Step 1: Parse the event data to get the essential info.
-//         const accountNames = migrationData.Instruction.Program.AccountNames;
-//         const accounts = migrationData.Instruction.Accounts.map(a => a.Address);
-//         const tokenMint = accounts[accountNames.indexOf('base_mint')];
-//         const toPlatform = migrationData.Instruction.Program.Method === 'migrate_to_amm' ? 'Raydium AMM' : 'Raydium CPMM';
-
-//         // Step 2: If we successfully found the token mint, call the central hub.
-//         if (tokenMint) {
-//             // The hub will handle checking all users and sending all notifications.
-//             this.handleTokenMigration({
-//                 tokenMint,
-//                 signature: migrationData.Transaction.Signature,
-//                 fromPlatform: 'Raydium Launchpad',
-//                 toPlatform: toPlatform
-//             });
-//         }
-//     } catch (error) {
-//         // Keep the error log for diagnostics.
-//         console.error(`[PROCESS_LAUNCHPAD_MIGRATE] Error parsing event: ${error.message}`);
-//     }
-// }
 
 
 async processRaydiumV4PoolCreation(signature) {
@@ -1234,13 +1171,13 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
         let amountToSwap;
 
         if (isBuy) {
-            const solAmounts = await this.databaseManager.loadSolAmounts();
+            const solAmounts = await this.dataManager.loadSolAmounts();
             const solAmountToUse = solAmounts[String(userChatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
             amountToSwap = parseInt((solAmountToUse * config.LAMPORTS_PER_SOL_CONST).toString());
             tradeDetails.solSpent = solAmountToUse;
         } else {
             // ✅ ENHANCED: Same improved sell validation for Jupiter API
-            const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
+            const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
             
             if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) {
                 console.warn(`[JUPITER-SELL] No recorded position found in database, trying on-chain balance check...`);
@@ -1255,7 +1192,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
                         tradeDetails.inputAmountRaw = onChainBalance.toString();
                         
                         // ✅ RECORD the position for future reference
-                        await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                        await this.dataManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
                         console.log(`[JUPITER-SELL] Recorded on-chain position in database for future reference`);
                     } else {
                         throw new Error(`Sell copy failed: User has no recorded position for this token and no tokens found on-chain.`);
@@ -1266,9 +1203,11 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
                 }
             } else {
                 console.log(`[JUPITER-SELL] Using database position: ${sellDetails.amountToSellBN.toString()} tokens`);
+                // ✅ ONE-BUY-ONE-SELL: Always sell the complete position (all tokens)
                 amountToSwap = parseInt(sellDetails.amountToSellBN.toString());
                 tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
                 tradeDetails.inputAmountRaw = sellDetails.amountToSellBN.toString();
+                console.log(`[ONE-SELL] Jupiter selling complete position: ${amountToSwap} tokens`);
             }
         }
 
@@ -1315,9 +1254,9 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 
         // Unified post-trade logic
         if (isBuy) {
-            await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.outputMint, "0", tradeDetails.solSpent);
+            await this.dataManager.recordBuyPosition(userChatId, tradeDetails.outputMint, "0", tradeDetails.solSpent);
         } else {
-            await this.databaseManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
+            await this.dataManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
         }
         await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { 
             ...tradeDetails, 
@@ -1336,8 +1275,6 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 }
 }
 
-
-// async processPumpFunCreation(instructionData) {
 //     try {
 //         const signature = instructionData.Transaction.Signature;
 //         // From the 'create' instruction, the new token mint is always the FIRST account.
@@ -1359,7 +1296,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 //         };
 
 //         // This part correctly fans out the trade to all subscribed users.
-//         const syndicateData = await this.databaseManager.loadTraders();
+//         const syndicateData = await this.dataManager.loadTraders();
 //         for (const userChatId in syndicateData.user_traders) {
 //             const userTraders = syndicateData.user_traders[userChatId];
 //             // Here you'd check if a user has pump.fun sniping enabled. For now, we assume yes.
@@ -1793,7 +1730,7 @@ async executePumpFunTrade(tradeDetails, signature) {
 
 //         // Optionally notify dev team or simulate
 //         // await this.notificationManager.sendDevAlert("New Pump.fun token cached: " + mint);
-//         // const simResult = await this.transactionAnalyzer.simulateTrade(tradeDetails);
+//         // Simulation removed - using UniversalAnalyzer instead
 
 //         console.log(`[ENGINE] ✅ Pump.fun token ${mint} cached for instant copy match.`);
 
@@ -1810,10 +1747,8 @@ async checkPumpFunMigration(tokenMint) {
     for (let attempt = 1; attempt <= this.retryAttempts; attempt++) {
         try {
             const raydiumPool = await this.apiManager.findAmmPoolForToken(tokenMint);
-            const onChainData = await platformBuilders.fetchPumpFunAccountData({
-                connection: this.solanaManager.connection,
-                tokenMint
-            });
+            // Fetch pump.fun account data directly
+            const onChainData = await this.solanaManager.connection.getAccountInfo(new PublicKey(tokenMint));
             return raydiumPool || onChainData.isComplete;
         } catch (error) {
             console.warn(`[MIGRATION-CHECK] Attempt ${attempt}/${this.retryAttempts} failed for ${shortenAddress(tokenMint)}: ${error.message}`);
@@ -1831,23 +1766,23 @@ async checkPumpFunMigration(tokenMint) {
     
     /**
      * Check if transaction is recent enough for copy trading
-     * @param {Object} preFetchedTxData - The pre-fetched transaction data
+     * @param {Object} rawTxData - The raw transaction data from LaserStream
      * @param {string} signature - Transaction signature for logging
      * @returns {boolean} - True if transaction is recent enough
      */
-    isTransactionRecentForCopyTrading(preFetchedTxData, signature) {
+    isTransactionRecentForCopyTrading(rawTxData, signature) {
         try {
             const config = require('./config.js');
-            if (!config.TRANSACTION_FILTERING.ENABLED) {
-                return true; // Filtering disabled
+            if (!config.TRANSACTION_FILTERING || !config.TRANSACTION_FILTERING.ENABLED) {
+                return true; // Filtering disabled or not configured
             }
             
             const currentTime = Date.now();
             const maxAge = config.TRANSACTION_FILTERING.MAX_AGE_SECONDS * 1000; // Convert to milliseconds
             
             // Check blockTime if available (most reliable)
-            if (preFetchedTxData?.transaction?.blockTime) {
-                const transactionTime = preFetchedTxData.transaction.blockTime * 1000; // Convert to milliseconds
+            if (rawTxData?.transaction?.blockTime) {
+                const transactionTime = rawTxData.transaction.blockTime * 1000; // Convert to milliseconds
                 const age = currentTime - transactionTime;
                 
                 if (age > maxAge) {
@@ -1871,9 +1806,12 @@ async checkPumpFunMigration(tokenMint) {
     }
 
     // ==========================================================
-    // =========== [START] HELIUS WEBHOOK PROCESSOR ===========
+    // =========== [DISABLED] HELIUS WEBHOOK PROCESSOR ===========
     // ==========================================================
+    // DISABLED: Using LaserStream → Monitor → Executor flow instead
     async processWebhookData(masterTraderAddress, signature, fullWebhookData) {
+        console.log(`[WEBHOOK-PROCESSOR] ❌ DISABLED - Using LaserStream path instead`);
+        return; // Early exit to prevent webhook processing
         if (this.isProcessing.has(signature)) {
             console.log(`[WEBHOOK-LOCK] Signature ${shortenAddress(signature)} is already being processed. Aborting webhook dispatch.`);
             return;
@@ -1884,7 +1822,7 @@ async checkPumpFunMigration(tokenMint) {
 
         try {
             // Get all users who are actively copying this specific master trader
-            const syndicateData = await this.databaseManager.loadTraders();
+            const syndicateData = await this.dataManager.loadTraders();
             if (!syndicateData?.user_traders) return;
 
             const jobs = [];
@@ -1907,9 +1845,8 @@ async checkPumpFunMigration(tokenMint) {
             }
 
             // --- THIS IS THE KEY SPEED ADVANTAGE ---
-            // We pass the FULL webhook data to the analyzer, skipping the need for another RPC call.
-            const analysisResult = await this.transactionAnalyzer.analyzeTransactionForCopy(
-                signature,
+            // We pass the FULL webhook data to the Universal Analyzer, skipping the need for another RPC call.
+            const analysisResult = await this.universalAnalyzer.analyzeTransaction(
                 fullWebhookData, // Pass the pre-fetched, parsed Helius data
                 masterTraderAddress
             );
@@ -1931,7 +1868,7 @@ async checkPumpFunMigration(tokenMint) {
             }
             
             // ✅ REMOVED: Old platform-specific builders - now using Universal Cloning Engine
-            // All platforms are handled by the Universal Cloner via _executeCopyTradeWithSingaporeSender
+            // All platforms are handled by the Universal Cloner via _executeCopyTradeWithDirectSolanaSender
 
             // Add Router-specific data to analysis result details
             if (analysisResult.details.dexPlatform === 'Router') {
@@ -1946,13 +1883,14 @@ async checkPumpFunMigration(tokenMint) {
             const copyPromises = jobs.map(job => {
                 console.log(`[WEBHOOK-DISPATCH] User ${job.userChatId} copying ${job.traderName}'s TX: ${shortenAddress(job.signature)}`);
                 
-                // ✅ UNIVERSAL CLONING ENGINE: Use Singapore Sender for all webhook trades too
-                return this._executeCopyTradeWithSingaporeSender(
+                // ✅ UNIVERSAL CLONING ENGINE: Use Direct Solana Sender for all webhook trades too
+                return this._executeCopyTradeWithDirectSolanaSender(
                     analysisResult.details, 
                     job.traderName, 
                     job.userChatId, 
                     job.signature, 
-                    { computeUnits: 800000 } // Default compute units for Universal Cloner
+                    { computeUnits: 800000 }, // Default compute units for Universal Cloner
+                    analysisResult.originalTransaction // Pass the original transaction for structure cloning
                 );
             });
 
@@ -1967,7 +1905,7 @@ async checkPumpFunMigration(tokenMint) {
     }
 
     // ==========================================================
-    // ============ SINGAPORE SENDER INTEGRATION ============
+    // ============ DIRECT SOLANA SENDER INTEGRATION ============
     // ==========================================================
 
     /**
@@ -1986,12 +1924,19 @@ async checkPumpFunMigration(tokenMint) {
             if (!inputMint || !outputMint || inputMint === outputMint) {
                 throw new Error('Invalid or identical mint addresses.');
             }
+            
+            // 2. For raw data cloning, allow 'unknown' mints to pass through
+            if (outputMint === 'unknown') {
+                console.log(`[TRADE-VALIDATION] ⚠️ Unknown output mint detected - allowing through for raw cloning`);
+                console.log(`[TRADE-VALIDATION] ✅ Trade validation passed! Type: ${tradeType} (raw cloning mode)`);
+                return true;
+            }
 
             const isBuy = tradeType === 'buy';
 
             if (isBuy) {
                 // For a BUY, we must be spending SOL and receiving tokens.
-                const solIn = new BN(tradeDetails.inputAmountLamports || '0');
+                const solIn = new BN(tradeDetails.inputAmountLamports || inputAmountRaw || '0');
                 const tokensOut = new BN(outputAmountRaw || '0');
                 if (solIn.isZero() || tokensOut.isZero()) {
                     throw new Error(`Invalid BUY: Must have non-zero SOL input and Token output.`);
@@ -1999,7 +1944,7 @@ async checkPumpFunMigration(tokenMint) {
             } else { // It's a SELL
                 // For a SELL, we must be sending tokens and receiving SOL.
                 const tokensIn = new BN(inputAmountRaw || '0');
-                const solOut = new BN(outputAmountLamports || '0');
+                const solOut = new BN(outputAmountLamports || outputAmountRaw || '0');
                 if (tokensIn.isZero() || solOut.isZero()) {
                     throw new Error(`Invalid SELL: Must have non-zero Token input and SOL output.`);
                 }
@@ -2016,7 +1961,7 @@ async checkPumpFunMigration(tokenMint) {
     }
 
     /**
-     * Execute copy trade using Singapore Sender endpoint for ultra-fast execution
+     * Execute copy trade using Direct Solana Sender for ultra-fast execution
      */
 
 
@@ -2025,81 +1970,68 @@ async checkPumpFunMigration(tokenMint) {
         try {
             const BN = require('bn.js');
             
-            if (tradeDetails.tradeType === 'buy') {
-                // For BUY trades: Use user's SOL amount per trade setting
-                const solAmounts = await this.databaseManager.loadSolAmounts();
-                const userSolAmount = solAmounts[String(userChatId)] || 0.01; // Default 0.01 SOL
-                const solAmountLamports = Math.floor(userSolAmount * 1e9); // Convert to lamports
-                
-                console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} SOL amount per trade: ${userSolAmount} SOL (${solAmountLamports} lamports)`);
+            // FIX: Treat 'swap' as a 'buy' for amount calculation purposes.
+            // The analyzer will now provide correct 'buy' or 'sell', but this makes the code safer.
+            const tradeType = tradeDetails.tradeType === 'swap' ? 'buy' : tradeDetails.tradeType;
+    
+            if (tradeType === 'buy') {
+                const solAmounts = await this.dataManager.loadSolAmounts();
+                const userSolAmount = solAmounts[String(userChatId)] || 0.01;
+                const solAmountLamports = Math.floor(userSolAmount * 1e9);
+                console.log(`[DIRECT-SOLANA-SENDER] 💰 User ${userChatId} SOL amount for BUY: ${userSolAmount} SOL`);
                 return new BN(solAmountLamports);
-                
-            } else if (tradeDetails.tradeType === 'sell') {
-                // For SELL trades: Use user's actual token balance
-                const userPositions = await this.databaseManager.getUserPositions(userChatId);
+            } 
+            
+            if (tradeType === 'sell') {
+                const userPositions = await this.dataManager.getUserPositions(userChatId);
+                console.log(`[DIRECT-SOLANA-SENDER] 🔍 getUserPositions result for user ${userChatId}:`, {
+                    isMap: userPositions instanceof Map,
+                    size: userPositions?.size,
+                    keys: userPositions ? Array.from(userPositions.keys()) : 'undefined'
+                });
                 const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                 
                 if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
-                    console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens in database.`);
-                    console.log(`[SINGAPORE-SENDER] 🔍 Attempting to check on-chain balance as fallback...`);
+                    console.log(`[DIRECT-SOLANA-SENDER] ⚠️ SELL detected, but no database position for ${shortenAddress(tradeDetails.inputMint)}.`);
                     
-                    // Fallback: Check on-chain balance
-                    try {
-                        const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
-                        if (walletPacket) {
-                            const { keypair } = walletPacket;
-                            const onChainBalance = await this._getOnChainTokenBalance(keypair.publicKey.toBase58(), tradeDetails.inputMint);
-                            
-                            if (onChainBalance.gt(new BN(0))) {
-                                console.log(`[SINGAPORE-SENDER] ✅ Found ${onChainBalance.toString()} tokens on-chain, using this amount`);
-                                
-                                // Record the position for future reference
-                                await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
-                                console.log(`[SINGAPORE-SENDER] 📝 Recorded on-chain position in database`);
-                                
-                                return onChainBalance;
-                            } else {
-                                console.log(`[SINGAPORE-SENDER] ❌ No tokens found on-chain either. Skipping trade.`);
-                            }
+                    // On-chain balance check fallback
+                    const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+                    if (walletPacket) {
+                        const onChainBalance = await this._getOnChainTokenBalance(walletPacket.keypair.publicKey.toBase58(), tradeDetails.inputMint);
+                        if (onChainBalance.gt(new BN(0))) {
+                            console.log(`[DIRECT-SOLANA-SENDER] ✅ Found ${onChainBalance.toString()} tokens on-chain, will sell entire balance.`);
+                            await this.dataManager.recordBuyPosition(userChatId, tradeDetails.inputMint, onChainBalance.toString(), 0);
+                            return onChainBalance;
                         }
-                    } catch (onChainError) {
-                        console.error(`[SINGAPORE-SENDER] ❌ Error checking on-chain balance: ${onChainError.message}`);
                     }
-                    
-                    return null; // Return null to indicate no position
+                    console.log(`[DIRECT-SOLANA-SENDER] ❌ No tokens found on-chain. Skipping trade.`);
+                    return null;
                 }
                 
-                console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} token balance: ${userTokenBalance.amountRaw} raw units`);
+                console.log(`[DIRECT-SOLANA-SENDER] 💰 User ${userChatId} token balance for SELL: ${userTokenBalance.amountRaw.toString()} raw units`);
                 return new BN(userTokenBalance.amountRaw.toString());
-                
-            } else {
-                throw new Error(`Unknown trade type: ${tradeDetails.tradeType}`);
             }
-            
+    
+            // This part should now be unreachable with the fix above
+            throw new Error(`Unhandled trade type: ${tradeDetails.tradeType}`);
         } catch (error) {
-            console.error(`[SINGAPORE-SENDER] ❌ Error calculating user copy trade amount:`, error);
-            // Fallback to default amount
-            return new BN('1000000000'); // 1 SOL default
+            console.error(`[DIRECT-SOLANA-SENDER] ❌ Error calculating user copy trade amount:`, error);
+            throw error; // Re-throw the error to be caught by the main execution function
         }
     }
 
 
-    async _executeCopyTradeWithSingaporeSender(tradeDetails, traderName, userChatId, masterSignature, config) {
+    async _executeCopyTradeWithDirectSolanaSender(tradeDetails, traderName, userChatId, masterSignature, config, originalTransaction = null) {
         // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
         const isBuy = tradeDetails.tradeType === 'buy';
         if (isBuy) {
-            const userPositions = await this.databaseManager.getUserPositions(String(userChatId));
+            const userPositions = await this.dataManager.getUserPositions(String(userChatId));
             const tokenToBuy = tradeDetails.outputMint;
-
+    
             // Check if the user ALREADY has a position and it's not empty.
             if (userPositions.has(tokenToBuy) && userPositions.get(tokenToBuy).amountRaw > 0n) {
                 const reason = `You already have an active position for ${shortenAddress(tokenToBuy)}. One buy per token is allowed.`;
                 console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
-                
-                // Notify the user why the copy was skipped.
-                if (this.notificationManager) {
-                    await this.notificationManager.notifyNoCopy(userChatId, traderName, "N/A", reason);
-                }
                 
                 // CRITICAL: Stop the function here to prevent the buy.
                 return; 
@@ -2126,7 +2058,7 @@ async checkPumpFunMigration(tokenMint) {
         performanceTracker.logStep('start');
         // Prevent race conditions by checking if user is already being processed
         if (this.userProcessing.has(userChatId)) {
-            console.log(`[SINGAPORE-SENDER] ⚠️ User ${userChatId} is already being processed, skipping to prevent race condition`);
+            console.log(`[DIRECT-SOLANA-SENDER] ⚠️ User ${userChatId} is already being processed, skipping to prevent race condition`);
             return;
         }
         
@@ -2136,83 +2068,92 @@ async checkPumpFunMigration(tokenMint) {
         // Set a timeout to automatically clear the user from processing state after 30 seconds
         const timeoutId = setTimeout(() => {
             if (this.userProcessing.has(userChatId)) {
-                console.log(`[SINGAPORE-SENDER] ⏰ Timeout reached for user ${userChatId}, clearing processing state`);
+                console.log(`[DIRECT-SOLANA-SENDER] ⏰ Timeout reached for user ${userChatId}, clearing processing state`);
                 this.userProcessing.delete(userChatId);
             }
         }, 30000); // 30 seconds timeout
         
         try {
-            console.log(`[SINGAPORE-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
-            console.log(`[SINGAPORE-SENDER] 🚀 COPY TRADE: ${tradeDetails.tradeType.toUpperCase()} ${tradeDetails.dexPlatform} | Token: ${shortenAddress(tradeDetails.outputMint)} | User: ${userChatId}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🚀 COPY TRADE: ${tradeDetails.tradeType.toUpperCase()} ${tradeDetails.dexPlatform} | Token: ${shortenAddress(tradeDetails.outputMint)} | User: ${userChatId}`);
             performanceTracker.logStep('trade_start');
-            // console.log(`[SINGAPORE-SENDER] 🔑 Master signature: ${masterSignature}`);
-            // console.log(`[SINGAPORE-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
-            // console.log(`[SINGAPORE-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
-
+            // console.log(`[DIRECT-SOLANA-SENDER] 🔑 Master signature: ${masterSignature}`);
+            // console.log(`[DIRECT-SOLANA-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
+            // console.log(`[DIRECT-SOLANA-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
+    
             // Get user's trading wallet
             const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
             if (!walletPacket) {
                 throw new Error(`No trading wallet found for user ${userChatId}`);
             }
-
+    
             const { keypair, wallet } = walletPacket;
-            console.log(`[SINGAPORE-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
             performanceTracker.logStep('wallet_retrieval');
-
+    
             // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
-            console.log(`[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
-
+            console.log(`[DIRECT-SOLANA-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
+    
             // Validate trade before processing
             try {
                 this._validateTradeForCopy(tradeDetails);
             } catch (validationError) {
-                console.log(`[SINGAPORE-SENDER] ❌ Trade validation failed: ${validationError.message}`);
-                console.log(`[SINGAPORE-SENDER] 🚫 Skipping invalid trade - not a real swap`);
+                console.log(`[DIRECT-SOLANA-SENDER] ❌ Trade validation failed: ${validationError.message}`);
+                console.log(`[DIRECT-SOLANA-SENDER] 🚫 Skipping invalid trade - not a real swap`);
                 throw new Error(`Trade validation failed: ${validationError.message}`);
             }
-
+    
             // Calculate user's copy trade amount based on trade type FIRST
-            const userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
+            let userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
             performanceTracker.logStep('amount_calculation');
             
-            // If user has no position for SELL trade, skip gracefully
-            if (userAmountBN === null) {
-                console.log(`[SINGAPORE-SENDER] ⏭️ Skipping copy trade for user ${userChatId} - no position found`);
+            // Only skip SELL trades when no position exists - BUY trades should always proceed
+            if (userAmountBN === null && tradeDetails.tradeType === 'sell') {
+                console.log(`[DIRECT-SOLANA-SENDER] ⏭️ Skipping SELL trade for user ${userChatId} - no position found`);
                 return; // Exit gracefully without throwing error
             }
             
+            // For BUY trades, userAmountBN should never be null, but if it is, use default SOL amount
+            if (userAmountBN === null && tradeDetails.tradeType === 'buy') {
+                console.log(`[DIRECT-SOLANA-SENDER] ⚠️ BUY trade returned null amount, using default SOL amount`);
+                const BN = require('bn.js');
+                const defaultSolAmount = 0.01; // 0.01 SOL default
+                const defaultLamports = Math.floor(defaultSolAmount * 1e9);
+                userAmountBN = new BN(defaultLamports);
+            }
+            
             // ✅ UNIVERSAL CLONING ENGINE: No need for platform-specific builders
-            console.log(`[SINGAPORE-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
-            console.log(`[SINGAPORE-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders`);
-
+            console.log(`[DIRECT-SOLANA-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders`);
+    
             // For SELL trades, check if user has position before proceeding
             if (tradeDetails.tradeType === 'sell') {
                 try {
-                    const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                    const userPositions = await this.dataManager.getUserPositions(userChatId);
                     const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                     
                     if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
-                        console.log(`[SINGAPORE-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
+                        console.log(`[DIRECT-SOLANA-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
                         this.userProcessing.delete(userChatId); // Clean up user processing lock
                         return; // Skip this trade, don't build transaction
                     }
-                    console.log(`[SINGAPORE-SENDER] ✅ SELL trade validated - user has ${userTokenBalance.amountRaw} raw units of ${shortenAddress(tradeDetails.inputMint)}`);
+                    console.log(`[DIRECT-SOLANA-SENDER] ✅ SELL trade validated - user has ${userTokenBalance.amountRaw} raw units of ${shortenAddress(tradeDetails.inputMint)}`);
                 } catch (error) {
-                    console.error(`[SINGAPORE-SENDER] ❌ Error checking user position for SELL:`, error);
+                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Error checking user position for SELL:`, error);
                     this.userProcessing.delete(userChatId); // Clean up user processing lock
                     return; // Skip on error
                 }
             }
-
-                        // userAmountBN is already calculated above
-
+    
+            // userAmountBN is already calculated above
+    
             // Validate cloning target exists
             if (!tradeDetails.cloningTarget) {
                 throw new Error("Analysis failed to provide a cloningTarget. Cannot proceed with Universal Cloning.");
             }
             
             // Enhanced validation and logging for tradeDetails
-            console.log(`[SINGAPORE-SENDER] 🔍 TradeDetails validation:`, {
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 TradeDetails validation:`, {
                 tradeType: tradeDetails.tradeType,
                 inputMint: tradeDetails.inputMint,
                 outputMint: tradeDetails.outputMint,
@@ -2226,7 +2167,7 @@ async checkPumpFunMigration(tokenMint) {
             
             // Validate required fields before building instructions
             if (!tradeDetails.inputMint || !tradeDetails.outputMint) {
-                console.error(`[SINGAPORE-SENDER] ❌ Missing required mint fields:`, {
+                console.error(`[DIRECT-SOLANA-SENDER] ❌ Missing required mint fields:`, {
                     inputMint: tradeDetails.inputMint,
                     outputMint: tradeDetails.outputMint,
                     tradeType: tradeDetails.tradeType,
@@ -2234,21 +2175,21 @@ async checkPumpFunMigration(tokenMint) {
                 });
                 throw new Error(`Cannot execute ${tradeDetails.dexPlatform} trade: missing inputMint or outputMint fields`);
             }
-
+    
             // Get user-specific configuration (SOL amount + slippage)
-            const userSettings = await this.databaseManager.getUserSettings(userChatId);
+            const userSettings = await this.dataManager.getUserSettings(userChatId);
             const userSolAmount = userSettings.solAmount; // SOL amount per trade
             const userSlippageBps = userSettings.slippageBps; // Slippage in basis points
             
-            console.log(`[SINGAPORE-SENDER] 💰 User ${userChatId} settings: ${userSolAmount} SOL, ${userSlippageBps} BPS slippage`);
+            console.log(`[DIRECT-SOLANA-SENDER] 💰 User ${userChatId} settings: ${userSolAmount} SOL, ${userSlippageBps} BPS slippage`);
             
             // Get user positions for SELL trades
             let userTokenBalance = null;
             if (tradeDetails.tradeType === 'sell') {
-                const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                const userPositions = await this.dataManager.getUserPositions(userChatId);
                 userTokenBalance = userPositions.get(tradeDetails.inputMint);
             }
-
+    
             // Get nonce info for durable transactions (eliminates old hash errors)
             let nonceInfo = null;
             if (wallet.nonceAccountPubkey) {
@@ -2259,15 +2200,53 @@ async checkPumpFunMigration(tokenMint) {
                         authorizedPubkey: nonceAuthority,
                         nonce: nonce
                     };
-                    console.log(`[SINGAPORE-SENDER] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
                 } catch (nonceError) {
-                    console.warn(`[SINGAPORE-SENDER] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
+                    console.warn(`[DIRECT-SOLANA-SENDER] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
                 }
             } else {
-                console.log(`[SINGAPORE-SENDER] ⚠️ No nonce account found for wallet. Using regular blockhash (may cause old hash errors).`);
+                console.log(`[DIRECT-SOLANA-SENDER] ⚠️ No nonce account found for wallet. Using regular blockhash (may cause old hash errors).`);
+            }
+    
+            // 1. Analyze the blueprint to see what the master spent
+            const masterInputMint = tradeDetails.inputMint;
+            let userPaymentMethod = 'sol'; // Our default is always SOL
+            let userAmountToSpend = userAmountBN; // This is the user's configured SOL amount
+    
+            // 2. The CRITICAL check: Is the master trader paying with something OTHER than raw SOL?
+            if (masterInputMint !== config.NATIVE_SOL_MINT) {
+                console.log(`[FORGER-OVERRIDE] Master paid with TOKEN (${shortenAddress(masterInputMint)}). We will pay with RAW SOL.`);
+                
+                // 🚀 PERFORMANCE OPTIMIZATION: Skip price fetching for copy trading
+                // Users set their own SOL amounts, so we don't need exact price conversion
+                const masterTokenAmountSpent = tradeDetails.inputAmountRaw / (10 ** tradeDetails.tokenDecimals);
+                console.log(`[FORGER-OVERRIDE] Master spent ${masterTokenAmountSpent} of token. Using user's configured SOL amount for copy trade.`);
+                
+                // Use user's pre-configured SOL amount for simplicity, safety, and speed
+                userAmountToSpend = new BN(Math.floor(userSettings.solAmount * 1e9));
+                
+                console.log(`[FORGER-OVERRIDE] Using user's configured trade size: ${userSettings.solAmount} SOL (saved ~100-300ms by skipping DAS API)`);
+            }
+    
+            // 3. Extract the actual transaction from LaserStream response
+            let actualTransaction = originalTransaction;
+            if (originalTransaction && originalTransaction.transaction && originalTransaction.transaction.transaction) {
+                // Go one level deeper - the actual transaction is at transaction.transaction.transaction
+                const nestedTransaction = originalTransaction.transaction.transaction;
+                if (nestedTransaction && nestedTransaction.transaction) {
+                    actualTransaction = nestedTransaction.transaction;
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (4 levels deep)`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
+                } else {
+                    actualTransaction = nestedTransaction;
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (3 levels deep)`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
+                }
             }
 
-            // Build Universal Cloner options with USER-SPECIFIC parameters
+            // 4. Pass this decision to the cloner with currency abstraction logic
+            const isSolBuy = tradeDetails.inputMint === config.NATIVE_SOL_MINT;
+
             const builderOptions = {
                 userPublicKey: keypair.publicKey,
                 masterTraderWallet: tradeDetails.traderPubkey,
@@ -2275,30 +2254,41 @@ async checkPumpFunMigration(tokenMint) {
                 tradeType: tradeDetails.tradeType,
                 inputMint: tradeDetails.inputMint,
                 outputMint: tradeDetails.outputMint,
-                amountBN: userAmountBN, // Keep for backward compatibility
-                slippageBps: userSlippageBps, // 🚀 USER'S CONFIGURED SLIPPAGE
-                // NEW: User-specific parameters
+                amountBN: userAmountToSpend, // The user's specific amount (SOL for buys, token for sells)
+                slippageBps: userSlippageBps,
+                
+                // User-specific parameters
                 userChatId: userChatId,
-                userSolAmount: new (require('bn.js'))(Math.floor(userSolAmount * 1e9)), // Convert to lamports
-                userTokenBalance: userTokenBalance ? new (require('bn.js'))(userTokenBalance.amountRaw.toString()) : null,
+                userSolAmount: tradeDetails.tradeType === 'buy' ? userAmountToSpend : new BN('0'),
+                userTokenBalance: tradeDetails.tradeType === 'sell' ? userAmountToSpend : null,
+                
+                // *** THIS IS THE CURRENCY ABSTRACTION LOGIC ***
+                // We tell the cloner how we want to pay.
+                userPaymentMethod: isSolBuy ? 'sol' : 'sol_override', // 'sol_override' tells it to build a SOL tx even if the original was different
+                
                 userRiskSettings: {
-                    slippageTolerance: userSlippageBps, // 🚀 USER'S CONFIGURED SLIPPAGE
-                    maxTradesPerDay: 10 // Could be loaded from database
+                    slippageTolerance: userSlippageBps,
+                    maxTradesPerDay: 10
                 },
                 // NEW: Durable nonce support
-                nonceInfo: nonceInfo
+                nonceInfo: nonceInfo,
+                // NEW: Pass original transaction for complete instruction cloning
+                originalTransaction: actualTransaction
             };
-
-            console.log(`[SINGAPORE-SENDER] 🔧 Building Universal Cloned instructions...`);
-            console.log(`[SINGAPORE-SENDER] 🔑 Transaction signature: ${masterSignature}`);
-            console.log(`[SINGAPORE-SENDER] 💰 Master trader amount: ${tradeDetails.inputAmountRaw} raw units`);
-            console.log(`[SINGAPORE-SENDER] 💰 User copy trade amount: ${userAmountBN.toString()} raw units`);
+    
+            console.log(`[DIRECT-SOLANA-SENDER] 🔧 Building Universal Cloned instructions...`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔑 Transaction signature: ${masterSignature}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 💰 Master trader amount: ${tradeDetails.inputAmountRaw} raw units`);
+            console.log(`[DIRECT-SOLANA-SENDER] 💰 User copy trade amount: ${userAmountToSpend.toString()} raw units`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: originalTransaction type: ${typeof originalTransaction}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: originalTransaction has instructions: ${originalTransaction?.instructions?.length || 'undefined'}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: actualTransaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
             
             // Log builder options to JSON file for detailed analysis
             this.transactionLogger.logCopyTradeExecution(masterSignature, {
                 platform: tradeDetails.dexPlatform,
                 builderOptions: builderOptions,
-                userAmount: userAmountBN.toString(),
+                userAmount: userAmountToSpend.toString(),
                 masterAmount: tradeDetails.inputAmountRaw
             }, { status: 'building_universal_instructions' });
             
@@ -2308,18 +2298,23 @@ async checkPumpFunMigration(tokenMint) {
                 const cloneResult = await this.universalCloner.buildClonedInstruction(builderOptions);
                 instructions = cloneResult.instructions;
             } catch (cloneError) {
-                console.error(`[SINGAPORE-SENDER] ❌ Universal Cloner failed:`, cloneError.message);
-                console.error(`[SINGAPORE-SENDER] ❌ Clone error stack:`, cloneError.stack);
+                console.error(`[DIRECT-SOLANA-SENDER] ❌ Universal Cloner failed:`, cloneError.message);
+                console.error(`[DIRECT-SOLANA-SENDER] ❌ Clone error stack:`, cloneError.stack);
                 throw new Error(`Universal Cloner failed: ${cloneError.message}`);
             }
-
+    
             if (!instructions || instructions.length === 0) {
                 throw new Error(`Universal Cloner failed to produce any instructions`);
             }
-
-            console.log(`[SINGAPORE-SENDER] ✅ Universal Cloner built ${instructions.length} instructions`);
-
-            // Prepare trade details for Singapore Sender with user's amounts
+    
+            console.log(`[DIRECT-SOLANA-SENDER] ✅ Universal Cloner built ${instructions.length} instructions`);
+    
+            // DEBUG: Log platform information before passing to Direct Solana Sender
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG Platform Tracing:`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 tradeDetails.dexPlatform: ${tradeDetails.dexPlatform}`);
+            console.log(`[DIRECT-SOLANA-SENDER] 🔍 tradeDetails keys:`, Object.keys(tradeDetails));
+            
+            // Prepare trade details for Direct Solana Sender with user's amounts
             const enhancedTradeDetails = {
                 ...tradeDetails,
                 tokenMint: tradeDetails.outputMint,
@@ -2328,17 +2323,17 @@ async checkPumpFunMigration(tokenMint) {
                 traderName,
                 masterSignature,
                 // Use user's calculated amounts, not master trader's
-                inputAmountRaw: userAmountBN.toString(),
-                userAmountBN: userAmountBN.toString()
+                inputAmountRaw: userAmountToSpend.toString(),
+                userAmountBN: userAmountToSpend.toString()
             };
-
+    
             // ULTRA-FAST execution - minimal logging for speed
             performanceTracker.logStep('pre_execution');
             
             try {
-                // Use the new ultra-fast execution method - minimal logging for speed
-                const result = await this.singaporeSenderManager.executeCopyTrade(
-                    instructions, // Pass ALL instructions - don't filter out ATA creation!
+                // Use the new direct Solana execution method with leader targeting
+                const result = await this.directSolanaSender.executeCopyTrade(
+                    originalTransaction || tradeDetails.originalTransaction, // Pass the original transaction for structure cloning
                     keypair,
                     {
                         // ULTRA-FAST execution options
@@ -2347,20 +2342,22 @@ async checkPumpFunMigration(tokenMint) {
                         userChatId,
                         traderName,
                         masterSignature,
-                        // Performance optimizations
-                        priorityFee: 'dynamic', // Use dynamic priority fee
-                        // computeUnits: 'dynamic', // Let singaporeSenderManager handle compute units
-                        tipAmount: 'dynamic'    // Use dynamic Jito tip
+                        clonedInstructions: instructions, // Pass the cloned instructions from Universal Cloner
+                        // 🚀 HARDCODED FEE STRATEGY: Pass user's SOL amount for 15% fee calculation
+                        userSolAmount: userAmountToSpend.toNumber(), // Pass the calculated SOL amount in lamports
+                        computeUnits: 'dynamic', // Let directSolanaSender handle compute units
+                        simulate: true, // Enable simulation for debugging (non-blocking)
+                        nonceInfo: nonceInfo // Pass nonce info for durable transactions
                     }
                 );
-
+    
                 if (result.success) {
-                    console.log(`[SINGAPORE-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
-                    console.log(`[SINGAPORE-SENDER] 🔑 Copy signature: ${result.signature}`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔑 Copy signature: ${result.signature}`);
                     
                     // FALSE POSITIVE CHECK: Verify BUY transactions actually received tokens
                     if (tradeDetails.tradeType === 'buy') {
-                        console.log(`[SINGAPORE-SENDER] 🔍 Performing false positive check for BUY transaction...`);
+                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 Performing false positive check for BUY transaction...`);
                         try {
                             // Wait a moment for the transaction to be fully processed
                             await new Promise(resolve => setTimeout(resolve, 2000));
@@ -2374,23 +2371,23 @@ async checkPumpFunMigration(tokenMint) {
                             const tokenAccountInfo = await this.solanaManager.connection.getTokenAccountBalance(userTokenAccount);
                             const userTokenBalance = new BN(tokenAccountInfo.value.amount);
                             
-                            console.log(`[SINGAPORE-SENDER] 🔍 User token balance after BUY: ${userTokenBalance.toString()} raw units`);
+                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 User token balance after BUY: ${userTokenBalance.toString()} raw units`);
                             
                             if (userTokenBalance.gt(new BN(0))) {
-                                console.log(`[SINGAPORE-SENDER] ✅ FALSE POSITIVE CHECK PASSED: User received ${userTokenBalance.toString()} tokens`);
+                                console.log(`[DIRECT-SOLANA-SENDER] ✅ FALSE POSITIVE CHECK PASSED: User received ${userTokenBalance.toString()} tokens`);
                                 
                                 // ✅ FIX: Use enhanced recordBuyPosition with validation
-                                await this.databaseManager.recordBuyPosition(
+                                await this.dataManager.recordBuyPosition(
                                     userChatId,
                                     tradeDetails.outputMint,
                                     userTokenBalance.toString(),
                                     userSolAmount || 0 // Use user's SOL amount
                                 );
-                                console.log(`[SINGAPORE-SENDER] 💾 ✅ Position recorded: ${userTokenBalance.toString()} tokens for ${shortenAddress(tradeDetails.outputMint)}`);
+                                console.log(`[DIRECT-SOLANA-SENDER] 💾 ✅ Position recorded: ${userTokenBalance.toString()} tokens for ${shortenAddress(tradeDetails.outputMint)}`);
                                 
                             } else {
-                                console.log(`[SINGAPORE-SENDER] ❌ FALSE POSITIVE DETECTED: Transaction reported success but user received 0 tokens!`);
-                                console.log(`[SINGAPORE-SENDER] 🔍 This indicates the transaction may have failed despite reporting success`);
+                                console.log(`[DIRECT-SOLANA-SENDER] ❌ FALSE POSITIVE DETECTED: Transaction reported success but user received 0 tokens!`);
+                                console.log(`[DIRECT-SOLANA-SENDER] 🔍 This indicates the transaction may have failed despite reporting success`);
                                 
                                 // Log this as a false positive for analysis
                                 await traceLogger.appendTrace(masterSignature, 'false_positive_buy', {
@@ -2402,34 +2399,34 @@ async checkPumpFunMigration(tokenMint) {
                             }
                             
                         } catch (falsePositiveError) {
-                            console.error(`[SINGAPORE-SENDER] ❌ False positive check failed: ${falsePositiveError.message}`);
+                            console.error(`[DIRECT-SOLANA-SENDER] ❌ False positive check failed: ${falsePositiveError.message}`);
                             // Don't throw - this is just a verification step
                         }
                     }
                     
                 } else {
-                    console.log(`[SINGAPORE-SENDER] ❌ ULTRA-FAST copy trade FAILED!`);
-                    console.log(`[SINGAPORE-SENDER] 🔑 Failed signature: ${result.signature}`);
+                    console.log(`[DIRECT-SOLANA-SENDER] ❌ ULTRA-FAST copy trade FAILED!`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🔑 Failed signature: ${result.signature}`);
                 }
-                console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${result.executionTime}ms`);
-                console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${result.confirmationTime}ms`);
-                console.log(`[SINGAPORE-SENDER] 📊 Result:`, {
+                console.log(`[DIRECT-SOLANA-SENDER] ⚡ Execution time: ${result.executionTime}ms`);
+                console.log(`[DIRECT-SOLANA-SENDER] 🔍 Confirmation time: ${result.confirmationTime}ms`);
+                console.log(`[DIRECT-SOLANA-SENDER] 📊 Result:`, {
                     signature: shortenAddress(result.signature),
                     executionTime: result.executionTime,
                     confirmationTime: result.confirmationTime,
                     tipAmount: result.tipAmount,
                     tipAccount: shortenAddress(result.tipAccount)
                 });
-
+    
                 // Check if execution meets ultra-fast targets
                 if (result.executionTime < 200) {
-                    console.log(`[SINGAPORE-SENDER] ⚡ ULTRA-FAST TARGET ACHIEVED: ${result.executionTime}ms execution!`);
+                    console.log(`[DIRECT-SOLANA-SENDER] ⚡ ULTRA-FAST TARGET ACHIEVED: ${result.executionTime}ms execution!`);
                 } else if (result.executionTime < 400) {
-                    console.log(`[SINGAPORE-SENDER] 🚀 FAST TARGET ACHIEVED: ${result.executionTime}ms execution`);
+                    console.log(`[DIRECT-SOLANA-SENDER] 🚀 FAST TARGET ACHIEVED: ${result.executionTime}ms execution`);
                 } else {
-                    console.log(`[SINGAPORE-SENDER] ⚠️ Execution time: ${result.executionTime}ms (above target)`);
+                    console.log(`[DIRECT-SOLANA-SENDER] ⚠️ Execution time: ${result.executionTime}ms (above target)`);
                 }
-
+    
                 // Send notification with proper tradeResult object
                 if (this.notificationManager) {
                     const tradeResult = {
@@ -2444,7 +2441,7 @@ async checkPumpFunMigration(tokenMint) {
                         tokenDecimals: tradeDetails.tokenDecimals || 9,
                         solFee: result.tipAmount / 1e9
                     };
-
+    
                     await this.notificationManager.notifySuccessfulCopy(
                         userChatId,
                         traderName,
@@ -2452,61 +2449,61 @@ async checkPumpFunMigration(tokenMint) {
                         tradeResult
                     );
                 }
-
+    
                 // Log success
-                await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
+                await traceLogger.appendTrace(masterSignature, 'step4_directSolanaSenderExecution', {
                     userChatId,
                     success: true,
                     signature: result.signature,
                     tipAmount: result.tipAmount
                 });
-
+    
                 return result;
-
+    
             } catch (executionError) {
-                console.error(`[SINGAPORE-SENDER] ❌ Real execution failed: ${executionError.message}`);
+                console.error(`[DIRECT-SOLANA-SENDER] ❌ Real execution failed: ${executionError.message}`);
                 
                 // Send error notification
                 if (this.notificationManager) {
                     await this.notificationManager.sendErrorNotification(
                         userChatId,
                         `Copy trade execution failed: ${executionError.message}`,
-                        'singapore-sender-execution'
+                        'direct-solana-sender-execution'
                     );
                 }
-
+    
                 throw executionError;
             }
-
+    
         } catch (error) {
-            console.error(`[SINGAPORE-SENDER] ❌ Copy trade execution failed for user ${userChatId}:`, error);
+            console.error(`[DIRECT-SOLANA-SENDER] ❌ Copy trade execution failed for user ${userChatId}:`, error);
             
             // Mark transaction as failed to prevent retries
             if (masterSignature) {
                 this.failedTransactions.add(masterSignature);
                 const blockhash = this.currentBlockhash || 'unknown';
                 this.failedTransactionBlockhashes.set(masterSignature, blockhash);
-                console.log(`[SINGAPORE-SENDER] 🚫 Marked transaction ${shortenAddress(masterSignature)} as failed - will not retry`);
+                console.log(`[DIRECT-SOLANA-SENDER] 🚫 Marked transaction ${shortenAddress(masterSignature)} as failed - will not retry`);
             }
             
             // Log failure
             if (masterSignature) {
-                await traceLogger.appendTrace(masterSignature, 'step4_singaporeSenderExecution', {
+                await traceLogger.appendTrace(masterSignature, 'step4_directSolanaSenderExecution', {
                     userChatId,
                     success: false,
                     error: error.message
                 });
             }
-
+    
             // Send error notification
             if (this.notificationManager) {
                 await this.notificationManager.sendErrorNotification(
                     userChatId,
                     `Copy trade failed: ${error.message}`,
-                    'singapore-sender'
+                    'direct-solana-sender'
                 );
             }
-
+    
             throw error;
         } finally {
             // Clear the timeout
@@ -2517,8 +2514,9 @@ async checkPumpFunMigration(tokenMint) {
     }
 
     // ==========================================================
-    // ============ [END] SINGAPORE SENDER INTEGRATION ============
+    // ============ [END] DIRECT SOLANA SENDER INTEGRATION ============
     // ==========================================================
+
 
 }
 

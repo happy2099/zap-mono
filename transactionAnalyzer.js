@@ -38,7 +38,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     constructor(connection, apiManager = null) {
         this.connection = connection;
         this.apiManager = apiManager; // Optional apiManager for pool lookups (TODO: Initialize if required)
-        this.rawFetcher = new RawTransactionFetcher(connection._rpcEndpoint || 'https://gilligan-jn1ghl-fast-mainnet.helius-rpc.com');
+        this.rawFetcher = new RawTransactionFetcher(connection._rpcEndpoint || config.HELIUS_ENDPOINTS.rpc);
         
         // Initialize unknown programs tracking
         this.unknownPrograms = new Set();
@@ -53,8 +53,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
 
         // Validate required platform IDs
         const requiredPlatformIds = ['RAYDIUM_V4', 'RAYDIUM_LAUNCHPAD', 'RAYDIUM_CPMM', 'RAYDIUM_CLMM',
-            'PUMP_FUN', 'PUMP_FUN_VARIANT', 'PUMP_FUN_AMM', 'PHOTON', 'AXIOM',
-            'METEORA_DBC', 'METEORA_DLMM', 'METEORA_CP_AMM', 'Jupiter Aggregator', 'CUSTOM_ROUTER'];
+            'PUMP_FUN', 'PUMP_FUN_AMM', 'METEORA_DBC', 'METEORA_DLMM', 'METEORA_CP_AMM', 'JUPITER'];
         for (const id of requiredPlatformIds) {
             if (!config.PLATFORM_IDS[id]) {
                 const platformIdVal = config.PLATFORM_IDS[id];
@@ -307,30 +306,32 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
             }
             // The fallback if no pre-fetched data is available at all.
             else {
-                console.log(`[ANALYZER] No pre-fetched data, fetching from RPC...`);
+                console.log(`[ANALYZER] No pre-fetched data, using raw fetcher for instant transactions...`);
                 
-                try {
-                    transactionResponse = await this.connection.getParsedTransaction(signature, { 
-                        maxSupportedTransactionVersion: 0,
-                        encoding: 'json'
-                    });
-                } catch (rpcError) {
-                    console.log(`[ANALYZER] Regular RPC fetch failed with error: ${rpcError.message}`);
-                    transactionResponse = null;
-                }
+                // For instant copy trading with processed commitment, use raw fetcher with retry
+                // This handles very recent transactions that might not be immediately available
+                let retryCount = 0;
+                const maxRetries = 3;
+                const retryDelays = [500, 1000, 2000]; // Progressive delays
                 
-                // If regular RPC fetch fails or returns empty transaction, try raw fetcher
-                if (!transactionResponse || !transactionResponse.transaction || 
-                    !transactionResponse.transaction.message || 
-                    !transactionResponse.transaction.message.instructions ||
-                    transactionResponse.transaction.message.instructions.length === 0) {
-                    
-                    console.log(`[ANALYZER] Regular RPC fetch failed, trying raw fetcher for ATL resolution...`);
+                while (retryCount < maxRetries) {
                     transactionResponse = await this.rawFetcher.fetchAndParseTransaction(signature);
                     
-                    if (!transactionResponse) {
-                        throw new Error("Both regular RPC and raw fetcher failed to get transaction.");
+                    if (transactionResponse) {
+                        console.log(`[ANALYZER] ✅ Transaction fetched successfully on attempt ${retryCount + 1}`);
+                        break;
                     }
+                    
+                    retryCount++;
+                    if (retryCount < maxRetries) {
+                        console.log(`[ANALYZER] ⏳ Transaction too recent, retrying in ${retryDelays[retryCount - 1]}ms... (attempt ${retryCount + 1}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, retryDelays[retryCount - 1]));
+                    }
+                }
+                
+                if (!transactionResponse) {
+                    console.log(`[ANALYZER] ❌ Transaction still too recent after ${maxRetries} attempts. Signature: ${signature}`);
+                    throw new Error(`Transaction too recent for instant copy trading. Tried ${maxRetries} times with progressive delays.`);
                 }
             }
             
@@ -844,7 +845,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // Check against known platform IDs from config
         const platforms = [
             { name: 'Jupiter V6', ids: [this.platformIds.JUPITER_V6] },
-            { name: 'Pump.fun', ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT, this.platformIds.PUMP_FUN_AMM] },
+            { name: 'Pump.fun', ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_AMM] },
             { name: 'Raydium V4', ids: [this.platformIds.RAYDIUM_V4] },
             { name: 'Raydium AMM V4', ids: [this.platformIds.RAYDIUM_AMM_V4] },
             { name: 'Raydium Launchpad', ids: [this.platformIds.RAYDIUM_LAUNCHPAD] },
@@ -931,7 +932,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         // 2️⃣ Define Known Inner Programs (PRIORITIZED ORDER)
         const knownInnerPrograms = [
             // --- Pump.fun (HIGHEST PRIORITY - BC trades) ---
-            { ids: [this.platformIds.PUMP_FUN, this.platformIds.PUMP_FUN_VARIANT], name: 'Pump.fun', priority: 1 },
+            { ids: [this.platformIds.PUMP_FUN], name: 'Pump.fun', priority: 1 },
             // --- Pump.fun Router (HIGH PRIORITY - Router that calls Pump.fun) ---
             { ids: [this.platformIds.PUMP_FUN_ROUTER], name: 'Pump.fun Router', priority: 1 },
             // --- Pump.fun AMM (LOWER PRIORITY - only if no BC detected) ---
@@ -1067,218 +1068,6 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
         );
     }
 
-    // --- Quantum Heuristic Analysis ---
-
-    // async runQuantumHeuristic(baseDetails, traderPublicKeyStr, allAccountKeys, parsedInstructions = [], connection) {
-    //     try {
-    //         const tokenMintString = baseDetails.tradeType === 'buy' ? baseDetails.outputMint : baseDetails.inputMint;
-    //         if (!tokenMintString || tokenMintString === config.NATIVE_SOL_MINT) {
-    //             return this._quantumResponse(false, 'Heuristic skipped: Not a token trade.', null, 0);
-    //         }
-
-    //         console.log(`[QUANTUM-V4] 🔍 Analyzing token: ${shortenAddress(tokenMintString)}`);
-
-    //         // ---------------------------
-    //         // Stage 1: Ultra-fast detection (Pump.fun first, then tokenInfo)
-    //         // ---------------------------
-    //         const fastChecks = await Promise.allSettled([
-    //             this._checkPumpFunBondingCurve(tokenMintString, connection),
-    //             this.apiManager.solanaTrackerApi.getTokenInfo(tokenMintString)
-    //         ]);
-
-    //         const [pumpBcResult, tokenInfoResult] = fastChecks;
-
-    //         // ✅ Priority 1: Pump.fun active bonding curve
-    //         if (pumpBcResult.status === 'fulfilled' && pumpBcResult.value && !pumpBcResult.value.isComplete) {
-    //             return this._quantumResponse(true, 'Active Pump.fun bonding curve detected', {
-    //                 ...baseDetails, dexPlatform: 'Pump.fun'
-    //             }, 100);
-    //         }
-
-    //         // ✅ Priority 2: Token info primary pool detection
-    //         let primaryPool = null;
-    //         if (tokenInfoResult.status === 'fulfilled' && tokenInfoResult.value?.pools?.length > 0) {
-    //             primaryPool = tokenInfoResult.value.pools[0];
-    //             const market = primaryPool.market?.toLowerCase() || '';
-
-    //             // Quick real-time match for Express Lane
-    //             if (market.includes('raydium-cpmm')) { // <-- FIX: ADDED RAYDIUM CPMM
-    //                 return this._quantumResponse(true, 'Raydium CPMM pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Raydium CPMM',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 97);
-    //             }
-    //             if (market.includes('raydium-clmm')) {
-    //                 return this._quantumResponse(true, 'Raydium CLMM pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Raydium CLMM',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 96);
-    //             }
-    //             if (market.includes('raydium-v4') || market.includes('raydium-amm')) {
-    //                 return this._quantumResponse(true, 'Raydium V4/AMM pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Raydium V4',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 95);
-    //             }
-    //             if (market.includes('meteora-dlmm')) {
-    //                 return this._quantumResponse(true, 'Meteora DLMM pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Meteora DLMM',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 93);
-    //             }
-    //             if (market.includes('meteora-dbc')) {
-    //                 return this._quantumResponse(true, 'Meteora DBC pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Meteora DBC',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 92);
-    //             }
-    //             if (market.includes('meteora-cpamm')) { // <-- FIX: STANDARDIZED NAME
-    //                 return this._quantumResponse(true, 'Meteora CP-AMM pool detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Meteora CP-AMM',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 91);
-    //             }
-    //             if (market.includes('jupiter')) {
-    //                 return this._quantumResponse(true, 'Jupiter Aggregator detected', {
-    //                     ...baseDetails,
-    //                     dexPlatform: 'Jupiter Aggregator',
-    //                     platformSpecificData: { poolId: primaryPool.poolId }
-    //                 }, 98);
-    //             }
-    //         }
-
-    //         // ---------------------------
-    //         // Stage 2: Async deep platform hints (Fallback, non-blocking)
-    //         // ---------------------------
-    //         const platformHints = this._extractPlatformHints(allAccountKeys, parsedInstructions);
-
-    //         // Check for Pump.fun migration (Bonding curve completed)
-    //         if (pumpBcResult.status === 'fulfilled' && pumpBcResult.value && pumpBcResult.value.isComplete) {
-    //             return this._quantumResponse(true, 'Pump.fun AMM migration assumed', {
-    //                 ...baseDetails, dexPlatform: 'Pump.fun AMM'
-    //             }, 70);
-    //         }
-
-    //         // ✅ Priority 3: Hints-based fallback
-    //         if (platformHints.jupiter) {
-    //             return this._quantumResponse(true, 'Jupiter hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Jupiter Aggregator'
-    //             }, 85);
-    //         }
-    //         if (platformHints.meteoraCpAmm) {
-    //             return this._quantumResponse(true, 'Meteora CPAMM hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Meteora CPAmm'
-    //             }, 88);
-    //         }
-    //         if (platformHints.meteoraDlmm) {
-    //             return this._quantumResponse(true, 'Meteora DLMM hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Meteora DLMM'
-    //             }, 87);
-    //         }
-    //         if (platformHints.meteoraDbc) {
-    //             return this._quantumResponse(true, 'Meteora DBC hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Meteora DBC'
-    //             }, 86);
-    //         }
-    //         if (platformHints.raydiumV4) {
-    //             return this._quantumResponse(true, 'Raydium V4 hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Raydium V4'
-    //             }, 84);
-    //         }
-    //         if (platformHints.raydiumClmm) {
-    //             return this._quantumResponse(true, 'Raydium CLMM hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Raydium CLMM'
-    //             }, 83);
-    //         }
-    //         if (platformHints.raydiumCpAmm) {
-    //             return this._quantumResponse(true, 'Raydium CPMM hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Raydium CPMM'
-    //             }, 82);
-    //         }
-    //         if (platformHints.raydiumAny) {
-    //             return this._quantumResponse(true, 'Raydium AMM hinted by program ID', {
-    //                 ...baseDetails, dexPlatform: 'Raydium AMM'
-    //             }, 80);
-    //         }
-
-
-    //         // ❌ Final fallback: No match
-    //         return this._quantumResponse(false, 'No definitive platform association found', null, 0);
-
-    //     } catch (error) {
-    //         console.error(`[QUANTUM-V4] ❌ Error: ${error.message}`);
-    //         return this._quantumResponse(false, `Heuristic failure: ${error.message}`, null, 0);
-    //     }
-    // }
-
-
-    // _extractPlatformHints(allAccountKeys, parsedInstructions = []) {
-    //     const hints = {
-    //         pumpFun: false,
-    //         raydiumV4: false, raydiumLaunchpad: false, raydiumClmm: false, raydiumCpAmm: false, raydiumAny: false,
-    //         meteoraDlmm: false, meteoraDbc: false, meteoraCpAmm: false, meteoraAny: false,
-    //         jupiter: false,
-    //         any: false
-    //     };
-
-    //     for (const key of allAccountKeys) {
-    //         const keyStr = key.toBase58();
-    //         // Pump.fun
-    //         if ([
-    //             config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-    //             config.PLATFORM_IDS.PUMP_FUN_VARIANT.toBase58(),
-    //             config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58()
-    //         ].includes(keyStr)) {
-    //             hints.pumpFun = true; hints.any = true;
-    //         }
-    //         // Raydium
-    //         else if (keyStr === config.PLATFORM_IDS.RAYDIUM_V4.toBase58()) {
-    //             hints.raydiumV4 = true; hints.raydiumAny = true; hints.any = true;
-    //         } else if (keyStr === config.PLATFORM_IDS.RAYDIUM_LAUNCHPAD.toBase58()) {
-    //             hints.raydiumLaunchpad = true; hints.raydiumAny = true; hints.any = true;
-    //         } else if (keyStr === config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58()) {
-    //             hints.raydiumClmm = true; hints.raydiumAny = true; hints.any = true;
-    //         } else if (keyStr === config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58()) { // <-- FIX: ADDED RAYDIUM CPMM CHECK
-    //             hints.raydiumCpAmm = true; hints.raydiumAny = true; hints.any = true;
-    //         }
-    //         // Meteora
-    //         else if (keyStr === config.PLATFORM_IDS.METEORA_DLMM.toBase58()) {
-    //             hints.meteoraDlmm = true; hints.meteoraAny = true; hints.any = true;
-    //         } else if ((config.PLATFORM_IDS.METEORA_DBC || []).some(id => id.toBase58() === keyStr)) {
-    //             hints.meteoraDbc = true; hints.meteoraAny = true; hints.any = true;
-    //         } else if (keyStr === config.PLATFORM_IDS.METEORA_CP_AMM.toBase58()) { // <-- FIX: CORRECT KEY LOOKUP
-    //             hints.meteoraCpAmm = true; hints.meteoraAny = true; hints.any = true;
-    //         }
-    //         // Jupiter
-    //         else if (keyStr === config.PLATFORM_IDS['Jupiter Aggregator'].toBase58()) {
-    //             hints.jupiter = true; hints.any = true;
-    //         }
-    //     }
-    //     return hints;
-    // }
-
-    // Helper: DIRECTLY checks Pump.fun bonding curve status (Reliable)
-    // async _checkPumpFunBondingCurve(tokenMintString, connection) {
-    //     // This is safer as we defined these in the constructor
-    //     const pumpProgramId = this.PUMP_FUN_PROGRAM_ID_PK;
-
-    //     const [bondingCurveAddress] = PublicKey.findProgramAddressSync(
-    //         [Buffer.from('bonding-curve'), new PublicKey(tokenMintString).toBuffer()],
-    //         pumpProgramId
-    //     );
-    //     try {
-    //         const accountInfo = await connection.getAccountInfo(bondingCurveAddress);
-    //         return { isComplete: !accountInfo }; // Simpler logic: if account exists, it's not complete.
-    //     } catch (e) {
-    //         return { isComplete: true };
-    //     }
-    // }
 
     async _checkTokenMigrationStatus(tokenMint) {
         if (!this.apiManager || !tokenMint) {
@@ -1336,7 +1125,7 @@ class TransactionAnalyzer { // Changed 'export class' to 'class'
     _mapConfigKeyToPlatformName(key) {
         // More specific checks must come first
         if (key === 'PUMP_FUN_AMM') return 'Pump.fun AMM';
-        if (key === 'PUMP_FUN' || key === 'PUMP_FUN_VARIANT' || key === 'PUMP_FUN_NEW') return 'Pump.fun'; // All Pump.fun variants
+        if (key === 'PUMP_FUN') return 'Pump.fun';
 
         if (key.includes('RAYDIUM_LAUNCHPAD')) return 'Raydium Launchpad';
         if (key.includes('RAYDIUM_V4')) return 'Raydium AMM';

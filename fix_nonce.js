@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-const { DatabaseManager } = require('./database/databaseManager');
+const { dataManager } = require('./database/dataManager');
 const { SolanaManager } = require('./solanaManager');
 const { decrypt, encrypt } = require('./encryption');
 const bs58 = require('bs58');
 const { Keypair } = require('@solana/web3.js');
 
 async function fixNonceAccount() {
-  const db = new DatabaseManager();
+  const db = new dataManager();
   await db.initialize();
   const solana = new SolanaManager();
   

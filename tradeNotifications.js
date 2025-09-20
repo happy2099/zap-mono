@@ -7,12 +7,12 @@ const { shortenAddress, escapeMarkdownV2 } = require('./utils.js');
 const config = require('./config.js');
 
 class TradeNotificationManager {
-    constructor(botInstance, apiManager, workerManager = null, databaseManager = null) {
+    constructor(botInstance, apiManager, workerManager = null, dataManager = null) {
         // We can now accept either the bot instance OR the worker manager
         this.bot = botInstance;
         this.workerManager = workerManager;
         this.apiManager = apiManager;
-        this.databaseManager = databaseManager;
+        this.dataManager = dataManager;
 
         if (!apiManager) {
             throw new Error("TradeNotificationManager: apiManager is a required instance.");
@@ -70,11 +70,11 @@ class TradeNotificationManager {
         this.connection = connection;
     }
 
-    setDatabaseManager(databaseManager) {
-        if (!databaseManager) {
-            throw new Error("TradeNotificationManager databaseManager instance cannot be null.");
+    setdataManager(dataManager) {
+        if (!dataManager) {
+            throw new Error("TradeNotificationManager dataManager instance cannot be null.");
         }
-        this.databaseManager = databaseManager;
+        this.dataManager = dataManager;
     }
 
     async getSolPriceInUSD() {
@@ -246,11 +246,11 @@ class TradeNotificationManager {
 
                 // Get original position to calculate PnL and total fees
                 let userPositions;
-                if (!this.databaseManager) {
-                    console.warn("[TradeNotifications] DatabaseManager not available, skipping PnL calculation");
+                if (!this.dataManager) {
+                    console.warn("[TradeNotifications] dataManager not available, skipping PnL calculation");
                     userPositions = new Map();
                 } else {
-                    userPositions = await this.databaseManager.getUserPositions(chatId);
+                    userPositions = await this.dataManager.getUserPositions(chatId);
                 }
                 const originalPosition = userPositions.get(targetMintAddress) || {};
                 const originalSolSpent = originalPosition.solSpent || tradeResult.originalSolSpent || 0;

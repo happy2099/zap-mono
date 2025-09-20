@@ -6,10 +6,10 @@
 
 const { workerData, parentPort } = require('worker_threads');
 const BaseWorker = require('./templates/baseWorker');
-const { DatabaseManager } = require('../database/databaseManager');
+const { DataManager } = require('../dataManager');
 const { SolanaManager } = require('../solanaManager');
 const WalletManager = require('../walletManager');
-const { TransactionAnalyzer } = require('../transactionAnalyzer');
+// TransactionAnalyzer removed - using UniversalAnalyzer instead
 const { ApiManager } = require('../apiManager');
 const TradeNotificationManager = require('../tradeNotifications');
 
@@ -33,10 +33,10 @@ class WorkerManagerInterface {
 class TradeExecutorWorker extends BaseWorker {
     constructor() {
         super();
-        this.databaseManager = null;
+        this.dataManager = null;
         this.solanaManager = null;
         this.walletManager = null;
-        this.transactionAnalyzer = null;
+        // TransactionAnalyzer removed
         this.apiManager = null;
         this.redisManager = null;
         this.notificationManager = null;
@@ -50,19 +50,19 @@ class TradeExecutorWorker extends BaseWorker {
     async customInitialize() {
         try {
             // Initialize core managers
-            this.databaseManager = new DatabaseManager();
-            await this.databaseManager.initialize();
+            this.dataManager = new DataManager();
+            await this.dataManager.initialize();
             
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
             
-            this.walletManager = new WalletManager(this.databaseManager);
+            this.walletManager = new WalletManager(this.dataManager);
             this.walletManager.setSolanaManager(this.solanaManager);
             this.walletManager.setConnection(this.solanaManager.connection);
             await this.walletManager.initialize();
             
             this.apiManager = new ApiManager(this.solanaManager);
-            this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
+            // TransactionAnalyzer removed - using UniversalAnalyzer instead
    
             // Replace CacheManager with RedisManager
             const { RedisManager } = require('../redis/redisManager');
@@ -77,9 +77,8 @@ class TradeExecutorWorker extends BaseWorker {
             const { TradingEngine } = require('../tradingEngine');
             this.tradingEngine = new TradingEngine({
                 solanaManager: this.solanaManager,
-                databaseManager: this.databaseManager,
+                dataManager: this.dataManager,
                 walletManager: this.walletManager,
-                transactionAnalyzer: this.transactionAnalyzer,
                 notificationManager: this.notificationManager,
                 apiManager: this.apiManager,
                 redisManager: this.redisManager
@@ -167,18 +166,19 @@ class TradeExecutorWorker extends BaseWorker {
 
     async executeCopyTrade(copyTradeData) {
         // Unpack the full data payload from LaserStream
-        const { traderWallet, signature, preFetchedTxData } = copyTradeData;
+        const { traderWallet, signature, preFetchedTxData: rawTxData, analysisResult } = copyTradeData;
 
         try {
             this.logInfo('🚀 EXECUTING HIGH-SPEED COPY TRADE', { 
                 traderWallet: traderWallet.substring(0,4) + '...' + traderWallet.slice(-4), 
                 signature: signature.substring(0, 8) + '...',
-                hasPreFetchedData: !!preFetchedTxData
+                hasPreFetchedData: !!rawTxData,
+                hasAnalysisResult: !!analysisResult
             });
             
             // Pass ALL data to the trading engine for fastest possible execution
-            // We pass null for `polledTraderInfo` because this did not come from polling.
-            await this.tradingEngine.processSignature(traderWallet, signature, null, preFetchedTxData);
+            // Include pre-analyzed results to skip re-analysis
+            await this.tradingEngine.processSignature(traderWallet, signature, null, rawTxData, analysisResult);
             
         } catch (error) {
             this.logError('❌ HIGH-SPEED COPY TRADE EXECUTION FAILED', { 
@@ -318,8 +318,8 @@ class TradeExecutorWorker extends BaseWorker {
             }
 
             // Close database connection
-            if (this.databaseManager) {
-                await this.databaseManager.close();
+            if (this.dataManager) {
+                await this.dataManager.close();
             }
 
             this.logInfo('Trade executor worker cleanup completed');

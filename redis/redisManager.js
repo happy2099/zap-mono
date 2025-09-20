@@ -6,12 +6,17 @@
 
 const redis = require('redis');
 const { promisify } = require('util');
+const { PublicKey } = require('@solana/web3.js');
 const config = require('../config.js');
+const { shortenAddress } = require('../utils.js');
 
 class RedisManager {
     constructor() {
         this.client = null;
         this.isConnected = false;
+        
+        // In-memory cache for trade-ready tokens (Quantum Cache target)
+        this.tradeReadyCache = new Map();
         
         // TTL configurations (in seconds)
         this.TTL = {
@@ -60,6 +65,8 @@ class RedisManager {
             this.lpush = this.client.lPush.bind(this.client);
             this.rpop = this.client.rPop.bind(this.client);
             this.llen = this.client.lLen.bind(this.client);
+            this.hIncrBy = this.client.hIncrBy.bind(this.client);
+            this.hincrby = this.hIncrBy; // Alias for lowercase compatibility
 
             // Connect to Redis
             try {
@@ -191,16 +198,33 @@ async getPreSignedTx(tokenMint) {
     // Active traders (real-time monitoring)
     async setActiveTraders(userId, traders) {
         const key = `active_traders:${userId}`;
-        await this.del(key); // Clear existing
-        if (traders.length > 0) {
-            await this.sadd(key, ...traders);
-            await this.expire(key, this.TTL.ACTIVE_TRADERS);
+        
+        try {
+            // Clear existing
+            await this.client.del(key);
+            
+            if (traders.length > 0) {
+                // Add each trader individually (compatible with all Redis versions)
+                for (const trader of traders) {
+                    await this.client.sAdd(key, trader);
+                }
+                await this.client.expire(key, this.TTL.ACTIVE_TRADERS);
+            }
+            
+            console.log(`[RedisManager] ✅ Set ${traders.length} active traders for user ${userId}: ${traders.join(', ')}`);
+        } catch (error) {
+            console.error(`[RedisManager] ❌ Failed to set active traders for user ${userId}:`, error.message);
         }
     }
 
     async getActiveTraders(userId) {
         const key = `active_traders:${userId}`;
-        return await this.smembers(key);
+        try {
+            return await this.client.sMembers(key);
+        } catch (error) {
+            console.error(`[RedisManager] ❌ Failed to get active traders for user ${userId}:`, error.message);
+            return [];
+        }
     }
 
     async addActiveTrader(userId, traderWallet) {
@@ -286,11 +310,11 @@ async getPreSignedTx(tokenMint) {
         
         for (const tokenMint of commonTokens) {
             // This would typically fetch from your pool state API
-            // For now, just set placeholder data
-            await this.setPoolState(tokenMint, { 
-                lastUpdated: Date.now(),
-                placeholder: true 
-            });
+            // For now, just set placeholder data - COMMENTED OUT
+            // await this.setPoolState(tokenMint, { 
+            //     lastUpdated: Date.now(),
+            //     placeholder: true 
+            // });
         }
         
         console.log('✅ Cache warming completed');
@@ -318,10 +342,75 @@ async getPreSignedTx(tokenMint) {
         }
     }
 
+    // INSIDE RedisManager class in redisManager.js
+
+    async getOrCacheTokenDecimals(mintAddress, solanaManager) {
+        const key = `token_meta:${mintAddress}`;
+        
+        // 1. Check Redis first
+        const cachedData = await this.get(key);
+        if (cachedData) {
+            // console.log(`[CACHE HIT] 🚀 Decimals for ${shortenAddress(mintAddress)}`); // Optional: can be noisy
+            return parseInt(cachedData);
+        }
+
+        // 2. On miss, fetch from Solana
+        console.log(`[CACHE MISS] 🐢 Fetching decimals for ${shortenAddress(mintAddress)} from RPC.`);
+        const mintInfo = await solanaManager.connection.getParsedAccountInfo(new PublicKey(mintAddress));
+        const decimals = mintInfo?.value?.data?.parsed?.info?.decimals;
+
+        if (typeof decimals !== 'number') {
+            throw new Error(`Could not fetch decimals for mint ${mintAddress}`);
+        }
+
+        // 3. Store in Redis for next time (decimals never change, so a long TTL is fine)
+        await this.set(key, decimals.toString(), { EX: 86400 }); // Cache for 24 hours
+        console.log(`[CACHE SET] ✅ Saved decimals for ${shortenAddress(mintAddress)} to Redis.`);
+        return decimals;
+    }
+
     async shutdown() {
         console.log('[Redis] Shutting down Redis manager...');
         await this.cleanup();
         console.log('[Redis] Redis manager shutdown complete');
+    }
+
+    // Missing methods for testing compatibility
+    async setWithExpiry(key, value, ttlSeconds) {
+        return await this.set(key, value, { EX: ttlSeconds });
+    }
+
+    async close() {
+        return await this.cleanup();
+    }
+
+    // --- Trade Ready Cache Management (Quantum Cache) ---
+    addToTradeReadyCache(tokenMint, tradeData) {
+        this.tradeReadyCache.set(tokenMint, {
+            ...tradeData,
+            timestamp: Date.now(),
+            dexPlatform: tradeData.dexPlatform || 'Unknown'
+        });
+    }
+
+    getFromTradeReadyCache(tokenMint) {
+        return this.tradeReadyCache.get(tokenMint);
+    }
+
+    removeFromTradeReadyCache(tokenMint) {
+        return this.tradeReadyCache.delete(tokenMint);
+    }
+
+    getAllTradeReadyTokens() {
+        return Array.from(this.tradeReadyCache.keys());
+    }
+
+    clearTradeReadyCache() {
+        this.tradeReadyCache.clear();
+    }
+
+    getTradeReadyCacheSize() {
+        return this.tradeReadyCache.size;
     }
 }
 

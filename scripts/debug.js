@@ -151,7 +151,7 @@ class ZapBotDebugger {
             'start.js',
             'dataManager.js',
             'config.js',
-            'database/databaseManager.js',
+            'database/dataManager.js',
             'database/schema.sql',
             'redis/redisManager.js'
         ];
@@ -286,7 +286,7 @@ class ZapBotDebugger {
         this.log('Checking module imports...', 'info');
         
         const modulesToTest = [
-            { name: 'DatabaseManager', path: '../database/databaseManager' },
+            { name: 'dataManager', path: '../database/dataManager' },
             { name: 'RedisManager', path: '../redis/redisManager' },
             { name: 'DataManager', path: '../dataManager' },
             { name: 'Config', path: '../config.js' }

@@ -1,0 +1,80 @@
+{
+  "timestamp": "2025-09-18T13:40:39.777Z",
+  "uptime": 1020002,
+  "detection": {
+    "laserstream": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "rpc_polling": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "helius_webhook": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    }
+  },
+  "analysis": {
+    "transaction_analysis": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "platform_detection": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "pool_id_finding": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    }
+  },
+  "execution": {
+    "instruction_building": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "singapore_sender": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    },
+    "total_execution": {
+      "count": 0,
+      "average": 0,
+      "min": 0,
+      "max": 0,
+      "performance": "N/A"
+    }
+  },
+  "overall": {
+    "count": 0,
+    "average": 0,
+    "min": 0,
+    "max": 0,
+    "performance": "N/A"
+  }
+}

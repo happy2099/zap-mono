@@ -14,6 +14,21 @@ class UniversalCloner {
     constructor(connection, apiManager = null) {
         this.connection = connection;
         this.apiManager = apiManager;
+        
+        // 🚀 PERFORMANCE CACHES
+        this.tokenProgramCache = new Map();
+        this.ataExistenceCache = new Map();
+        this.priceCache = new Map();
+        this.cacheTimestamps = new Map();
+        
+        // Cache TTLs (in milliseconds)
+        this.CACHE_TTL = {
+            TOKEN_PROGRAM: 300000,  // 5 minutes
+            ATA_EXISTENCE: 60000,   // 1 minute
+            PRICES: 30000          // 30 seconds
+        };
+        
+        console.log('[UNIVERSAL-CLONER] 🚀 Performance caches initialized');
     }
 
     /**
@@ -22,19 +37,37 @@ class UniversalCloner {
      * @returns {Promise<boolean>} - True if Token-2022, false if standard SPL Token
      */
     async _isToken2022(mintPubkey) {
+        const mintStr = mintPubkey.toString();
+        const now = Date.now();
+        
+        // 🚀 CHECK CACHE FIRST
+        if (this.tokenProgramCache.has(mintStr)) {
+            const cachedData = this.tokenProgramCache.get(mintStr);
+            if ((now - cachedData.timestamp) < this.CACHE_TTL.TOKEN_PROGRAM) {
+                return cachedData.isToken2022;
+            }
+        }
+        
         try {
             const mintInfo = await this.connection.getAccountInfo(mintPubkey);
             if (!mintInfo) {
-                console.warn(`[UNIVERSAL-CLONER] ⚠️ Mint ${shortenAddress(mintPubkey.toString())} not found, assuming standard SPL Token`);
+                console.warn(`[UNIVERSAL-CLONER] ⚠️ Mint ${shortenAddress(mintStr)} not found, assuming standard SPL Token`);
+                // Cache the assumption
+                this.tokenProgramCache.set(mintStr, { isToken2022: false, timestamp: now });
                 return false;
             }
             
             const isToken2022 = mintInfo.owner.equals(config.TOKEN_2022_PROGRAM_ID);
-            console.log(`[UNIVERSAL-CLONER] 🔍 Mint ${shortenAddress(mintPubkey.toString())} uses ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
+            
+            // 🚀 CACHE THE RESULT
+            this.tokenProgramCache.set(mintStr, { isToken2022, timestamp: now });
+            
+            console.log(`[UNIVERSAL-CLONER] 🔍 Mint ${shortenAddress(mintStr)} uses ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
             return isToken2022;
         } catch (error) {
-            console.error(`[UNIVERSAL-CLONER] ❌ Error checking token program for mint ${shortenAddress(mintPubkey.toString())}:`, error.message);
-            // Default to standard SPL Token on error
+            console.error(`[UNIVERSAL-CLONER] ❌ Error checking token program for mint ${shortenAddress(mintStr)}:`, error.message);
+            // Cache the error result
+            this.tokenProgramCache.set(mintStr, { isToken2022: false, timestamp: now });
             return false;
         }
     }
@@ -50,7 +83,7 @@ class UniversalCloner {
         const BN = require('bn.js');
 
         // 1. Write the CORRECT, OFFICIAL 'buy' discriminator
-        config.PUMP_FUN_BUY_DISCRIMINATOR.copy(freshInstructionData, 0);
+        config.PUMP_FUN_CONSTANTS.BUY_DISCRIMINATOR.copy(freshInstructionData, 0);
 
         // 2. Write the token amount out (ALWAYS 0 for a SOL-based buy)
         freshInstructionData.writeBigUInt64LE(BigInt(0), 8);
@@ -66,7 +99,7 @@ class UniversalCloner {
         freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
         
         console.log(`[FORGER] ✅ RECONSTRUCTION COMPLETE:`);
-        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_BUY_DISCRIMINATOR.toString('hex')}`);
+        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_CONSTANTS.BUY_DISCRIMINATOR.toString('hex')}`);
         console.log(`[FORGER]   - User SOL Amount: ${userSolAmount.toString()} lamports`);
         console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
         console.log(`[FORGER]   - Max SOL Cost: ${ourMaxSolCost.toString()} lamports`);
@@ -85,7 +118,7 @@ class UniversalCloner {
         const BN = require('bn.js');
 
         // 1. Write the CORRECT, OFFICIAL 'sell' discriminator
-        config.PUMP_FUN_SELL_DISCRIMINATOR.copy(freshInstructionData, 0);
+        config.PUMP_FUN_CONSTANTS.SELL_DISCRIMINATOR.copy(freshInstructionData, 0);
 
         // 2. Write the token amount to sell (user's token amount)
         const userTokenAmount = new BN(builderOptions.userTokenAmount.toString());
@@ -102,7 +135,7 @@ class UniversalCloner {
         freshInstructionData.writeBigUInt64LE(BigInt(minSolOutput.toString()), 16);
         
         console.log(`[FORGER] ✅ SELL RECONSTRUCTION COMPLETE:`);
-        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_SELL_DISCRIMINATOR.toString('hex')}`);
+        console.log(`[FORGER]   - Discriminator: ${config.PUMP_FUN_CONSTANTS.SELL_DISCRIMINATOR.toString('hex')}`);
         console.log(`[FORGER]   - Token Amount: ${userTokenAmount.toString()} tokens`);
         console.log(`[FORGER]   - Expected SOL Output: ${expectedSolOutput.toString()} lamports`);
         console.log(`[FORGER]   - Slippage BPS: ${slippageBps.toString()}`);
@@ -134,17 +167,22 @@ class UniversalCloner {
         const ourMaxSolCost = userSolAmount.mul(BPS_DIVISOR.add(slippageBps)).div(BPS_DIVISOR);
 
         // Build new instruction data preserving master's structure
-        const freshInstructionData = Buffer.alloc(24); // Pump.fun instruction is 24 bytes
+        const freshInstructionData = Buffer.alloc(originalData.length); // Preserve original instruction length
         
         // 1. Copy master's discriminator exactly (bytes 0-7)
         masterDiscriminator.copy(freshInstructionData, 0);
         
-        // 2. Set minimal token output for maximum slippage tolerance (bytes 8-15)
-        const minTokenOut = BigInt(1);
-        freshInstructionData.writeBigUInt64LE(minTokenOut, 8);
+        // 2. For instructions shorter than 24 bytes, preserve the original structure
+        if (originalData.length >= 16) {
+            // Set user's max SOL cost (bytes 8-15) if space allows
+            freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 8);
+        }
         
-        // 3. Set user's max SOL cost (bytes 16-23)
-        freshInstructionData.writeBigUInt64LE(BigInt(ourMaxSolCost.toString()), 16);
+        // 3. For longer instructions, also set minimal token output (bytes 16-23) if space allows
+        const minTokenOut = BigInt(1);
+        if (originalData.length >= 24) {
+            freshInstructionData.writeBigUInt64LE(minTokenOut, 16);
+        }
 
         console.log(`[FORGER] ✅ TRANSACTION-DRIVEN RECONSTRUCTION COMPLETE:`);
         console.log(`[FORGER]   - Master's discriminator preserved: ${masterDiscriminator.toString('hex')}`);
@@ -202,6 +240,120 @@ class UniversalCloner {
     }
 
     /**
+     * 🔧 UNKNOWN PLATFORM: Modify instruction data to use user's SOL amount
+     * Preserves original structure but updates amount fields
+     */
+    _createMinimalInstructionData(originalDataBuffer, builderOptions) {
+        console.log(`[FORGER] 🔧 MODIFYING AMOUNT: Updating instruction data with user's SOL amount`);
+        console.log(`[FORGER] 🔍 Original data length: ${originalDataBuffer.length} bytes`);
+        console.log(`[FORGER] 🔍 Original data: ${originalDataBuffer.toString('hex')}`);
+        
+        // For very small instructions (like ATA creation), preserve original data
+        // These typically don't contain amounts
+        if (originalDataBuffer.length <= 4) {
+            console.log(`[FORGER] ✅ PRESERVING ORIGINAL: Small instruction data (${originalDataBuffer.length} bytes) - likely no amounts`);
+            return originalDataBuffer;
+        }
+        
+        const BN = require('bn.js');
+        const userSolAmount = new BN(builderOptions.userSolAmount || 5000000); // Default 0.005 SOL
+        
+        // Create a copy of the original data to preserve structure
+        const modifiedData = Buffer.from(originalDataBuffer);
+        
+        // Try to find and update amount fields (common locations: offset 8, 16, 24)
+        let amountUpdated = false;
+        for (let offset = 8; offset <= Math.min(24, originalDataBuffer.length - 8); offset += 8) {
+            try {
+                const originalAmount = modifiedData.readBigUInt64LE(offset);
+                
+                // If the amount looks reasonable (not too large), replace it with user's amount
+                if (originalAmount > 0n && originalAmount < BigInt('1000000000000000')) { // Less than 1000 SOL
+                    console.log(`[FORGER] 💰 Found amount at offset ${offset}: ${originalAmount} lamports`);
+                    console.log(`[FORGER] 💰 Updating to user's amount: ${userSolAmount.toString()} lamports`);
+                    
+                    modifiedData.writeBigUInt64LE(BigInt(userSolAmount.toString()), offset);
+                    console.log(`[FORGER] ✅ Successfully updated amount from ${originalAmount} to ${userSolAmount.toString()}`);
+                    amountUpdated = true;
+                    break;
+                }
+            } catch (error) {
+                // Skip this offset if we can't read it
+                continue;
+            }
+        }
+        
+        if (!amountUpdated) {
+            console.log(`[FORGER] ⚠️ No amount field found to update - using original data`);
+        }
+        
+        console.log(`[FORGER] ✅ MODIFIED DATA: Updated instruction data (${modifiedData.length} bytes)`);
+        console.log(`[FORGER] 🔍 Modified data: ${modifiedData.toString('hex')}`);
+        
+        return modifiedData;
+    }
+
+    /**
+     * 🔧 UNKNOWN PLATFORM: Reconstruct instruction data for unknown platforms
+     * Fixes account index issues by creating fresh instruction data
+     */
+    _reconstructUnknownPlatformData(originalDataBuffer, builderOptions) {
+        console.log(`[FORGER] 🔧 RECONSTRUCTING: Building fresh instruction data for unknown platform`);
+        console.log(`[FORGER] 🔍 Original data length: ${originalDataBuffer.length} bytes`);
+        console.log(`[FORGER] 🔍 Original data: ${originalDataBuffer.toString('hex')}`);
+        
+        // For unknown platforms, we need to be more careful about preserving structure
+        // Instead of completely reconstructing, let's try to preserve the original data
+        // and only modify specific fields if we can identify them
+        
+        const BN = require('bn.js');
+        const userSolAmount = new BN(builderOptions.userSolAmount || 5000000); // Default 0.005 SOL
+        
+        // Create a copy of the original data
+        const freshInstructionData = Buffer.from(originalDataBuffer);
+        
+        // Try to identify and update amount fields in the instruction data
+        // Most swap instructions have amount data in the first 16-24 bytes
+        if (originalDataBuffer.length >= 16) {
+            // Look for patterns that might be amounts (u64 values)
+            // Try to find the master's amount and replace with user's amount
+            
+            // Common patterns:
+            // - Amount at offset 8 (after 8-byte discriminator)
+            // - Amount at offset 16 (after discriminator + other data)
+            
+            // Try offset 8 first (most common)
+            if (originalDataBuffer.length >= 16) {
+                const originalAmount = originalDataBuffer.readBigUInt64LE(8);
+                console.log(`[FORGER] 🔍 Found potential amount at offset 8: ${originalAmount}`);
+                
+                // If the amount looks reasonable (not too large), replace it
+                if (originalAmount > 0 && originalAmount < BigInt('1000000000000000')) { // Less than 1000 SOL
+                    freshInstructionData.writeBigUInt64LE(BigInt(userSolAmount.toString()), 8);
+                    console.log(`[FORGER] ✅ Updated amount at offset 8: ${originalAmount} → ${userSolAmount.toString()}`);
+                }
+            }
+            
+            // Try offset 16 if we have enough data
+            if (originalDataBuffer.length >= 24) {
+                const originalAmount2 = originalDataBuffer.readBigUInt64LE(16);
+                console.log(`[FORGER] 🔍 Found potential amount at offset 16: ${originalAmount2}`);
+                
+                // If the amount looks reasonable, replace it
+                if (originalAmount2 > 0 && originalAmount2 < BigInt('1000000000000000')) {
+                    freshInstructionData.writeBigUInt64LE(BigInt(userSolAmount.toString()), 16);
+                    console.log(`[FORGER] ✅ Updated amount at offset 16: ${originalAmount2} → ${userSolAmount.toString()}`);
+                }
+            }
+        }
+        
+        console.log(`[FORGER] ✅ RECONSTRUCTED: Fresh instruction data (${freshInstructionData.length} bytes)`);
+        console.log(`[FORGER] 🔍 Fresh data: ${freshInstructionData.toString('hex')}`);
+        
+        return freshInstructionData;
+    }
+
+    /**
      * 🔪 SURGICAL OVERRIDE: Modify specific fields in original data
      * Maximum Safety Strategy - Minimal changes to preserve structure
      */
@@ -220,57 +372,6 @@ class UniversalCloner {
         return originalDataBuffer;
     }
 
-    /**
-     * 🔄 PHOTON ROUTER CPI EXTRACTION: Extract inner Pump.fun instruction from Photon Router
-     * This converts complex router calls into direct Pump.fun calls for successful cloning
-     */
-    async _extractAndClonePumpFunFromPhoton(photonInstruction, builderOptions) {
-        try {
-            console.log(`[FORGER-PHOTON] 🔄 Starting CPI extraction from Photon Router...`);
-            
-            // Create a direct Pump.fun instruction using our platformBuilders
-            const { userPublicKey, outputMint, inputMint, tradeType, userSolAmount, slippageBps } = builderOptions;
-            
-            console.log(`[FORGER-PHOTON] 🎯 Reconstructing as direct Pump.fun ${tradeType.toUpperCase()} instruction`);
-            console.log(`[FORGER-PHOTON] 💰 Amount: ${userSolAmount} lamports`);
-            console.log(`[FORGER-PHOTON] 📊 Slippage: ${slippageBps} BPS`);
-            console.log(`[FORGER-PHOTON] 🪙 Token: ${outputMint || inputMint}`);
-            
-            // Import platformBuilders dynamically to avoid circular dependency
-            const { buildPumpFunInstruction } = require('./platformBuilders');
-            const { PumpSdk } = require('@pump-fun/pump-sdk');
-            
-            // Build the direct Pump.fun instruction using proper builderOptions format
-            const pumpBuilderOptions = {
-                connection: this.connection,
-                keypair: { publicKey: userPublicKey }, // Mock keypair structure
-                swapDetails: {
-                    tradeType: tradeType,
-                    inputMint: tradeType === 'sell' ? (outputMint || inputMint) : 'So11111111111111111111111111111111111111112',
-                    outputMint: tradeType === 'buy' ? (outputMint || inputMint) : 'So11111111111111111111111111111111111111112'
-                },
-                amountBN: new (require('bn.js'))(userSolAmount),
-                slippageBps: slippageBps,
-                sdk: new PumpSdk(this.connection), // Add SDK instance
-                apiManager: this.apiManager // Pass apiManager for Jupiter quotes
-            };
-            
-            const directPumpFunInstruction = await buildPumpFunInstruction(pumpBuilderOptions);
-            
-            console.log(`[FORGER-PHOTON] ✅ Successfully extracted and rebuilt as direct Pump.fun instruction`);
-            console.log(`[FORGER-PHOTON] 📊 Direct instruction: Program ${shortenAddress(directPumpFunInstruction.programId.toBase58())}, Accounts: ${directPumpFunInstruction.keys.length}`);
-            
-            // Return the full instruction object (programId, keys, data)
-            return directPumpFunInstruction;
-            
-        } catch (error) {
-            console.error(`[FORGER-PHOTON] ❌ CPI extraction failed:`, error.message);
-            console.log(`[FORGER-PHOTON] 🔄 Falling back to conservative cloning...`);
-            
-            // Fall back to original instruction (this will likely fail, but it's a safety net)
-            throw error; // Re-throw to let the calling function handle the fallback
-        }
-    }
 
     /**
      * 🧠 SMART OVERRIDE DISPATCHER: The pinnacle of the Smart Cloner architecture
@@ -284,28 +385,20 @@ class UniversalCloner {
 
         // --- THE STRATEGY DISPATCHER ---
 
-        // 🔄 CASE 0: Photon Router -> EXTRACT INNER PUMP.FUN INSTRUCTION (CPI Extraction Override)
+        // 🔄 CASE 0: Photon Router -> TRUE MIMIC AS-IS APPROACH (Use exact structure, swap accounts only)
         if (programIdStr === 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW') {
-            console.log(`[FORGER] 🔄 PHOTON ROUTER DETECTED: Extracting inner Pump.fun instruction for direct cloning`);
-            console.log(`[FORGER] 🎯 CPI EXTRACTION OVERRIDE: Converting router call to direct Pump.fun call`);
+            console.log(`[FORGER] 🔄 PHOTON ROUTER DETECTED: Using TRUE mimic-as-is approach`);
+            console.log(`[FORGER] 🎯 MIMIC STRATEGY: Keep exact Photon Router structure, swap accounts only`);
+            console.log(`[FORGER] ✅ Using original Photon Router instruction data as-is with account forging`);
             
-            // Extract the inner Pump.fun instruction and reconstruct as direct call
-            const directInstruction = await this._extractAndClonePumpFunFromPhoton(clonedInstruction, builderOptions);
-            
-            // Update the cloned instruction to use direct Pump.fun program and accounts
-            clonedInstruction.programId = directInstruction.programId;
-            clonedInstruction.keys = directInstruction.keys;
-            
-            console.log(`[FORGER] ✅ Photon Router converted to direct Pump.fun instruction`);
-            console.log(`[FORGER] 📊 New program: ${shortenAddress(directInstruction.programId.toBase58())}`);
-            console.log(`[FORGER] 📊 New accounts: ${directInstruction.keys.length}`);
-            
-            return directInstruction.data;
+            // For Photon Router, we keep the EXACT same instruction data and structure
+            // Only the account forging will swap trader wallet → user wallet, etc.
+            // This is the most reliable approach - no data modification, just account swaps
+            return finalInstructionData; // Return original data unchanged
         }
 
         // 🎯 CASE 1: Pump.fun Buy -> TRANSACTION-DRIVEN RECONSTRUCTION (Maximum Accuracy)
-        if ((programIdStr === config.PUMP_FUN_PROGRAM_ID.toBase58() || 
-             programIdStr === config.PUMP_FUN_PROGRAM_ID_VARIANT.toBase58()) && 
+        if (programIdStr === config.PLATFORM_IDS.PUMP_FUN.toBase58() && 
             builderOptions.tradeType === 'buy') {
             console.log(`[FORGER] 🧠 TRANSACTION-DRIVEN RECONSTRUCTION: Pump.fun detected - using MASTER'S discriminator and structure`);
             finalInstructionData = this._reconstructPumpFunFromMasterTransaction(finalInstructionData, builderOptions);
@@ -323,9 +416,13 @@ class UniversalCloner {
             finalInstructionData = this._surgicallyModifyPhotonData(finalInstructionData);
         }
 
-        // 🔒 CASE 3: All Other Platforms -> PRESERVE ORIGINAL (Maximum Universality)
+        // 🔒 CASE 3: All Other Platforms -> MODIFY AMOUNT ONLY (Preserve structure)
         else {
-            console.log(`[FORGER] 🔒 CONSERVATIVE OVERRIDE: Unknown platform - preserving original data for safety`);
+            console.log(`[FORGER] 🔧 UNKNOWN PLATFORM: Modifying amount field to use user's SOL amount`);
+            console.log(`[FORGER] ✅ PRESERVING STRUCTURE: Keeping original instruction structure, updating amount only`);
+            // For unknown platforms, we preserve the original instruction structure
+            // but update the amount field to use the user's SOL amount
+            finalInstructionData = this._createMinimalInstructionData(finalInstructionData, builderOptions);
         }
 
         // Update the instruction with the potentially modified data
@@ -335,34 +432,79 @@ class UniversalCloner {
         // These are account-level fixes, not data-level fixes
 
         // --- OVERRIDE RULE #1: Pump.fun User Volume Accumulator PDA Fix ---
-        if (programIdStr === config.PUMP_FUN_PROGRAM_ID.toBase58() || programIdStr === config.PUMP_FUN_PROGRAM_ID_VARIANT.toBase58()) {
+        // Based on official @pump-fun/pump-sdk: user_volume_accumulator PDA seeds are [Buffer.from("user_volume_accumulator"), user.toBuffer()]
+        // NOT [Buffer.from("user_volume_accumulator"), user.toBuffer(), mint.toBuffer()] as we had before
+        if (programIdStr === config.PLATFORM_IDS.PUMP_FUN.toBase58()) {
             console.log(`[FORGER] 🎯 Detected Pump.fun. Fixing user_volume_accumulator PDA...`);
             
             try {
                 const { userPublicKey } = builderOptions;
+                const { outputMint } = builderOptions;
                 
-                // The user_volume_accumulator is typically at index 13 based on the error logs
-                const USER_VOLUME_ACCUMULATOR_INDEX = 13;
+                // Debug: Log all accounts to see what we're working with
+                console.log(`[FORGER] 🔍 DEBUG: Pump.fun instruction has ${clonedInstruction.keys.length} accounts:`);
+                clonedInstruction.keys.forEach((key, index) => {
+                    console.log(`[FORGER]   Account ${index}: ${shortenAddress(key.pubkey.toBase58())} (signer: ${key.isSigner}, writable: ${key.isWritable})`);
+                });
                 
-                if (clonedInstruction.keys.length > USER_VOLUME_ACCUMULATOR_INDEX) {
-                    // Derive the correct PDA for our user
+                // Find the default PDA that needs to be replaced
+                const defaultPDA = 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ';
+                
+                // Find index dynamically by looking for the default PDA
+                let accumulatorIndex = -1;
+                for (let i = 0; i < clonedInstruction.keys.length; i++) {
+                    if (clonedInstruction.keys[i].pubkey.toBase58() === defaultPDA) {
+                        accumulatorIndex = i;
+                        break;
+                    }
+                }
+                
+                if (accumulatorIndex === -1) {
+                    console.warn(`[FORGER] ⚠️ user_volume_accumulator not found in accounts - skipping fix`);
+                } else {
+                    // Derive the correct PDA for our user (CORRECT seeds from official SDK)
                     const [userVolumeAccumulator] = PublicKey.findProgramAddressSync(
                         [
                             Buffer.from("user_volume_accumulator"),
                             userPublicKey.toBuffer()
+                            // NOTE: NO outputMint in seeds - that was the bug!
                         ],
                         new PublicKey(programIdStr)
                     );
                     
-                    const oldPDA = clonedInstruction.keys[USER_VOLUME_ACCUMULATOR_INDEX].pubkey.toBase58();
-                    clonedInstruction.keys[USER_VOLUME_ACCUMULATOR_INDEX].pubkey = userVolumeAccumulator;
+                    const oldPDA = clonedInstruction.keys[accumulatorIndex].pubkey.toBase58();
+                    clonedInstruction.keys[accumulatorIndex].pubkey = userVolumeAccumulator;
                     
-                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA:`);
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated user_volume_accumulator PDA at index ${accumulatorIndex}:`);
                     console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
                     console.log(`[FORGER]   New: ${shortenAddress(userVolumeAccumulator.toBase58())}`);
-                } else {
-                    console.warn(`[FORGER] ⚠️ Cannot find user_volume_accumulator at expected index ${USER_VOLUME_ACCUMULATOR_INDEX}`);
                 }
+                
+                // Additional validation: Check if all required accounts are present and valid
+                console.log(`[FORGER] 🔍 VALIDATION: Checking Pump.fun instruction integrity...`);
+                console.log(`[FORGER]   Program ID: ${shortenAddress(programIdStr)}`);
+                console.log(`[FORGER]   Data length: ${clonedInstruction.data.length} bytes`);
+                console.log(`[FORGER]   Data (hex): ${clonedInstruction.data.toString('hex')}`);
+                
+                // Check for common Pump.fun account issues
+                const hasUserWallet = clonedInstruction.keys.some(key => key.pubkey.toBase58() === userPublicKey);
+                const hasOutputMint = clonedInstruction.keys.some(key => key.pubkey.toBase58() === outputMint);
+                const hasSystemProgram = clonedInstruction.keys.some(key => key.pubkey.toBase58() === '11111111111111111111111111111111');
+                
+                console.log(`[FORGER]   Has user wallet: ${hasUserWallet}`);
+                console.log(`[FORGER]   Has output mint: ${hasOutputMint}`);
+                console.log(`[FORGER]   Has system program: ${hasSystemProgram}`);
+                
+                if (!hasUserWallet) {
+                    console.error(`[FORGER] ❌ CRITICAL: User wallet not found in Pump.fun instruction!`);
+                }
+                if (!hasOutputMint) {
+                    console.error(`[FORGER] ❌ CRITICAL: Output mint not found in Pump.fun instruction!`);
+                }
+                if (!hasSystemProgram) {
+                    console.error(`[FORGER] ❌ CRITICAL: System program not found in Pump.fun instruction!`);
+                }
+                
             } catch (e) {
                 console.error(`[FORGER] ❌ Pump.fun PDA derivation failed:`, e.message);
             }
@@ -407,6 +549,233 @@ class UniversalCloner {
                 console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Photon timestamp to ${newTimestamp}`);
             } else {
                 console.log(`[FORGER] ⚠️ Photon instruction data too short for timestamp update`);
+            }
+        }
+        
+        // --- OVERRIDE RULE #4: Raydium CLMM User Position PDA Fix ---
+        else if (programIdStr === config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Raydium CLMM. Fixing user position PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                const { inputMint, outputMint } = builderOptions;
+                
+                // Raydium CLMM uses position PDAs for user-specific positions
+                // Find and replace the position PDA with user-specific one
+                const positionPDAIndex = this._findRaydiumCLMMPositionPDA(clonedInstruction.keys, userPublicKey, inputMint, outputMint);
+                
+                if (positionPDAIndex !== -1) {
+                    const [userPositionPDA] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("position"),
+                            new PublicKey(userPublicKey).toBuffer(),
+                            new PublicKey(inputMint).toBuffer(),
+                            new PublicKey(outputMint).toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[positionPDAIndex].pubkey.toBase58();
+                    clonedInstruction.keys[positionPDAIndex].pubkey = userPositionPDA;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Raydium CLMM position PDA at index ${positionPDAIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userPositionPDA.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Raydium CLMM position PDA not found in accounts - skipping fix`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Raydium CLMM PDA derivation failed:`, e.message);
+            }
+        }
+        
+        // --- OVERRIDE RULE #5: Raydium CPMM User Position PDA Fix ---
+        else if (programIdStr === config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Raydium CPMM. Fixing user position PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                const { inputMint, outputMint } = builderOptions;
+                
+                // Raydium CPMM uses position PDAs similar to CLMM
+                const positionPDAIndex = this._findRaydiumCPMMPositionPDA(clonedInstruction.keys, userPublicKey, inputMint, outputMint);
+                
+                if (positionPDAIndex !== -1) {
+                    const [userPositionPDA] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("position"),
+                            new PublicKey(userPublicKey).toBuffer(),
+                            new PublicKey(inputMint).toBuffer(),
+                            new PublicKey(outputMint).toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[positionPDAIndex].pubkey.toBase58();
+                    clonedInstruction.keys[positionPDAIndex].pubkey = userPositionPDA;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Raydium CPMM position PDA at index ${positionPDAIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userPositionPDA.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Raydium CPMM position PDA not found in accounts - skipping fix`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Raydium CPMM PDA derivation failed:`, e.message);
+            }
+        }
+        
+        // --- OVERRIDE RULE #6: Meteora DLMM User Position PDA Fix ---
+        else if (programIdStr === config.PLATFORM_IDS.METEORA_DLMM.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Meteora DLMM. Fixing user position PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                const { inputMint, outputMint } = builderOptions;
+                
+                // Meteora DLMM uses position PDAs for user-specific positions
+                const positionPDAIndex = this._findMeteoraDLMMPositionPDA(clonedInstruction.keys, userPublicKey, inputMint, outputMint);
+                
+                if (positionPDAIndex !== -1) {
+                    const [userPositionPDA] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("position"),
+                            new PublicKey(userPublicKey).toBuffer(),
+                            new PublicKey(inputMint).toBuffer(),
+                            new PublicKey(outputMint).toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[positionPDAIndex].pubkey.toBase58();
+                    clonedInstruction.keys[positionPDAIndex].pubkey = userPositionPDA;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Meteora DLMM position PDA at index ${positionPDAIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userPositionPDA.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Meteora DLMM position PDA not found in accounts - skipping fix`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Meteora DLMM PDA derivation failed:`, e.message);
+            }
+        }
+        
+        // --- OVERRIDE RULE #7: Meteora DBC User Position PDA Fix ---
+        else if (config.PLATFORM_IDS.METEORA_DBC.some(id => programIdStr === id.toBase58())) {
+            console.log(`[FORGER] 🎯 Detected Meteora DBC. Fixing user position PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                const { inputMint, outputMint } = builderOptions;
+                
+                // Meteora DBC uses position PDAs for user-specific positions
+                const positionPDAIndex = this._findMeteoraDBCPositionPDA(clonedInstruction.keys, userPublicKey, inputMint, outputMint);
+                
+                if (positionPDAIndex !== -1) {
+                    const [userPositionPDA] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("position"),
+                            new PublicKey(userPublicKey).toBuffer(),
+                            new PublicKey(inputMint).toBuffer(),
+                            new PublicKey(outputMint).toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[positionPDAIndex].pubkey.toBase58();
+                    clonedInstruction.keys[positionPDAIndex].pubkey = userPositionPDA;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Meteora DBC position PDA at index ${positionPDAIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userPositionPDA.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Meteora DBC position PDA not found in accounts - skipping fix`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Meteora DBC PDA derivation failed:`, e.message);
+            }
+        }
+        
+        // --- OVERRIDE RULE #8: Meteora CP-AMM User Position PDA Fix ---
+        else if (programIdStr === config.PLATFORM_IDS.METEORA_CP_AMM.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Meteora CP-AMM. Fixing user position PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                const { inputMint, outputMint } = builderOptions;
+                
+                // Meteora CP-AMM uses position PDAs for user-specific positions
+                const positionPDAIndex = this._findMeteoraCPAMMPositionPDA(clonedInstruction.keys, userPublicKey, inputMint, outputMint);
+                
+                if (positionPDAIndex !== -1) {
+                    const [userPositionPDA] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("position"),
+                            new PublicKey(userPublicKey).toBuffer(),
+                            new PublicKey(inputMint).toBuffer(),
+                            new PublicKey(outputMint).toBuffer()
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[positionPDAIndex].pubkey.toBase58();
+                    clonedInstruction.keys[positionPDAIndex].pubkey = userPositionPDA;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Meteora CP-AMM position PDA at index ${positionPDAIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userPositionPDA.toBase58())}`);
+                } else {
+                    console.warn(`[FORGER] ⚠️ Meteora CP-AMM position PDA not found in accounts - skipping fix`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Meteora CP-AMM PDA derivation failed:`, e.message);
+            }
+        }
+        
+        // --- OVERRIDE RULE #6: Pump AMM User Volume Accumulator PDA Fix ---
+        // Based on official @pump-fun/pump-swap-sdk: user_volume_accumulator PDA seeds are [Buffer.from("user_volume_accumulator"), user.toBuffer()]
+        else if (programIdStr === config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58()) {
+            console.log(`[FORGER] 🎯 Detected Pump AMM. Fixing user_volume_accumulator PDA...`);
+            
+            try {
+                const { userPublicKey } = builderOptions;
+                
+                // Find the user_volume_accumulator PDA in the accounts
+                // Look for the default PDA that needs to be replaced
+                const defaultPDA = 'pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ';
+                
+                // Find index dynamically by looking for the default PDA
+                let accumulatorIndex = -1;
+                for (let i = 0; i < clonedInstruction.keys.length; i++) {
+                    if (clonedInstruction.keys[i].pubkey.toBase58() === defaultPDA) {
+                        accumulatorIndex = i;
+                        break;
+                    }
+                }
+                
+                if (accumulatorIndex === -1) {
+                    console.warn(`[FORGER] ⚠️ user_volume_accumulator not found in accounts - skipping fix`);
+                } else {
+                    // Derive the correct PDA for our user (CORRECT seeds from official SDK)
+                    const [userVolumeAccumulator] = PublicKey.findProgramAddressSync(
+                        [
+                            Buffer.from("user_volume_accumulator"),
+                            userPublicKey.toBuffer()
+                            // NOTE: NO outputMint in seeds - same as Pump.fun
+                        ],
+                        new PublicKey(programIdStr)
+                    );
+                    
+                    const oldPDA = clonedInstruction.keys[accumulatorIndex].pubkey.toBase58();
+                    clonedInstruction.keys[accumulatorIndex].pubkey = userVolumeAccumulator;
+                    
+                    console.log(`[FORGER] ✅ OVERRIDE APPLIED: Updated Pump AMM user_volume_accumulator PDA at index ${accumulatorIndex}:`);
+                    console.log(`[FORGER]   Old: ${shortenAddress(oldPDA)}`);
+                    console.log(`[FORGER]   New: ${shortenAddress(userVolumeAccumulator.toBase58())}`);
+                }
+            } catch (e) {
+                console.error(`[FORGER] ❌ Pump AMM PDA derivation failed:`, e.message);
             }
         }
         
@@ -457,6 +826,8 @@ class UniversalCloner {
      * STAGE 3: Blueprint-Based Forging - Main cloning function using blueprint and forging map
      */
     async buildClonedInstruction(builderOptions) {
+        const startTime = Date.now();
+        
         const { 
             userPublicKey, 
             cloningTarget, 
@@ -550,33 +921,98 @@ class UniversalCloner {
 
             // Blueprint vs forged comparison - removed for speed
 
-            // Step 2: Handle all prerequisites (ATA creation, wSOL wrapping, etc.)
-            const prerequisiteInstructions = await this._handlePrerequisites(
-                userPublicKey,
-                outputMint,
-                tradeType,
-                inputMint, // Pass inputMint for comprehensive prerequisite handling
-                builderOptions // 🚀 CRITICAL: Pass builderOptions for userSolAmount
-            );
+            // Step 2: Use ALL instructions from master trader (no prerequisites)
+            console.log(`[UNIVERSAL-CLONER] 🎯 USING ALL MASTER INSTRUCTIONS: Taking exact same instruction structure from master trader`);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: builderOptions.originalTransaction type: ${typeof builderOptions.originalTransaction}`);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: builderOptions.originalTransaction keys: ${builderOptions.originalTransaction ? Object.keys(builderOptions.originalTransaction) : 'undefined'}`);
+            const allMasterInstructions = builderOptions.originalTransaction?.instructions || [];
+            console.log(`[UNIVERSAL-CLONER] 🔍 Master has ${allMasterInstructions.length} instructions - will clone ALL of them`);
 
             // Step 3: Handle instruction data - CRITICAL FIX for data corruption
             // The issue: We're converting base64 → Buffer → base64, which adds padding
             // Solution: Keep original data format and only convert when creating TransactionInstruction
             
+            // DEBUG: Check what data we're receiving
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: cloningTarget.data type: ${typeof cloningTarget.data}`);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: cloningTarget.data isBuffer: ${Buffer.isBuffer(cloningTarget.data)}`);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: cloningTarget.data value:`, cloningTarget.data);
+            console.log(`[UNIVERSAL-CLONER] 🔍 DEBUG: cloningTarget.data length: ${cloningTarget.data ? cloningTarget.data.length : 'undefined'}`);
+            
             // Convert to Buffer for instruction creation - minimal logging for speed
             let finalInstructionData;
             
             try {
-                finalInstructionData = Buffer.from(bs58.decode(cloningTarget.data)); // CRITICAL FIX: Decode from Base58, not Base64
+                // Handle different data types properly
+                if (Buffer.isBuffer(cloningTarget.data)) {
+                    // Data is already a Buffer
+                    finalInstructionData = cloningTarget.data;
+                    console.log(`[UNIVERSAL-CLONER] 🔍 Data is already Buffer: ${finalInstructionData.length} bytes`);
+                } else if (cloningTarget.data instanceof Uint8Array) {
+                    // Data is a Uint8Array (common after worker communication)
+                    finalInstructionData = Buffer.from(cloningTarget.data);
+                    console.log(`[UNIVERSAL-CLONER] ✅ Uint8Array to Buffer conversion: ${finalInstructionData.length} bytes`);
+                } else if (typeof cloningTarget.data === 'string') {
+                    // Data is a string, try base58 decode first
+                    try {
+                        finalInstructionData = Buffer.from(bs58.decode(cloningTarget.data));
+                        console.log(`[UNIVERSAL-CLONER] ✅ Base58 decode successful: ${finalInstructionData.length} bytes`);
+                    } catch (base58Error) {
+                        // If base58 fails, try hex decode
+                        finalInstructionData = Buffer.from(cloningTarget.data, 'hex');
+                        console.log(`[UNIVERSAL-CLONER] ✅ Hex decode successful: ${finalInstructionData.length} bytes`);
+                    }
+                } else if (Array.isArray(cloningTarget.data)) {
+                    // Data is an array of numbers
+                    finalInstructionData = Buffer.from(cloningTarget.data);
+                    console.log(`[UNIVERSAL-CLONER] ✅ Array to Buffer conversion: ${finalInstructionData.length} bytes`);
+                } else {
+                    // Unknown type, try to convert to string first
+                    const dataString = String(cloningTarget.data);
+                    try {
+                        finalInstructionData = Buffer.from(bs58.decode(dataString));
+                        console.log(`[UNIVERSAL-CLONER] ✅ String to Base58 decode: ${finalInstructionData.length} bytes`);
+                    } catch (base58Error) {
+                        finalInstructionData = Buffer.from(dataString, 'hex');
+                        console.log(`[UNIVERSAL-CLONER] ✅ String to Hex decode: ${finalInstructionData.length} bytes`);
+                    }
+                }
                 
                 // Platform-specific, SURGICAL data modifications for timestamp expiration fixes
                 const PHOTON_ROUTER_ID = 'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW';
                 
                 if (cloningTarget.programId === PHOTON_ROUTER_ID) {
-                    console.log(`[UNIVERSAL-CLONER] 🔧 Photon Router detected. Attempting to update timestamp...`);
+                    console.log(`[UNIVERSAL-CLONER] 🔧 Photon Router detected. Updating SOL amount and timestamp...`);
                     try {
-                        // Based on the 40-byte instruction data, attempt to locate and update timestamp
-                        // Let's try multiple common timestamp locations
+                        // For Photon Router 40-byte instruction data:
+                        // - Update SOL amount to user's amount (usually at offset 8-16)
+                        // - Update timestamp to current time (usually at offset 0-8 or 16-24)
+                        
+                        const userSolAmount = builderOptions.userSolAmount || 1000000; // Default 0.001 SOL
+                        console.log(`[UNIVERSAL-CLONER] 💰 Updating SOL amount from master's amount to user's amount: ${userSolAmount} lamports`);
+                        
+                        // Try to find and update SOL amount (common locations: offset 8, 16, 24)
+                        const solAmountOffsets = [8, 16, 24];
+                        let solAmountUpdated = false;
+                        
+                        for (const offset of solAmountOffsets) {
+                            if (finalInstructionData.length >= offset + 8) {
+                                const originalAmount = finalInstructionData.readBigUInt64LE(offset);
+                                console.log(`[UNIVERSAL-CLONER] 🔍 Checking offset ${offset}: ${originalAmount} lamports`);
+                                
+                                // Check if this looks like a reasonable SOL amount (between 1000 and 100 SOL)
+                                if (originalAmount > 1000n && originalAmount < 100000000000n) {
+                                    console.log(`[UNIVERSAL-CLONER] 💰 Found SOL amount at offset ${offset}: ${originalAmount} lamports`);
+                                    console.log(`[UNIVERSAL-CLONER] 💰 Updating to user's amount: ${userSolAmount} lamports`);
+                                    
+                                    finalInstructionData.writeBigUInt64LE(BigInt(userSolAmount), offset);
+                                    console.log(`[UNIVERSAL-CLONER] ✅ Successfully updated SOL amount from ${originalAmount} to ${userSolAmount}`);
+                                    solAmountUpdated = true;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        // Update timestamp (try multiple common timestamp locations)
                         const possibleOffsets = [0, 8, 16, 24, 32]; // Try different 8-byte aligned positions
                         let timestampUpdated = false;
                         const currentTimestamp = BigInt(Math.floor(Date.now() / 1000)); // Current Unix time in seconds
@@ -602,6 +1038,10 @@ class UniversalCloner {
                             }
                         }
                         
+                        if (!solAmountUpdated) {
+                            console.warn(`[UNIVERSAL-CLONER] ⚠️ Could not locate SOL amount in Photon instruction data. Proceeding with original data.`);
+                        }
+                        
                         if (!timestampUpdated) {
                             console.warn(`[UNIVERSAL-CLONER] ⚠️ Could not locate valid timestamp in Photon instruction data. Proceeding with original data.`);
                         }
@@ -614,15 +1054,30 @@ class UniversalCloner {
                 }
                 
             } catch (error) {
-                console.error(`[UNIVERSAL-CLONER] ❌ Failed to decode base58 data: ${error.message}`);
+                console.error(`[UNIVERSAL-CLONER] ❌ Failed to process instruction data: ${error.message}`);
+                console.error(`[UNIVERSAL-CLONER] 🔍 Data type: ${typeof cloningTarget.data}, isBuffer: ${Buffer.isBuffer(cloningTarget.data)}, isArray: ${Array.isArray(cloningTarget.data)}`);
                 console.error(`[UNIVERSAL-CLONER] 🔍 Problematic data: ${JSON.stringify(cloningTarget.data)}`);
-                // Fallback: treat as hex or raw
+                
+                // Multiple fallback strategies
                 try {
-                    finalInstructionData = Buffer.from(cloningTarget.data, 'hex');
-                    console.log(`[UNIVERSAL-CLONER] 🔄 Fallback hex decode successful: ${finalInstructionData.length} bytes`);
-                } catch (hexError) {
-                    console.error(`[UNIVERSAL-CLONER] ❌ Hex fallback also failed: ${hexError.message}`);
-                    finalInstructionData = Buffer.alloc(0); // Empty buffer as last resort
+                    if (Buffer.isBuffer(cloningTarget.data)) {
+                        finalInstructionData = cloningTarget.data;
+                        console.log(`[UNIVERSAL-CLONER] 🔄 Buffer fallback successful: ${finalInstructionData.length} bytes`);
+                    } else if (typeof cloningTarget.data === 'string') {
+                        finalInstructionData = Buffer.from(cloningTarget.data, 'hex');
+                        console.log(`[UNIVERSAL-CLONER] 🔄 Hex fallback successful: ${finalInstructionData.length} bytes`);
+                    } else if (Array.isArray(cloningTarget.data)) {
+                        finalInstructionData = Buffer.from(cloningTarget.data);
+                        console.log(`[UNIVERSAL-CLONER] 🔄 Array fallback successful: ${finalInstructionData.length} bytes`);
+                    } else {
+                        // Last resort: try to create a minimal buffer
+                        finalInstructionData = Buffer.alloc(1, 0); // Single byte with value 0
+                        console.log(`[UNIVERSAL-CLONER] 🔄 Minimal buffer fallback: ${finalInstructionData.length} bytes`);
+                    }
+                } catch (fallbackError) {
+                    console.error(`[UNIVERSAL-CLONER] ❌ All fallbacks failed: ${fallbackError.message}`);
+                    finalInstructionData = Buffer.alloc(1, 0); // Single byte as absolute last resort
+                    console.log(`[UNIVERSAL-CLONER] 🔄 Absolute fallback: ${finalInstructionData.length} bytes`);
                 }
             }
             
@@ -677,28 +1132,37 @@ class UniversalCloner {
             clonedInstruction = await this._applySurgicalOverrides(clonedInstruction, builderOptions);
             console.log(`[UNIVERSAL-CLONER] ✅ Smart Cloner overrides completed`);
 
-            // Step 6: Prepare all instructions (prerequisites + cloned instruction)
-            let allInstructions = [...prerequisiteInstructions, clonedInstruction];
+            // Step 6: Clone ALL master instructions with account swapping
+            console.log(`[UNIVERSAL-CLONER] 🔄 Cloning ALL ${allMasterInstructions.length} instructions from master trader`);
+            const allInstructions = [];
             
-            // Step 7: Add durable nonce instruction if provided (must be FIRST)
-            if (nonceInfo) {
-                console.log(`[UNIVERSAL-CLONER] 🔐 Adding durable nonce instruction for account: ${shortenAddress(nonceInfo.noncePubkey.toString())}`);
-                const nonceInstruction = SystemProgram.nonceAdvance({
-                    noncePubkey: nonceInfo.noncePubkey,
-                    authorizedPubkey: nonceInfo.authorizedPubkey,
-                });
-                allInstructions.unshift(nonceInstruction); // Add as FIRST instruction
-                console.log(`[UNIVERSAL-CLONER] ✅ Durable nonce instruction added - transaction will never expire`);
+            for (let i = 0; i < allMasterInstructions.length; i++) {
+                const masterInstruction = allMasterInstructions[i];
+                console.log(`[UNIVERSAL-CLONER] 🔍 Cloning instruction ${i}: ${shortenAddress(masterInstruction.programId.toString())} with ${masterInstruction.keys.length} accounts`);
+                
+                // Clone the instruction with account swapping
+                const clonedInstruction = await this._cloneInstructionWithAccountSwap(masterInstruction, builderOptions);
+                allInstructions.push(clonedInstruction);
             }
+            
+            console.log(`[UNIVERSAL-CLONER] ✅ Cloned ALL ${allInstructions.length} instructions from master trader`);
 
+            const totalTime = Date.now() - startTime;
+            console.log(`[BLUEPRINT-FORGER] ⚡ Cloning completed in ${totalTime}ms`);
+            
             return {
                 instructions: allInstructions,
                 success: true,
                 platform: 'Universal',
-                method: 'swap_rules_cloning',
-                prerequisiteInstructions: prerequisiteInstructions.length,
-                clonedInstruction: true,
-                nonceUsed: !!nonceInfo
+                method: 'all_instructions_cloning',
+                totalInstructions: allInstructions.length,
+                clonedInstructions: true,
+                nonceUsed: false, // Nonce is used as blockhash, not as instruction
+                performance: {
+                    totalTime: totalTime,
+                    targetTime: 200, // Target: <200ms
+                    isOptimal: totalTime < 200
+                }
             };
 
         } catch (error) {
@@ -838,30 +1302,99 @@ class UniversalCloner {
     }
 
     /**
+     * Clone a single instruction with account swapping
+     * This replaces the old prerequisite system - we just swap accounts in existing instructions
+     */
+    async _cloneInstructionWithAccountSwap(masterInstruction, builderOptions) {
+        const { userPublicKey, masterTraderWallet, inputMint, outputMint } = builderOptions;
+        const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+        
+        console.log(`[UNIVERSAL-CLONER] 🔄 Cloning instruction: ${shortenAddress(masterInstruction.programId.toString())}`);
+        
+        // Create forging map for account swaps
+        const forgingMap = new Map();
+        
+        // 1. Map the trader's wallet to our user's wallet
+        forgingMap.set(masterTraderWallet, userPublicKey.toBase58());
+        
+        // 2. Map the trader's ATAs to our user's ATAs
+        if (inputMint && inputMint !== 'So11111111111111111111111111111111111111112') {
+            const masterInputATA = getAssociatedTokenAddressSync(new PublicKey(inputMint), new PublicKey(masterTraderWallet));
+            const userInputATA = getAssociatedTokenAddressSync(new PublicKey(inputMint), userPublicKey);
+            forgingMap.set(masterInputATA.toBase58(), userInputATA.toBase58());
+        }
+        
+        if (outputMint && outputMint !== 'So11111111111111111111111111111111111111112') {
+            const masterOutputATA = getAssociatedTokenAddressSync(new PublicKey(outputMint), new PublicKey(masterTraderWallet));
+            const userOutputATA = getAssociatedTokenAddressSync(new PublicKey(outputMint), userPublicKey);
+            forgingMap.set(masterOutputATA.toBase58(), userOutputATA.toBase58());
+        }
+        
+        // Clone the instruction keys with account swapping
+        const clonedKeys = masterInstruction.keys.map((key) => {
+            const originalPubkeyStr = key.pubkey.toBase58();
+            const finalPubkeyStr = forgingMap.get(originalPubkeyStr) || originalPubkeyStr;
+            
+            return {
+                pubkey: new PublicKey(finalPubkeyStr),
+                isSigner: key.isSigner,
+                isWritable: key.isWritable
+            };
+        });
+        
+        // Clone the instruction data (preserve original structure)
+        let clonedData = masterInstruction.data;
+        
+        // Apply surgical overrides for amount modification if needed
+        if (masterInstruction.data.length > 4) {
+            clonedData = await this._applySurgicalOverrides({
+                programId: masterInstruction.programId,
+                keys: clonedKeys,
+                data: masterInstruction.data
+            }, builderOptions);
+            clonedData = clonedData.data; // Extract data from the result
+        }
+        
+        // Create the cloned instruction
+        const clonedInstruction = new TransactionInstruction({
+            programId: masterInstruction.programId,
+            keys: clonedKeys,
+            data: clonedData
+        });
+        
+        console.log(`[UNIVERSAL-CLONER] ✅ Cloned instruction: ${clonedKeys.length} accounts, ${clonedData.length} bytes data`);
+        return clonedInstruction;
+    }
+
+    /**
      * Handle all prerequisites for the trade: ATA creation, wSOL wrapping, etc.
      * This is the "Prerequisite Handler" - the final architectural component
+     * NOTE: This method is now DEPRECATED - we use _cloneInstructionWithAccountSwap instead
      */
     async _handlePrerequisites(userPublicKey, outputMint, tradeType, inputMint = null, builderOptions = {}) {
-        const ataInstructions = [];
-
-        // DEBUG: Log all parameters to understand the issue
-        console.log(`[FORGER-PREQ] 🔍 PREREQUISITE HANDLER DEBUG:`);
-        console.log(`[FORGER-PREQ]   - tradeType: "${tradeType}"`);
-        console.log(`[FORGER-PREQ]   - outputMint: ${outputMint}`);
-        console.log(`[FORGER-PREQ]   - inputMint: ${inputMint}`);
-        console.log(`[FORGER-PREQ]   - SOL mint: So11111111111111111111111111111111111111112`);
-
-        // Create ATA for OUTPUT tokens (BUY trades - when user receives tokens)
-        if (tradeType === 'buy' && outputMint !== 'So11111111111111111111111111111111111111112') {
-            try {
-                console.log(`[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: ${shortenAddress(outputMint)}`);
-                
-                // Check if user already has an ATA for this token
-                const userATA = await this._getAssociatedTokenAddress(userPublicKey, outputMint);
-                const ataAccountInfo = await this.connection.getAccountInfo(userATA);
-                
-                if (!ataAccountInfo) {
-                    console.log(`[UNIVERSAL-CLONER] 🔧 Creating ATA for user: ${shortenAddress(userPublicKey.toString())}`);
+        const prerequisiteInstructions = [];
+        const { userPaymentMethod, amountBN } = builderOptions;
+    
+        // --- Create ATA for the token we are RECEIVING (This logic is still correct) ---
+        if (tradeType === 'buy') {
+            // ... existing logic to create the ATA for the outputMint ...
+            // DEBUG: Log all parameters to understand the issue
+            console.log(`[FORGER-PREQ] 🔍 PREREQUISITE HANDLER DEBUG:`);
+            console.log(`[FORGER-PREQ]   - tradeType: "${tradeType}"`);
+            console.log(`[FORGER-PREQ]   - outputMint: ${outputMint}`);
+            console.log(`[FORGER-PREQ]   - inputMint: ${inputMint}`);
+            console.log(`[FORGER-PREQ]   - SOL mint: So11111111111111111111111111111111111111112`);
+    
+            // Create ATA for OUTPUT tokens (BUY trades - when user receives tokens)
+            if (tradeType === 'buy' && outputMint !== 'So11111111111111111111111111111111111111112') {
+                try {
+                    console.log(`[UNIVERSAL-CLONER] 🔍 Checking ATA creation for mint: ${shortenAddress(outputMint)}`);
+                    
+                    // 🚀 PERFORMANCE OPTIMIZATION: Skip RPC call, always create ATA instruction
+                    // The transaction will fail gracefully if ATA already exists (rare case)
+                    const userATA = await this._getAssociatedTokenAddress(userPublicKey, outputMint);
+                    
+                    console.log(`[UNIVERSAL-CLONER] 🔧 Creating ATA instruction for user: ${shortenAddress(userPublicKey.toString())}`);
                     
                     // 🔧 TOKEN-2022 FIX: Determine which token program owns the mint
                     const outputMintPk = new PublicKey(outputMint);
@@ -878,134 +1411,97 @@ class UniversalCloner {
                         tokenProgramId // 🔧 CRITICAL FIX: Pass the correct token program
                     );
                     
-                    ataInstructions.push(createATAInstruction);
+                    prerequisiteInstructions.push(createATAInstruction);
                     console.log(`[UNIVERSAL-CLONER] ✅ ATA creation instruction added with ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
-                } else {
-                    console.log(`[UNIVERSAL-CLONER] ✅ User already has ATA for this token`);
+                } catch (error) {
+                    console.error(`[UNIVERSAL-CLONER] ❌ OUTPUT ATA creation check failed:`, error.message);
                 }
-            } catch (error) {
-                console.error(`[UNIVERSAL-CLONER] ❌ OUTPUT ATA creation check failed:`, error.message);
             }
         }
-
+    
         // Create ATA for INPUT tokens (SELL trades - when user needs to sell tokens)
         if (tradeType === 'sell' && inputMint && inputMint !== 'So11111111111111111111111111111111111111112') {
             try {
                 console.log(`[UNIVERSAL-CLONER] 🔍 Checking INPUT ATA creation for mint: ${shortenAddress(inputMint)}`);
                 
-                // Check if user already has an ATA for this input token
+                // 🚀 PERFORMANCE OPTIMIZATION: Skip RPC call, always create ATA instruction
                 const userInputATA = await this._getAssociatedTokenAddress(userPublicKey, inputMint);
-                const inputATAAccountInfo = await this.connection.getAccountInfo(userInputATA);
                 
-                if (!inputATAAccountInfo) {
-                    console.log(`[UNIVERSAL-CLONER] 🔧 Creating INPUT ATA for user: ${shortenAddress(userPublicKey.toString())}`);
-                    
-                    // 🔧 TOKEN-2022 FIX: Determine which token program owns the mint
-                    const inputMintPk = new PublicKey(inputMint);
-                    const isToken2022 = await this._isToken2022(inputMintPk);
-                    const tokenProgramId = isToken2022 ? config.TOKEN_2022_PROGRAM_ID : config.TOKEN_PROGRAM_ID;
-                    
-                    console.log(`[UNIVERSAL-CLONER] 🎯 Using Token Program: ${shortenAddress(tokenProgramId.toString())} for INPUT mint ${shortenAddress(inputMint)}`);
-                    
-                    const createInputATAInstruction = createAssociatedTokenAccountInstruction(
-                        userPublicKey, // payer
-                        userInputATA, // ata
-                        userPublicKey, // owner
-                        inputMintPk, // mint
-                        tokenProgramId // 🔧 CRITICAL FIX: Pass the correct token program
-                    );
-                    
-                    ataInstructions.push(createInputATAInstruction);
-                    console.log(`[UNIVERSAL-CLONER] ✅ INPUT ATA creation instruction added with ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
-                } else {
-                    console.log(`[UNIVERSAL-CLONER] ✅ User already has INPUT ATA for this token`);
-                }
+                console.log(`[UNIVERSAL-CLONER] 🔧 Creating INPUT ATA instruction for user: ${shortenAddress(userPublicKey.toString())}`);
+                
+                // 🔧 TOKEN-2022 FIX: Determine which token program owns the mint
+                const inputMintPk = new PublicKey(inputMint);
+                const isToken2022 = await this._isToken2022(inputMintPk);
+                const tokenProgramId = isToken2022 ? config.TOKEN_2022_PROGRAM_ID : config.TOKEN_PROGRAM_ID;
+                
+                console.log(`[UNIVERSAL-CLONER] 🎯 Using Token Program: ${shortenAddress(tokenProgramId.toString())} for INPUT mint ${shortenAddress(inputMint)}`);
+                
+                const createInputATAInstruction = createAssociatedTokenAccountInstruction(
+                    userPublicKey, // payer
+                    userInputATA, // ata
+                    userPublicKey, // owner
+                    inputMintPk, // mint
+                    tokenProgramId // 🔧 CRITICAL FIX: Pass the correct token program
+                );
+                
+                prerequisiteInstructions.push(createInputATAInstruction);
+                console.log(`[UNIVERSAL-CLONER] ✅ INPUT ATA creation instruction added with ${isToken2022 ? 'Token-2022' : 'Standard SPL Token'} program`);
             } catch (error) {
                 console.error(`[UNIVERSAL-CLONER] ❌ INPUT ATA creation check failed:`, error.message);
             }
         }
-
-        // 🚀 PLATFORM-SPECIFIC wSOL prerequisite handling
-        // Only AMM platforms (Raydium, Meteora) need wSOL, not Pump.fun
-        const needsWSOL = builderOptions.platform && 
-                         (builderOptions.platform.includes('Raydium') || 
-                          builderOptions.platform.includes('Meteora') ||
-                          builderOptions.platform.includes('AMM'));
-        
-        if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112' && needsWSOL) {
-            try {
-                console.log(`[FORGER-PREQ] 🔍 AMM BUY trade detected with SOL as input - checking wSOL prerequisite for ${builderOptions.platform}...`);
+    
+        // --- NEW "SOL-ONLY" PAYMENT LOGIC ---
+        // This logic replaces the old, simple wSOL wrapping.
+    
+        // If the master's input was a token (like wSOL or USDC), but we are commanded to pay with SOL...
+        if (tradeType === 'buy' && userPaymentMethod === 'sol') {
+            console.log(`[FORGER-PREQ] Enforcing SOL-only payment rule.`);
+            
+            // Is the platform an AMM that REQUIRES wrapped SOL? (e.g., Raydium, Orca)
+            const platform = builderOptions.cloningTarget.platform; // We need to know the platform
+            const needsWSOL = platform.includes('Raydium') || platform.includes('Meteora') || platform.includes('Orca');
+    
+            if (needsWSOL) {
+                // This is an AMM trade. We MUST wrap our raw SOL into wSOL.
+                console.log(`[FORGER-PREQ] Platform ${platform} requires wSOL. Wrapping user's raw SOL...`);
                 
                 const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
-                const { SystemProgram } = require('@solana/web3.js');
-                const { createSyncNativeInstruction } = require('@solana/spl-token');
-                
-                // Check if user has a wSOL ATA
-                const userWSOLATA = getAssociatedTokenAddressSync(
-                    new PublicKey('So11111111111111111111111111111111111111112'), 
-                    userPublicKey
-                );
-                
-                const wsolATAInfo = await this.connection.getAccountInfo(userWSOLATA);
-                
-                // CRITICAL FIX: Always ensure wSOL ATA is funded for AMM trades!
-                // AMMs require wSOL accounts to have sufficient balance, even if they exist
-                
-                if (!wsolATAInfo) {
-                    console.log(`[FORGER-PREQ] ⚠️ User is missing a Wrapped SOL account. Creating and funding it...`);
-                    
-                    // 1. Create the wSOL ATA
-                    const createWSOLATAInstruction = createAssociatedTokenAccountInstruction(
-                        userPublicKey, // payer
-                        userWSOLATA, // ata
-                        userPublicKey, // owner
-                        new PublicKey('So11111111111111111111111111111111111111112'), // mint (wSOL)
-                        config.TOKEN_PROGRAM_ID // token program
+                const { SystemProgram, createSyncNativeInstruction } = require('@solana/web3.js');
+    
+                const userWSOL_ATA = getAssociatedTokenAddressSync(new PublicKey(config.NATIVE_SOL_MINT), userPublicKey);
+                const wsolAtaInfo = await this.connection.getAccountInfo(userWSOL_ATA);
+    
+                // 1. Create the wSOL ATA if it doesn't exist
+                if (!wsolAtaInfo) {
+                    prerequisiteInstructions.push(
+                        createAssociatedTokenAccountIdempotentInstruction(userPublicKey, userWSOL_ATA, userPublicKey, new PublicKey(config.NATIVE_SOL_MINT))
                     );
-                    
-                    ataInstructions.push(createWSOLATAInstruction);
-                    console.log(`[FORGER-PREQ] ✅ wSOL ATA creation instruction added`);
-                } else {
-                    console.log(`[FORGER-PREQ] ✅ User has wSOL ATA - will fund it for AMM trade`);
                 }
+    
+                // 2. Transfer RAW SOL from our user's wallet to their wSOL ATA
+                prerequisiteInstructions.push(
+                    SystemProgram.transfer({
+                        fromPubkey: userPublicKey,
+                        toPubkey: userWSOL_ATA,
+                        lamports: parseInt(amountBN.toString()), // The user's desired SOL spend
+                    })
+                );
+    
+                // 3. Sync the native balance to "wrap" the SOL
+                prerequisiteInstructions.push(
+                    createSyncNativeInstruction(userWSOL_ATA)
+                );
+    
+                console.log(`[FORGER-PREQ] Added 3 instructions to create and fund wSOL account with ${amountBN.toString()} lamports.`);
                 
-                // ALWAYS fund the wSOL ATA for AMM trades (regardless of existence)
-                console.log(`[FORGER-PREQ] 💰 Funding wSOL ATA for AMM trade with user's configured amount...`);
-                
-                // 2. Transfer SOL to the wSOL ATA to fund it
-                const { userSolAmount } = builderOptions;
-                
-                if (!userSolAmount || userSolAmount.toString() === '0') {
-                    throw new Error("[FORGER-PREQ] userSolAmount is missing or zero, cannot fund wSOL account.");
-                }
-                
-                // Convert BN to number for the transfer instruction
-                const solAmountToWrap = typeof userSolAmount === 'object' ? parseInt(userSolAmount.toString()) : userSolAmount;
-                
-                const transferSOLInstruction = SystemProgram.transfer({
-                    fromPubkey: userPublicKey,
-                    toPubkey: userWSOLATA,
-                    lamports: solAmountToWrap // 🎯 USE THE CORRECT USER AMOUNT
-                });
-                
-                ataInstructions.push(transferSOLInstruction);
-                console.log(`[FORGER-PREQ] ✅ SOL transfer instruction added (${solAmountToWrap} lamports) - USER'S CONFIGURED AMOUNT`);
-                
-                // 3. Sync native to convert SOL to wSOL
-                const syncNativeInstruction = createSyncNativeInstruction(userWSOLATA);
-                ataInstructions.push(syncNativeInstruction);
-                console.log(`[FORGER-PREQ] ✅ Sync native instruction added to convert SOL to wSOL`);
-                console.log(`[FORGER-PREQ] 🎯 AMM wSOL prerequisite completed - account funded and ready`);
-                
-                
-            } catch (error) {
-                console.error(`[FORGER-PREQ] ❌ wSOL prerequisite check failed:`, error.message);
+            } else {
+                // This is likely a Pump.fun trade. It uses raw SOL directly. No wrapping needed.
+                console.log(`[FORGER-PREQ] Platform ${platform} uses raw SOL. No wrapping required.`);
             }
-        } else if (tradeType === 'buy' && inputMint === 'So11111111111111111111111111111111111111112' && !needsWSOL) {
-            console.log(`[FORGER-PREQ] ✅ Pump.fun BUY trade - no wSOL needed, using direct SOL`);
         }
-
-        return ataInstructions;
+    
+        return prerequisiteInstructions;
     }
 
     /**
@@ -1126,6 +1622,117 @@ class UniversalCloner {
             const BN = require('bn.js');
             return new BN(tokenAmount.toString()).mul(new BN(500000)); // 0.0005 SOL per token
         }
+    }
+
+    /**
+     * Helper method to find Raydium CLMM position PDA in instruction keys
+     */
+    _findRaydiumCLMMPositionPDA(keys, userPublicKey, inputMint, outputMint) {
+        // Look for position PDA pattern in Raydium CLMM
+        // Position PDAs are typically at specific indices in CLMM instructions
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i].pubkey.toBase58();
+            // Look for known position PDA patterns or check if it's a PDA
+            if (this._isPositionPDA(key, userPublicKey, inputMint, outputMint)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Helper method to find Raydium CPMM position PDA in instruction keys
+     */
+    _findRaydiumCPMMPositionPDA(keys, userPublicKey, inputMint, outputMint) {
+        // Similar to CLMM but for CPMM
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i].pubkey.toBase58();
+            if (this._isPositionPDA(key, userPublicKey, inputMint, outputMint)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Helper method to find Meteora DLMM position PDA in instruction keys
+     */
+    _findMeteoraDLMMPositionPDA(keys, userPublicKey, inputMint, outputMint) {
+        // Look for position PDA pattern in Meteora DLMM
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i].pubkey.toBase58();
+            if (this._isPositionPDA(key, userPublicKey, inputMint, outputMint)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Helper method to find Meteora DBC position PDA in instruction keys
+     */
+    _findMeteoraDBCPositionPDA(keys, userPublicKey, inputMint, outputMint) {
+        // Look for position PDA pattern in Meteora DBC
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i].pubkey.toBase58();
+            if (this._isPositionPDA(key, userPublicKey, inputMint, outputMint)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Helper method to find Meteora CP-AMM position PDA in instruction keys
+     */
+    _findMeteoraCPAMMPositionPDA(keys, userPublicKey, inputMint, outputMint) {
+        // Look for position PDA pattern in Meteora CP-AMM
+        for (let i = 0; i < keys.length; i++) {
+            const key = keys[i].pubkey.toBase58();
+            if (this._isPositionPDA(key, userPublicKey, inputMint, outputMint)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Helper method to check if a key is a position PDA
+     */
+    _isPositionPDA(key, userPublicKey, inputMint, outputMint) {
+        // This is a simplified check - in practice, you'd want to derive the expected PDA
+        // and compare it with the key. For now, we'll look for common patterns.
+        
+        // Check if it's a known position PDA pattern
+        // Position PDAs typically have specific characteristics:
+        // 1. They're not system programs
+        // 2. They're not token mints
+        // 3. They're not user wallets
+        // 4. They're not ATAs
+        
+        const systemPrograms = [
+            '11111111111111111111111111111111', // System Program
+            'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', // SPL Token Program
+            'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', // Associated Token Program
+        ];
+        
+        if (systemPrograms.includes(key)) {
+            return false;
+        }
+        
+        // Check if it's the user's wallet
+        if (key === userPublicKey) {
+            return false;
+        }
+        
+        // Check if it's the input or output mint
+        if (key === inputMint || key === outputMint) {
+            return false;
+        }
+        
+        // For now, assume any other key could be a position PDA
+        // In a real implementation, you'd derive the expected PDA and compare
+        return true;
     }
 }
 

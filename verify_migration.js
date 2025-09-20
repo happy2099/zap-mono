@@ -1,8 +1,8 @@
-const { DatabaseManager } = require('./database/databaseManager');
+const { dataManager } = require('./database/dataManager');
 
 class MigrationVerifier {
     constructor() {
-        this.dbManager = new DatabaseManager();
+        this.dbManager = new dataManager();
     }
 
     async initialize() {

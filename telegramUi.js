@@ -15,19 +15,19 @@ const config = require('./config.js');
 const { BOT_TOKEN, USER_WALLET_PUBKEY, MIN_SOL_AMOUNT_PER_TRADE, ADMIN_CHAT_ID } = config;
 
 class TelegramUI {
-    constructor(databaseManager, solanaManager, walletManager) {
-        if (!databaseManager || !solanaManager || !walletManager) {
+    constructor(dataManager, solanaManager, walletManager) {
+        if (!dataManager || !solanaManager || !walletManager) {
             throw new Error("TelegramUI: Missing one or more required manager modules.");
         }
         
         // Store the manager instance
-        this.databaseManager = databaseManager;
+        this.dataManager = dataManager;
         this.solanaManager = solanaManager;
         this.walletManager = walletManager;
         
         // Determine the manager type for compatibility
-        this.isDatabaseManager = typeof databaseManager.getUser === 'function' && typeof databaseManager.all === 'function';
-        this.isLegacyDataManager = typeof databaseManager.loadTraders === 'function' && typeof databaseManager.loadUsers === 'function';
+        this.isdataManager = typeof dataManager.getUser === 'function' && typeof dataManager.all === 'function';
+        this.isLegacyDataManager = typeof dataManager.loadTraders === 'function' && typeof dataManager.loadUsers === 'function';
         this.bot = null;
 
         // In-memory state
@@ -49,7 +49,7 @@ class TelegramUI {
         this.logger.info("TelegramUI initialized.");
     }
 
-    initialize() {
+    async initialize() {
         this.logger.info("BOT_TOKEN:", BOT_TOKEN ? "Set" : "Missing");
         console.log("🔍 DEBUG: BOT_TOKEN value:", BOT_TOKEN ? `${BOT_TOKEN.substring(0, 10)}...` : "undefined");
         console.log("🔍 DEBUG: BOT_TOKEN length:", BOT_TOKEN ? BOT_TOKEN.length : 0);
@@ -149,6 +149,7 @@ class TelegramUI {
                     }
                 });
                 console.log("✅ TelegramUI: Bot ready in polling mode with WSL stability");
+                
                 return true;
             }
         } catch (error) {
@@ -161,8 +162,35 @@ class TelegramUI {
         this.actionHandlers = handlers;
     }
 
+    async setupPersistentMenu() {
+        try {
+            // Set up bot commands for the menu button
+            await this.bot.setMyCommands([
+                { command: 'start', description: '🚀 Start the bot and show main menu' },
+                { command: 'menu', description: '📋 Show main menu' },
+                { command: 'help', description: '❓ Get help and support' }
+            ]);
+            
+            // Set up the persistent menu button
+            await this.bot.setChatMenuButton({
+                menu_button: {
+                    type: 'commands'
+                }
+            });
+            
+            console.log("✅ Persistent menu button configured");
+        } catch (error) {
+            console.error("❌ Failed to setup persistent menu:", error.message);
+        }
+    }
+
     setupEventListeners() {
         if (!this.bot) return;
+
+        // Set up persistent menu button after bot is ready
+        this.setupPersistentMenu().catch(error => {
+            console.error("❌ Failed to setup persistent menu:", error.message);
+        });
 
         // Command handlers
         this.bot.onText(/^\/(start|menu)$/, msg => this.handleMenuCommand(msg));
@@ -187,31 +215,14 @@ class TelegramUI {
                 });
             }
         });
-        this.bot.on('polling_error', e => {
-            console.error(`❌ Telegram Polling Error: ${e.code} - ${e.message}`);
-            
-            // Handle specific error codes
-            if (e.code === 409) {
-                console.log(`🔄 Telegram Conflict (409): Another bot instance detected. Attempting to resolve...`);
-                // Don't restart immediately, let the error handler manage it
-                setTimeout(() => {
-                    console.log(`🔄 Attempting to restart Telegram polling after conflict resolution...`);
-                    this.bot.stopPolling();
-                    setTimeout(() => {
-                        this.bot.startPolling().catch(err => {
-                            console.error(`❌ Failed to restart polling: ${err.message}`);
-                        });
-                    }, 2000);
-                }, 5000);
-            }
-        });
+        this.bot.on('polling_error', e => console.error(`❌ Telegram Polling Error: ${e.code} - ${e.message}`));
     }
 
     async requestNewUserChatId(chatId) {
         this.activeFlows.set(chatId, { type: 'admin_add_user_chat_id' });
-        const message = "➡️ *Step 1/2: Add New User*\n\n" +
-            "Please enter the unique *Telegram Chat ID* of your friend\\. " +
-            "They can get this by messaging `@userinfobot`\\.";
+        const message = "➡️ Step 1/2: Add New User\n\n" +
+            "Please enter the unique Telegram Chat ID of your friend. " +
+            "They can get this by messaging @userinfobot.";
         await this.sendOrEditMessage(chatId, message, {
             reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "admin_manage_users" }]] }
         });
@@ -251,6 +262,7 @@ async handleCallbackQuery(cb) {
             help: () => this.showHelp(chatId),
             wallets_menu: () => this.displayWalletManagerMenu(chatId),
             traders_list: () => this.showTradersList(chatId),
+            traders_menu: () => this.showTradersList(chatId), // Add missing traders_menu handler
             balance: () => this.displayWalletBalances(chatId),
             withdraw: () => this.handleWithdraw(chatId),
             add_trader: () => this.requestTraderName(chatId),
@@ -265,9 +277,6 @@ async handleCallbackQuery(cb) {
             wm_import: () => this.handleImportWalletPrompt(chatId),
     
             refresh_balances: () => this.displayWalletBalances(chatId),
-            admin_panel: () => this.showAdminPanel(chatId),
-            admin_view_activity: () => this.displayUserActivity(chatId),
-            admin_view_pnl: () => this.displayUserPnl(chatId),
         };
 
         if (simpleRoutes[data]) {
@@ -302,6 +311,7 @@ async handleCallbackQuery(cb) {
             return await this.displayWalletList(chatId); // Refresh wallet list
         }
         
+        
         console.warn(`Unhandled callback data: ${data}`);
         await this.sendErrorMessage(chatId, `Unknown action: ${data}`);
 
@@ -312,81 +322,168 @@ async handleCallbackQuery(cb) {
 }
 
 
-    async showMainMenu(chatId, messageId = null) {
-        // Load data for the specific user
-        let userSol = config.DEFAULT_SOL_TRADE_AMOUNT;
-        let userTraders = {};
-        
+    async showMainMenu(chatId, messageId = null, additionalMessage = "") {
         try {
-            if (this.isDatabaseManager) {
-                // Database approach
-                const user = await this.databaseManager.getUser(chatId);
-                if (user) {
-                    // Get SOL amount from user_trading_settings table
-                    const tradingSettings = await this.databaseManager.get('SELECT sol_amount_per_trade FROM user_trading_settings WHERE user_id = ?', [user.id]);
-                    userSol = tradingSettings?.sol_amount_per_trade || config.DEFAULT_SOL_TRADE_AMOUNT;
+            // Load data for the specific user
+            let userSol = config.DEFAULT_SOL_TRADE_AMOUNT;
+            let userTraders = {};
+            
+            try {
+                if (this.isdataManager) {
+                    // Database approach
+                    let user = await this.dataManager.getUser(chatId);
                     
+                    // If user doesn't exist, create them automatically
+                    if (!user) {
+                        this.logger.info('User not found, creating new user', { chatId });
+                        try {
+                            // Get user info from Telegram
+                            const chatMember = await this.bot.getChatMember(chatId, chatId);
+                            const userInfo = chatMember.user;
+                            
+                            // Create user with Telegram info
+                            const userId = await this.dataManager.createUser(chatId, {
+                                firstName: userInfo.first_name || null,
+                                lastName: userInfo.last_name || null,
+                                telegramUsername: userInfo.username || null,
+                                isActive: true,
+                                isAdmin: false
+                            });
+                            
+                            // Get the newly created user
+                            user = await this.dataManager.getUser(chatId);
+                            this.logger.info('Created new user successfully', { chatId, userId, username: userInfo.username });
+                        } catch (error) {
+                            this.logger.error('Failed to create user, using minimal data', { chatId, error: error.message });
+                            // Fallback: create user with minimal data
+                            const userId = await this.dataManager.createUser(chatId, {
+                                firstName: 'User',
+                                isActive: true,
+                                isAdmin: false
+                            });
+                            user = await this.dataManager.getUser(chatId);
+                        }
+                    }
+                    
+                    if (user) {
+                        // Get SOL amount from user settings
+                        const userSettings = await this.dataManager.getUserSettings(chatId);
+                        userSol = userSettings.solAmount || config.DEFAULT_SOL_TRADE_AMOUNT;
+                        
+                        const traders = await this.dataManager.getTraders(chatId);
+                        userTraders = {};
+                        traders.forEach(trader => {
+                            userTraders[trader.name] = {
+                                wallet: trader.wallet,
+                                active: trader.active === true || trader.active === 1,
+                                addedAt: trader.created_at
+                            };
+                        });
+                    }
+                } else if (this.isLegacyDataManager) {
+                    // Legacy dataManager approach
+                    const solAmounts = await this.dataManager.loadSolAmounts();
+                    userSol = solAmounts[String(chatId)] || solAmounts.default || config.DEFAULT_SOL_TRADE_AMOUNT;
 
-                    
-                    const traders = await this.databaseManager.getTraders(chatId);
+                    // Use the same logic as the first branch to process traders correctly
+                    const traders = await this.dataManager.getTraders(chatId);
                     userTraders = {};
                     traders.forEach(trader => {
                         userTraders[trader.name] = {
                             wallet: trader.wallet,
-                            active: trader.active === 1,
+                            active: trader.active === true || trader.active === 1,
                             addedAt: trader.created_at
                         };
                     });
                 }
-            } else if (this.isLegacyDataManager) {
-                // Legacy dataManager approach
-                const solAmounts = await this.databaseManager.loadSolAmounts();
-                userSol = solAmounts[String(chatId)] || solAmounts.default || config.DEFAULT_SOL_TRADE_AMOUNT;
-
-                const settings = await this.databaseManager.loadSettings();
-                const userSettings = settings.userSettings?.[String(chatId)] || {};
-
-                
-                userTraders = await this.databaseManager.loadTraders(chatId);
+            } catch (error) {
+                console.error('Error loading user data for main menu:', error);
             }
-        } catch (error) {
-            console.error('Error loading user data for main menu:', error);
-        }
 
-        // Get user-specific wallet count from database
-        const userWalletCount = await this.walletManager.getTradingWalletCount(chatId);
-        const activeTradersCount = Object.values(userTraders).filter(t => t.active).length;
-        const totalTradersCount = Object.values(userTraders).length;
-        const message = `*🚀 ZapTrade Bot Menu*\n\n` +
-             `📊 Your Active Copies: *${activeTradersCount} / ${totalTradersCount} trader\\(s\\) active*\n`+ 
-             `💰 Your Trade Size: *${escapeMarkdownV2(userSol.toFixed(4) + ' SOL')}\\.*\n` +
-            `💼 Your Wallets: *${userWalletCount}*\n\n` +
-            `Choose an action:`;
+            // Get user-specific wallet count from database
+            const userWalletCount = await this.walletManager.getTradingWalletCount(chatId);
+            const activeTradersCount = Object.values(userTraders).filter(t => t.active).length;
+            const totalTradersCount = Object.values(userTraders).length;
+            
+            // Debug logging removed for cleaner logs
 
-        const keyboard = [
-            [{ text: "▶️ Start Copy", callback_data: "start_copy" }, { text: "⛔ Stop Copy", callback_data: "stop_copy" }],
-            [{ text: "➕ Add Trader", callback_data: "add_trader" }, { text: "❌ Remove Trader", callback_data: "remove_trader" }],
-            [{ text: "💼 My Wallets", callback_data: "wallets_menu" }, { text: "💰 My Balances", callback_data: "balance" }],
-            [{ text: "📋 List Traders", callback_data: "traders_list" }, { text: "💸 Withdraw", callback_data: "withdraw" }],
-            [{ text: "💲 Set SOL Amt", callback_data: "set_sol" }, { text: "⚙️ Reset Bot", callback_data: "reset_all" }]
-        ];
-        // Admins get a special button
-        try {
-            const user = await this.databaseManager.getUser(chatId);
-            if (user && user.is_admin === 1) {
-                keyboard.push([{ text: "👑 Admin Panel", callback_data: "admin_panel" }]);
+            // Build clean, professional message with better formatting
+            let message = additionalMessage ? `_${escapeMarkdownV2(additionalMessage)}_\n\n` : "";
+            
+            // Header with nice styling
+            message += `┌─────────────────────────┐\n`;
+            message += `│    *🚀 ZAP TRADE BOT*   │\n`;
+            message += `└─────────────────────────┘\n\n`;
+            
+            // Status section with clean formatting
+            message += `📊 *TRADING STATUS*\n`;
+            message += `├ Active Traders: \`${activeTradersCount}/${totalTradersCount}\`\n`;
+            message += `├ Trade Amount: \`${userSol.toFixed(4)} SOL\`\n`;
+            message += `└ Wallets: \`${userWalletCount}\`\n\n`;
+            
+            message += `🎯 *SELECT ACTION:*`;
+
+            const keyboard = [
+                // Row 1: Primary Actions (Start/Stop)
+                [
+                    { text: "🟢 START COPY", callback_data: "start_copy" }, 
+                    { text: "🔴 STOP COPY", callback_data: "stop_copy" }
+                ],
+                // Row 2: Trader Management  
+                [
+                    { text: "👤 Add Trader", callback_data: "add_trader" }, 
+                    { text: "🗑️ Remove Trader", callback_data: "remove_trader" }
+                ],
+                // Row 3: Wallet Operations
+                [
+                    { text: "💼 Wallets", callback_data: "wallets_menu" }, 
+                    { text: "💰 Balances", callback_data: "balance" }
+                ],
+                // Row 4: Information
+                [
+                    { text: "📋 List Traders", callback_data: "traders_list" }, 
+                    { text: "💸 Withdraw", callback_data: "withdraw" }
+                ],
+                // Row 5: Configuration
+                [
+                    { text: "⚙️ Set SOL Amount", callback_data: "set_sol" }, 
+                    { text: "🔧 Settings", callback_data: "reset_all" }
+                ],
+                // Row 6: Help
+                [
+                    { text: "❓ Help & Support", callback_data: "help" }
+                ]
+            ];
+            
+            // Admins get a special button
+            try {
+                const user = await this.dataManager.getUser(chatId);
+                if (user && user.is_admin === 1) {
+                    keyboard.push([{ text: "👑 Admin Panel", callback_data: "admin_panel" }]);
+                }
+            } catch (error) {
+                console.error('Error checking admin status for menu:', error);
             }
+            
+            await this.sendOrEditMessage(chatId, message, { 
+                reply_markup: { inline_keyboard: keyboard }, 
+                parse_mode: 'MarkdownV2' 
+            }, messageId);
+
         } catch (error) {
-            console.error('Error checking admin status for menu:', error);
+            console.error(`❌ Error showing main menu for chat ${chatId}:`, error);
+            // Attempt to send a very simple fallback message
+            try { 
+                await this.bot.sendMessage(chatId, "Error displaying menu. Please try /start again."); 
+            } catch { }
         }
-        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } }, messageId);
     }
 
 
     async showAdminPanel(chatId) {
         // A safety check to ensure only the admin can access this.
         try {
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user || user.is_admin !== 1) {
                 return this.showMainMenu(chatId);
             }
@@ -413,7 +510,7 @@ async handleCallbackQuery(cb) {
     async displayUserActivity(chatId) {
         // Double-check admin privileges
         try {
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user || user.is_admin !== 1) return;
         } catch (error) {
             console.error('Error checking admin status:', error);
@@ -425,14 +522,14 @@ async handleCallbackQuery(cb) {
         let allSettings = { userSettings: {} };
 
         try {
-            if (this.databaseManager && typeof this.databaseManager.loadTraders === 'function') {
-                // Legacy databaseManager approach
-                allTraders = await this.databaseManager.loadTraders();
-                allSettings = await this.databaseManager.loadSettings();
-            } else if (this.databaseManager && typeof this.databaseManager.all === 'function') {
+            if (this.dataManager && typeof this.dataManager.loadTraders === 'function') {
+                // Legacy dataManager approach
+                allTraders = await this.dataManager.loadTraders();
+                allSettings = await this.dataManager.loadSettings();
+            } else if (this.dataManager && typeof this.dataManager.all === 'function') {
                 // Database approach
-                const traders = await this.databaseManager.all('SELECT * FROM traders WHERE active = 1');
-                const users = await this.databaseManager.all('SELECT * FROM users');
+                const traders = await this.dataManager.all('SELECT * FROM traders WHERE active = 1');
+                const users = await this.dataManager.all('SELECT * FROM users');
                 
                 allTraders = {};
                 traders.forEach(trader => {
@@ -440,7 +537,7 @@ async handleCallbackQuery(cb) {
                     if (user) {
                         allTraders[trader.name] = {
                             wallet: trader.wallet,
-                            active: trader.active === 1,
+                            active: trader.active === true || trader.active === 1,
                             chatId: user.chat_id,
                             addedAt: trader.created_at
                         };
@@ -494,7 +591,7 @@ async handleCallbackQuery(cb) {
 
     async displayUserPnl(chatId) {
         try {
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user || user.is_admin !== 1) return;
         } catch (error) {
             console.error('Error checking admin status:', error);
@@ -513,12 +610,12 @@ async handleCallbackQuery(cb) {
         // Get user positions from database
         let allUserPositions = new Map();
         try {
-            if (this.databaseManager && this.databaseManager.userPositions) {
-                // Legacy databaseManager approach
-                allUserPositions = this.databaseManager.userPositions;
-            } else if (this.databaseManager && typeof this.databaseManager.all === 'function') {
+            if (this.dataManager && this.dataManager.userPositions) {
+                // Legacy dataManager approach
+                allUserPositions = this.dataManager.userPositions;
+            } else if (this.dataManager && typeof this.dataManager.all === 'function') {
                 // Database approach - get positions from user settings
-                const users = await this.databaseManager.all('SELECT * FROM users');
+                const users = await this.dataManager.all('SELECT * FROM users');
                 allUserPositions = new Map();
                 
                 users.forEach(user => {
@@ -618,12 +715,12 @@ async handleCallbackQuery(cb) {
     async showUserSelectionForActivity(chatId) {
         let users = {};
         try {
-            if (this.databaseManager && typeof this.databaseManager.loadUsers === 'function') {
-                // Legacy databaseManager approach
-                users = await this.databaseManager.loadUsers();
-            } else if (this.databaseManager && typeof this.databaseManager.all === 'function') {
+            if (this.dataManager && typeof this.dataManager.loadUsers === 'function') {
+                // Legacy dataManager approach
+                users = await this.dataManager.loadUsers();
+            } else if (this.dataManager && typeof this.dataManager.all === 'function') {
                 // Database approach
-                const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+                const dbUsers = await this.dataManager.all('SELECT * FROM users');
                 users = {};
                 dbUsers.forEach(user => {
                     const userSettings = JSON.parse(user.settings || '{}');
@@ -664,12 +761,12 @@ async handleCallbackQuery(cb) {
     }
 
 async showTradersList(chatId) {
-    // Use database instead of databaseManager
+    // Use database instead of dataManager
     let userTraders = {};
     try {
         // Always use database approach
         this.logger.debug(`Loading traders for chatId: ${chatId}`);
-        const traders = await this.databaseManager.getTraders(chatId);
+        const traders = await this.dataManager.getTraders(chatId);
         this.logger.debug(`Found ${traders.length} traders for chatId: ${chatId}`);
         
         // Convert traders to the expected format
@@ -677,7 +774,7 @@ async showTradersList(chatId) {
         traders.forEach(trader => {
             userTraders[trader.name] = {
                 wallet: trader.wallet,
-                active: trader.active === 1,
+                active: trader.active === true || trader.active === 1,
                 addedAt: trader.created_at
             };
         });
@@ -698,11 +795,11 @@ async showTradersList(chatId) {
         // Get SOL amount for this user
         let solAmt = config.DEFAULT_SOL_TRADE_AMOUNT;
         try {
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (user) {
-                // Get SOL amount from user_trading_settings table
-                const tradingSettings = await this.databaseManager.get('SELECT sol_amount_per_trade FROM user_trading_settings WHERE user_id = ?', [user.id]);
-                solAmt = tradingSettings?.sol_amount_per_trade || config.DEFAULT_SOL_TRADE_AMOUNT;
+                // Get SOL amount from user settings
+                const userSettings = await this.dataManager.getUserSettings(chatId);
+                solAmt = userSettings.solAmount || config.DEFAULT_SOL_TRADE_AMOUNT;
             }
         } catch (error) {
             console.error('Error loading SOL amount for traders list:', error);
@@ -740,12 +837,12 @@ async showTradersMenu(chatId, action) {
     // Always use database approach
     let userTraders = {};
     try {
-        const traders = await this.databaseManager.getTraders(chatId);
+        const traders = await this.dataManager.getTraders(chatId);
         userTraders = {};
         traders.forEach(trader => {
             userTraders[trader.name] = {
                 wallet: trader.wallet,
-                active: trader.active === 1,
+                active: trader.active === true || trader.active === 1,
                 addedAt: trader.created_at
             };
         });
@@ -761,27 +858,30 @@ async showTradersMenu(chatId, action) {
             title = "▶️ Select Trader to START";
             filterFn = ([, t]) => !t.active;
             cbPrefix = "start_";
-            emptyMsg = "_All your traders are already active\\._";
-            header = "*Select one of your inactive traders:*";
+            emptyMsg = "All your traders are already active.";
+            header = "Select one of your inactive traders:";
             break;
         case 'stop':
             title = "⛔ Select Trader to STOP";
             filterFn = ([, t]) => t.active;
             cbPrefix = "stop_";
-            emptyMsg = "_You have no active traders to stop\\._";
-            header = "*Select one of your active traders:*";
+            emptyMsg = "You have no active traders to stop.";
+            header = "Select one of your active traders:";
             break;
         case 'remove':
             title = "🗑️ Select Trader to REMOVE";
             filterFn = () => true;
             cbPrefix = "remove_";
-            emptyMsg = "_You have no traders configured\\._";
-            header = "*Select any of your traders to remove:*";
+            emptyMsg = "You have no traders configured.";
+            header = "Select any of your traders to remove:";
             break;
         default: return;
     }
 
     const filteredTraders = Object.entries(userTraders).filter(filterFn);
+    
+    // Sort traders alphabetically by name
+    filteredTraders.sort(([nameA], [nameB]) => nameA.localeCompare(nameB));
     
     // THE FIX: We don't escape our own headers.
     let message = `*${escapeMarkdownV2(title)}*\\n\\n${header}`;
@@ -805,14 +905,19 @@ async showTradersMenu(chatId, action) {
 }
  
     async displayWalletManagerMenu(chatId) {
-        const message = `*💼 Wallet Manager*\n\nManage wallets used for copy trading\\.`;
+        const message = `*💼 Wallet Manager*\n\nManage wallets used for copy trading\\.\nWithdrawals use the separate Bot Wallet defined in \`.env\`\\.`;
         const keyboard = [
-            [{ text: "👁️ List/Delete Wallets", callback_data: "wm_view" }, { text: "💰 Check Balances", callback_data: "balance" }],
-            [{ text: "➕ Add New Wallet", callback_data: "wm_add" }],
+            [{ text: "👁️ List Trading Wallets", callback_data: "wm_view" }, { text: "💰 Check Balances", callback_data: "balance" }],
+            [{ text: "➕ Add New Trading Wallet", callback_data: "wm_add" }],
+            [{ text: "🔄 Refresh All Balances", callback_data: "refresh_balances" }],
             [{ text: "🔙 Main Menu", callback_data: "main_menu" }]
         ];
-        await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard } });
+        await this.sendOrEditMessage(chatId, message, { 
+            reply_markup: { inline_keyboard: keyboard },
+            parse_mode: "MarkdownV2"
+        });
     }
+
 
     async displaySettingsMenu(chatId) {
         const message = `*⚙️ Settings & Reset*\n\nManage bot-wide settings or reset data\\.`;
@@ -825,59 +930,82 @@ async showTradersMenu(chatId, action) {
     }
 
     async displayWalletBalances(chatId) {
-        await this.sendOrEditMessage(chatId, "⏳ Fetching wallet balances\\.\\.\\.", {});
+        await this.sendOrEditMessage(chatId, "⏳ Fetching wallet balances...", {});
 
         try {
             // Get user's wallets from database
-            const userWallets = await this.databaseManager.getUserWallets(chatId);
+            const userWallets = await this.dataManager.getUserWallets(chatId);
             
             const botBalance = await this.solanaManager.getSOLBalance(config.USER_WALLET_PUBKEY); 
 
-            // Escape "n" properly if you have it in string literals.
-            let message = `*💰 Wallet Balances*\n\n`;
+            // Create clean, readable message
+            let message = `💰 Wallet Balances\n\n`;
             let totalSol = 0;
 
-            const botBalStr = botBalance !== null ? `*${escapeMarkdownV2(botBalance.toFixed(4))} SOL*` : '_N/A_';
-            message += `🤖 *Bot Wallet*: ${botBalStr}\n\n*Your Wallets:*\n`;
+            // Bot wallet section
+            const botBalStr = botBalance !== null ? `${botBalance.toFixed(4)} SOL` : 'N/A';
+            message += `🤖 Bot Wallet: ${botBalStr}\n\n`;
 
+            // User wallets section
             if (userWallets.length === 0) {
-                message += "_No trading wallets configured\\._";
+                message += `📱 Your Wallets:\n`;
+                message += `No trading wallets configured\n\n`;
             } else {
+                message += `📱 Your Wallets:\n\n`;
+                
                 // Update balances for each wallet
                 for (const wallet of userWallets) {
                     try {
                         const balance = await this.solanaManager.getSOLBalance(wallet.public_key);
-                        await this.databaseManager.updateWalletBalance(wallet.id, balance);
+                        await this.dataManager.updateWalletBalance(wallet.id, balance);
                         
-                        const balStr = escapeMarkdownV2((balance || 0).toFixed(4));
-                        message += `\n📈 *${escapeMarkdownV2(wallet.label)}*\n` + 
-                                   `   Addr: \`${escapeMarkdownV2(wallet.public_key)}\`\n` +
-                                   `   Balance: *${balStr} SOL*\n`;
+                        // Clean wallet display with shortened address
+                        const shortAddr = wallet.public_key.length > 20 ? 
+                            `${wallet.public_key.substring(0, 8)}...${wallet.public_key.substring(wallet.public_key.length - 8)}` : 
+                            wallet.public_key;
+                        
+                        message += `${wallet.label}\n`;
+                        message += `${shortAddr}\n`;
+                        message += `${(balance || 0).toFixed(4)} SOL\n\n`;
+                        
                         totalSol += (balance || 0);
                     } catch (error) {
                         console.error(`Error fetching balance for wallet ${wallet.label}:`, error);
-                        const balStr = escapeMarkdownV2((wallet.balance || 0).toFixed(4));
-                        message += `\n📈 *${escapeMarkdownV2(wallet.label)}*\n` + 
-                                   `   Addr: \`${escapeMarkdownV2(wallet.public_key)}\`\n` +
-                                   `   Balance: *${balStr} SOL* \\(cached\\)\n`;
+                        
+                        // Fallback to cached balance
+                        const shortAddr = wallet.public_key.length > 20 ? 
+                            `${wallet.public_key.substring(0, 8)}...${wallet.public_key.substring(wallet.public_key.length - 8)}` : 
+                            wallet.public_key;
+                        
+                        message += `${wallet.label}\n`;
+                        message += `${shortAddr}\n`;
+                        message += `${(wallet.balance || 0).toFixed(4)} SOL (cached)\n\n`;
+                        
                         totalSol += (wallet.balance || 0);
                     }
                 }
-                message += `\n💎 *Total Balance:* *${escapeMarkdownV2(totalSol.toFixed(4) + ' SOL')}*`; // Final sum message// Final sum message
             }
+            
+            // Total balance section
+            message += `Total Balance: ${totalSol.toFixed(4)} SOL`;
 
-            const keyboard = [[{ text: "🔄 Refresh", callback_data: "balance" }, { text: "🔙 Main Menu", callback_data: "main_menu" }]];
-            await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: keyboard }, disable_web_page_preview: true });
+            const keyboard = [
+                [{ text: "🔄 Refresh", callback_data: "refresh_balances" }],
+                [{ text: "🔙 Main Menu", callback_data: "main_menu" }]
+            ];
+            
+            await this.sendOrEditMessage(chatId, message, { 
+                reply_markup: { inline_keyboard: keyboard }
+            });
         } catch (error) {
             console.error("[Balance Display] Error fetching balances:", error);
-            await this.sendErrorMessage(chatId, "Failed to fetch balances\\. Please check logs and try again\\.");
+            await this.sendErrorMessage(chatId, "Failed to fetch balances. Please check logs and try again.");
         }
     }
 
     async handleWithdraw(chatId) {
         this.activeFlows.set(chatId, { type: 'withdraw_amount' });
-        const message = `💸 *Withdraw SOL from Bot Wallet*\n\n` +
-            `Please enter the amount of SOL to withdraw\\.`;
+        const message = `💸 Withdraw SOL from Bot Wallet\n\nPlease enter the amount of SOL to withdraw.`;
         await this.sendOrEditMessage(chatId, message, {
             reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "main_menu" }]] }
         });
@@ -885,25 +1013,39 @@ async showTradersMenu(chatId, action) {
 
    async displayWalletList(chatId) {
         try {
-            // Get user's wallets directly from the database
-            const userWallets = await this.databaseManager.getUserWallets(chatId);
+            // Update balances before display for fresh info
+            await this.walletManager.updateAllBalances(true); // Force refresh
             
-            let message = `*💼 Your Trading Wallets*\n\n`; // Add extra newline for spacing
+            // Get user's wallets directly from the database
+            const userWallets = await this.dataManager.getUserWallets(chatId);
+            const tradingWallets = userWallets; // All wallets in user_wallets table are trading wallets
+            
+            let message = `💼 Trading Wallets\n`;
             let buttons = [];
 
-            if (userWallets.length === 0) { // Check the length of YOUR user's wallets
-                message += "_You have no trading wallets\\. Use the 'Add' button to create one\\._";
+            if (tradingWallets.length === 0) {
+                message += "\nNo trading wallets configured. Use '➕ Add Wallet' to generate or import one.";
+                buttons.push([{ text: "➕ Add Wallet", callback_data: "wm_add" }]);
+                buttons.push([{ text: "🔙 Back to Wallet Menu", callback_data: "wallets_menu" }]);
             } else {
-                userWallets.sort((a, b) => a.label.localeCompare(b.label)).forEach(w => {
-                    const balStr = escapeMarkdownV2((w.balance || 0).toFixed(4));
-                    message += `📈 *${escapeMarkdownV2(w.label)}*\n` + // Newline after label with primary indicator
-                               `   Addr: \`${escapeMarkdownV2(w.public_key)}\`\n` + // Properly escaped address, and consistent newline
-                               `   Balance: *${balStr} SOL*\n\n`; // Extra newline for spacing between wallets
-                    buttons.push([{ text: `🗑️ Delete ${w.label}`, callback_data: `delete_wallet_${w.label}` }]);
+                message += "\n(Balances refreshed)\n";
+                
+                tradingWallets.sort((a, b) => a.label.localeCompare(b.label)).forEach(wallet => {
+                    const balance = wallet.balance || 0;
+                    const balanceStr = balance.toFixed(4);
+                    message += `${wallet.label}\n`;
+                    message += `Balance: ${balanceStr} SOL\n\n`;
+                    buttons.push([{ text: `🗑️ Delete ${wallet.label}`, callback_data: `delete_wallet_${wallet.label}` }]);
                 });
+                
+                buttons.push([{ text: "🔄 Refresh Balances", callback_data: "wm_view" }]);
+                buttons.push([{ text: "🔙 Back to Wallet Menu", callback_data: "wallets_menu" }]);
             }
-            buttons.push([{ text: "🔙 Back", callback_data: "wallets_menu" }]);
-            await this.sendOrEditMessage(chatId, message, { reply_markup: { inline_keyboard: buttons }, disable_web_page_preview: true });
+            
+            await this.sendOrEditMessage(chatId, message, { 
+                reply_markup: { inline_keyboard: buttons }, 
+                disable_web_page_preview: true 
+            });
         } catch (error) {
             console.error("[Wallet List] Error displaying wallet list:", error);
             await this.sendErrorMessage(chatId, "Error displaying wallet list.");
@@ -935,21 +1077,39 @@ async showTradersMenu(chatId, action) {
     }
 
     async handleDeleteWalletConfirmation(chatId, walletLabel) {
-        const message = `🚨 *Confirm Deletion* 🚨\n\nAre you sure you want to delete wallet **${escapeMarkdownV2(walletLabel)}**\\? This is irreversible\\!`;
+        console.log(`[DeleteWallet] Confirmation requested for: ${walletLabel} by chat ${chatId}`);
+        
+        // Check if wallet still exists
+        const userWallets = await this.dataManager.getUserWallets(chatId);
+        const wallet = userWallets.find(w => w.label === walletLabel);
+        
+        if (!wallet) {
+            await this.sendErrorMessage(chatId, `Wallet "${walletLabel}" not found. Maybe already deleted?`);
+            return await this.displayWalletList(chatId); // Refresh list
+        }
+
+        const message = `🚨 Confirm Deletion 🚨\n\n` +
+            `Are you absolutely sure you want to permanently delete trading wallet ${walletLabel}?\n\n` +
+            `⚠️ This action CANNOT be undone! The private key stored in the bot for this wallet WILL BE LOST unless you have it saved elsewhere!\n\n` +
+            `Funds on the blockchain are safe, but access via the bot will be removed.`;
+
+        const keyboard = [
+            [
+                { text: `🗑️ YES, Delete ${walletLabel}`, callback_data: `confirm_delete_wallet_${walletLabel}` },
+                { text: `❌ NO, Cancel`, callback_data: `wm_view` }
+            ]
+        ];
+
         await this.sendOrEditMessage(chatId, message, {
-            reply_markup: {
-                inline_keyboard: [
-                    [{ text: `🗑️ YES, Delete`, callback_data: `confirm_delete_wallet_${walletLabel}` }],
-                    [{ text: `❌ NO, Cancel`, callback_data: `wm_view` }]
-                ]
-            }
+            parse_mode: "MarkdownV2",
+            reply_markup: { inline_keyboard: keyboard }
         });
     }
 
     async handleResetConfirmation(chatId) {
         this.activeFlows.set(chatId, { type: 'confirm_reset' });
-        const message = `🚨 *WARNING: IRREVERSIBLE ACTION* 🚨\n\n` +
-            `This will delete ALL bot data, including wallets\\. To confirm, type the phrase \`RESET NOW\` exactly\\.`;
+        const message = `🚨 WARNING: IRREVERSIBLE ACTION 🚨\n\n` +
+            `This will delete ALL bot data, including wallets. To confirm, type the phrase RESET NOW exactly.`;
         await this.sendOrEditMessage(chatId, message, {
             reply_markup: {
                 inline_keyboard: [[{ text: "❌ Cancel Reset", callback_data: "main_menu" }]]
@@ -959,7 +1119,7 @@ async showTradersMenu(chatId, action) {
 
     async requestTraderName(chatId) {
         this.activeFlows.set(chatId, { type: 'add_trader_name' });
-        await this.sendOrEditMessage(chatId, "✏️ Enter a unique *NAME* for the trader\\.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "main_menu" }]] } });
+        await this.sendOrEditMessage(chatId, "✏️ Enter a unique NAME for the trader.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "main_menu" }]] } });
     }
 
     async requestSolAmount(chatId) {
@@ -967,13 +1127,13 @@ async showTradersMenu(chatId, action) {
         
         let currentAmount = config.DEFAULT_SOL_TRADE_AMOUNT;
         try {
-            if (this.databaseManager && typeof this.databaseManager.loadSolAmounts === 'function') {
-                // Legacy databaseManager approach
-        const amounts = await this.databaseManager.loadSolAmounts();
+            if (this.dataManager && typeof this.dataManager.loadSolAmounts === 'function') {
+                // Legacy dataManager approach
+        const amounts = await this.dataManager.loadSolAmounts();
                 currentAmount = amounts[String(chatId)] || amounts.default;
-            } else if (this.databaseManager && typeof this.databaseManager.getUser === 'function') {
+            } else if (this.dataManager && typeof this.dataManager.getUser === 'function') {
                 // Database approach
-                const user = await this.databaseManager.getUser(chatId);
+                const user = await this.dataManager.getUser(chatId);
                 if (user) {
                     const userSettings = JSON.parse(user.settings || '{}');
                     currentAmount = userSettings.solAmount || config.DEFAULT_SOL_TRADE_AMOUNT;
@@ -983,18 +1143,18 @@ async showTradersMenu(chatId, action) {
             console.error('Error loading SOL amount:', error);
         }
         
-        const msg = `💲 Enter the *SOL* amount per trade \\(Current: ${escapeMarkdownV2(currentAmount)}\\)\\. Minimum: ${escapeMarkdownV2(MIN_SOL_AMOUNT_PER_TRADE)}\\.`;
+        const msg = `💲 Enter the SOL amount per trade\n\nCurrent: ${currentAmount} SOL\nMinimum: ${MIN_SOL_AMOUNT_PER_TRADE} SOL`;
         await this.sendOrEditMessage(chatId, msg, { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "main_menu" }]] } });
     }
 
     async handleImportWalletPrompt(chatId) {
         this.activeFlows.set(chatId, { type: 'add_wallet_label', action: 'import' });
-        await this.sendOrEditMessage(chatId, "✏️ Enter a *LABEL* for the wallet you are importing\\.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "wallets_menu" }]] } });
+        await this.sendOrEditMessage(chatId, "✏️ Enter a LABEL for the wallet you are importing.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "wallets_menu" }]] } });
     }
 
     async handleGenerateWallet(chatId) {
         this.activeFlows.set(chatId, { type: 'add_wallet_label', action: 'generate' });
-        await this.sendOrEditMessage(chatId, "✏️ Enter a *LABEL* for the new wallet to generate\\.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "wallets_menu" }]] } });
+        await this.sendOrEditMessage(chatId, "✏️ Enter a LABEL for the new wallet to generate.", { reply_markup: { inline_keyboard: [[{ text: "❌ Cancel", callback_data: "wallets_menu" }]] } });
     }
 
    async handleFlowInput(msg) {
@@ -1006,17 +1166,17 @@ async showTradersMenu(chatId, action) {
         switch (flow.type) {
             case 'add_trader_name':
                 const traderName = text.trim();
-                if (!traderName) throw new Error("Trader name cannot be empty\\.");
+                if (!traderName) throw new Error("Trader name cannot be empty.");
                 
                 // Check if trader name already exists
                 let traders = {};
                 try {
-                    if (this.databaseManager && typeof this.databaseManager.loadTraders === 'function') {
-                        // Legacy databaseManager approach
-                        traders = await this.databaseManager.loadTraders();
-                    } else if (this.databaseManager && typeof this.databaseManager.all === 'function') {
+                    if (this.dataManager && typeof this.dataManager.loadTraders === 'function') {
+                        // Legacy dataManager approach
+                        traders = await this.dataManager.loadTraders();
+                    } else if (this.dataManager && typeof this.dataManager.all === 'function') {
                         // Database approach - check all traders for this user
-                        const userTraders = await this.databaseManager.getTraders(chatId);
+                        const userTraders = await this.dataManager.getTraders(chatId);
                         traders = {};
                         userTraders.forEach(trader => {
                             traders[trader.name] = trader;
@@ -1046,7 +1206,7 @@ async showTradersMenu(chatId, action) {
                         console.warn(`[TelegramUI] Could not delete user message: ${e.message}`);
                     }
                 } catch (e) {
-                    throw new Error("Invalid Solana wallet address\\. Please try again\\.");
+                    throw new Error("Invalid Solana wallet address. Please try again.");
                 }
                 break;
 
@@ -1056,18 +1216,18 @@ async showTradersMenu(chatId, action) {
 
                 // --- UPGRADED SAVE LOGIC ---
                 try {
-                    if (this.databaseManager && typeof this.databaseManager.loadSolAmounts === 'function') {
-                        // Legacy databaseManager approach
-                const amounts = await this.databaseManager.loadSolAmounts();
+                    if (this.dataManager && typeof this.dataManager.loadSolAmounts === 'function') {
+                        // Legacy dataManager approach
+                const amounts = await this.dataManager.loadSolAmounts();
                         amounts[String(chatId)] = amount;
-                await this.databaseManager.saveSolAmounts(amounts);
-                    } else if (this.databaseManager && typeof this.databaseManager.updateUserSettings === 'function') {
+                await this.dataManager.saveSolAmounts(amounts);
+                    } else if (this.dataManager && typeof this.dataManager.updateUserSettings === 'function') {
                         // Database approach
-                        const user = await this.databaseManager.getUser(chatId);
+                        const user = await this.dataManager.getUser(chatId);
                         if (user) {
                             const userSettings = JSON.parse(user.settings || '{}');
                             userSettings.solAmount = amount;
-                            await this.databaseManager.updateUserSettings(chatId, userSettings);
+                            await this.dataManager.updateUserSettings(chatId, userSettings);
                         }
                     }
                 } catch (error) {
@@ -1103,11 +1263,11 @@ async showTradersMenu(chatId, action) {
 
             case 'add_wallet_label':
                 const label = text.trim();
-                if (!label) throw new Error("Label cannot be empty\\.");
+                if (!label) throw new Error("Label cannot be empty.");
 
                 if (flow.action === 'import') {
                     this.activeFlows.set(chatId, { type: 'add_wallet_privatekey', label: label });
-                    await this.sendOrEditMessage(chatId, `🔑 Now paste the Base58 *PRIVATE KEY* for wallet "${escapeMarkdownV2(label)}":`);
+                    await this.sendOrEditMessage(chatId, `🔑 Now paste the Base58 PRIVATE KEY for wallet "${label}":`);
                 } else if (flow.action === 'generate') {
                     await this.actionHandlers.onGenerateWallet(chatId, label);
                     this.activeFlows.delete(chatId);
@@ -1158,12 +1318,12 @@ async showTradersMenu(chatId, action) {
                 // Store the amount and ask for address
                 const withdrawAmount = parseFloat(text.trim());
                 if (isNaN(withdrawAmount) || withdrawAmount <= 0) {
-                    await this.sendErrorMessage(chatId, "Please enter a valid SOL amount greater than 0\\.");
+                    await this.sendErrorMessage(chatId, "Please enter a valid SOL amount greater than 0.");
                     return;
                 }
                 this.activeFlows.set(chatId, { type: 'withdraw_address', amount: withdrawAmount });
-                await this.sendOrEditMessage(chatId, `💸 *Withdraw ${withdrawAmount} SOL*\n\n` +
-                    `Please enter the destination Solana address\\.`);
+                await this.sendOrEditMessage(chatId, `💸 Withdraw ${withdrawAmount} SOL\n\n` +
+                    `Please enter the destination Solana address.`);
                 break;
 
             case 'withdraw_address':
@@ -1185,30 +1345,30 @@ async showTradersMenu(chatId, action) {
             case 'admin_add_user_chat_id':
                 const userId = text.trim();
                 if (!/^\d+$/.test(userId)) {
-                    throw new Error("Invalid Chat ID\\. It should only contain numbers\\.");
+                    throw new Error("Invalid Chat ID. It should only contain numbers.");
                 }
                 this.activeFlows.set(chatId, { type: 'admin_add_user_username', userId: userId });
-                await this.sendOrEditMessage(chatId, `➡️ *Step 2/2: Set Username*\n\n` +
-                    `Chat ID set to \`${escapeMarkdownV2(userId)}\`\\. Now, enter a unique username for this person \\(e\\.g\\., 'Rahul'\\)\\.`);
+                await this.sendOrEditMessage(chatId, `➡️ Step 2/2: Set Username\n\n` +
+                    `Chat ID set to ${userId}. Now, enter a unique username for this person (e.g., 'Rahul').`);
                 break;
 
             case 'admin_add_user_username':
                 const username = text.trim();
-                if (!username) throw new Error("Username cannot be empty\\.");
+                if (!username) throw new Error("Username cannot be empty.");
 
                 try {
-                    if (this.databaseManager && typeof this.databaseManager.loadUsers === 'function') {
-                        // Legacy databaseManager approach
-                const users = await this.databaseManager.loadUsers();
+                    if (this.dataManager && typeof this.dataManager.loadUsers === 'function') {
+                        // Legacy dataManager approach
+                const users = await this.dataManager.loadUsers();
                         users[flow.userId] = username;
-                await this.databaseManager.saveUsers(users);
-                    } else if (this.databaseManager && typeof this.databaseManager.updateUserSettings === 'function') {
+                await this.dataManager.saveUsers(users);
+                    } else if (this.dataManager && typeof this.dataManager.updateUserSettings === 'function') {
                         // Database approach
-                        const user = await this.databaseManager.getUser(flow.userId);
+                        const user = await this.dataManager.getUser(flow.userId);
                         if (user) {
                             const userSettings = JSON.parse(user.settings || '{}');
                             userSettings.username = username;
-                            await this.databaseManager.updateUserSettings(flow.userId, userSettings);
+                            await this.dataManager.updateUserSettings(flow.userId, userSettings);
                         }
                     }
                 } catch (error) {
@@ -1244,12 +1404,12 @@ async showTradersMenu(chatId, action) {
     async showUserRemovalList(chatId) {
         let users = {};
         try {
-            if (this.databaseManager && typeof this.databaseManager.loadUsers === 'function') {
-                // Legacy databaseManager approach
-                users = await this.databaseManager.loadUsers();
-            } else if (this.databaseManager && typeof this.databaseManager.all === 'function') {
+            if (this.dataManager && typeof this.dataManager.loadUsers === 'function') {
+                // Legacy dataManager approach
+                users = await this.dataManager.loadUsers();
+            } else if (this.dataManager && typeof this.dataManager.all === 'function') {
                 // Database approach
-                const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+                const dbUsers = await this.dataManager.all('SELECT * FROM users');
                 users = {};
                 dbUsers.forEach(user => {
                     const userSettings = JSON.parse(user.settings || '{}');
@@ -1282,24 +1442,24 @@ async showTradersMenu(chatId, action) {
 
     async handleRemoveUser(chatId, userIdToRemove) {
         try {
-            if (this.databaseManager && typeof this.databaseManager.loadUsers === 'function') {
-                // Legacy databaseManager approach
-        const users = await this.databaseManager.loadUsers();
+            if (this.dataManager && typeof this.dataManager.loadUsers === 'function') {
+                // Legacy dataManager approach
+        const users = await this.dataManager.loadUsers();
         const username = users[userIdToRemove];
         if (username) {
             delete users[userIdToRemove];
-            await this.databaseManager.saveUsers(users);
+            await this.dataManager.saveUsers(users);
                     await this.sendOrEditMessage(chatId, `✅ User *${escapeMarkdownV2(username)}* has been removed\\.`);
         } else {
                     await this.sendOrEditMessage(chatId, "❌ User not found\\.");
                 }
-            } else if (this.databaseManager && typeof this.databaseManager.deleteUser === 'function') {
+            } else if (this.dataManager && typeof this.dataManager.deleteUser === 'function') {
                 // Database approach
-                const user = await this.databaseManager.getUser(userIdToRemove);
+                const user = await this.dataManager.getUser(userIdToRemove);
                 if (user) {
                     const userSettings = JSON.parse(user.settings || '{}');
                     const username = userSettings.username || userIdToRemove;
-                    await this.databaseManager.deleteUser(userIdToRemove);
+                    await this.dataManager.deleteUser(userIdToRemove);
                     await this.sendOrEditMessage(chatId, `✅ User *${escapeMarkdownV2(username)}* has been removed\\.`);
                 } else {
                     await this.sendOrEditMessage(chatId, "❌ User not found\\.");
@@ -1309,7 +1469,7 @@ async showTradersMenu(chatId, action) {
             }
         } catch (error) {
             console.error('Error removing user:', error);
-            await this.sendOrEditMessage(chatId, "❌ Failed to remove user\\.");
+            await this.sendOrEditMessage(chatId, "❌ Failed to remove user.");
         }
         
         if (false) { // This will never execute, but keeps the original logic structure
@@ -1323,14 +1483,23 @@ async showTradersMenu(chatId, action) {
 
     async sendOrEditMessage(chatId, text, options = {}, messageId = null) {
         messageId = messageId || this.latestMessageIds.get(chatId);
-        const finalOptions = { parse_mode: 'MarkdownV2', disable_web_page_preview: true, ...options };
+        const finalOptions = { disable_web_page_preview: true, ...options };
         
-        // Ensure text is properly escaped for MarkdownV2 if not already escaped
-        const escapedText = text.includes('\\-') ? text : escapeMarkdownV2(text);
+        // Only use MarkdownV2 if parse_mode is not explicitly set to null
+        if (options.parse_mode !== null) {
+            finalOptions.parse_mode = 'MarkdownV2';
+            // Ensure text is properly escaped for MarkdownV2 if not already escaped
+            // Harden: Ensure text is a string before calling includes()
+            const safeText = typeof text === 'string' ? text : String(text);
+            const escapedText = safeText.includes('\\-') ? safeText : escapeMarkdownV2(safeText);
+            finalOptions.text = escapedText;
+        } else {
+            finalOptions.text = text;
+        }
 
         try {
             if (messageId) {
-                const editedMessage = await this.bot.editMessageText(escapedText, { ...finalOptions, chat_id: chatId, message_id: messageId });
+                const editedMessage = await this.bot.editMessageText(finalOptions.text, { ...finalOptions, chat_id: chatId, message_id: messageId });
                 this.latestMessageIds.set(chatId, editedMessage.message_id);
                 return editedMessage;
             } else {
@@ -1342,7 +1511,7 @@ async showTradersMenu(chatId, action) {
             }
 
             try {
-                const newMessage = await this.bot.sendMessage(chatId, escapedText, finalOptions);
+                const newMessage = await this.bot.sendMessage(chatId, finalOptions.text, finalOptions);
                 this.latestMessageIds.set(chatId, newMessage.message_id);
                 return newMessage;
             } catch (sendError) {
@@ -1355,7 +1524,7 @@ async showTradersMenu(chatId, action) {
     async sendErrorMessage(chatId, text) {
         if (!this.bot) return;
         try {
-            await this.bot.sendMessage(chatId, `❌ *Error*\n\n${escapeMarkdownV2(text)}`, { parse_mode: 'MarkdownV2' });
+            await this.bot.sendMessage(chatId, `❌ Error\n\n${text}`);
         } catch (e) {
             console.error(`Failed to send error message to chat ${chatId}:`, e);
         }

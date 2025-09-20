@@ -1,7 +1,7 @@
-const { DatabaseManager } = require('./database/databaseManager.js');
+const { dataManager } = require('./database/dataManager.js');
 
 async function checkTraders() {
-    const db = new DatabaseManager();
+    const db = new dataManager();
     await db.initialize();
     
     try {

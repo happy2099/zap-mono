@@ -11,18 +11,18 @@ const fs = require('fs/promises');
 
 // Project Modules (CommonJS requires)
 const config = require('./config.js');
-const { DatabaseManager } = require('./database/databaseManager.js');
+const { DataManager } = require('./dataManager.js');
 const { SolanaManager } = require('./solanaManager.js');
 // TelegramUI handled by telegramWorker in threaded mode
 const WalletManager = require('./walletManager.js');
-const { TransactionAnalyzer } = require('./transactionAnalyzer.js');
+// TransactionAnalyzer removed - using UniversalAnalyzer instead
 const { ApiManager } = require('./apiManager.js');
 // TradeNotificationManager handled by telegramWorker in threaded mode
 const { shortenAddress } = require('./utils.js');
 const { PublicKey } = require('@solana/web3.js');
 const { RedisManager } = require('./redis/redisManager.js');
 const { LaserStreamManager } = require('./laserstreamManager.js');
-const platformBuilders = require('./platformBuilders.js');
+// platformBuilders removed - using universalCloner instead
 
 class ZapBot {
     constructor() {
@@ -35,11 +35,11 @@ class ZapBot {
 
         console.log("ZapBot core modules instantiated. Awaiting initialization...");
 
-        this.databaseManager = null; // We will inject the real one.
+        this.dataManager = null; // We will inject the real one.
         this.solanaManager = new SolanaManager();
         this.apiManager = new ApiManager(this.solanaManager);
         // Pass null for now, it will be injected.
-        this.walletManager = new WalletManager(this.databaseManager);
+        this.walletManager = new WalletManager(this.dataManager);
         this.walletManager.setSolanaManager(this.solanaManager);
         this.redisManager = new RedisManager();
 
@@ -47,17 +47,17 @@ class ZapBot {
         this.telegramUi = null;
         this.notificationManager = null;
 
-        this.transactionAnalyzer = null;
+        // TransactionAnalyzer removed
         this.tradingEngine = null;
     }
 
     // ADD THIS ENTIRE NEW FUNCTION
-    setDatabaseManager(dbManager) {
-        console.log("[ZAPBOT-CORE] ✅ DatabaseManager instance has been successfully injected.");
-        this.databaseManager = dbManager;
+    setdataManager(dataManager) {
+        console.log("[ZAPBOT-CORE] ✅ DataManager instance has been successfully injected.");
+        this.dataManager = dataManager;
 
-        // Now, pass the REAL database manager to all child components.
-        this.walletManager.databaseManager = dbManager;
+        // Now, pass the REAL data manager to all child components.
+        this.walletManager.dataManager = dataManager;
         // TelegramUI is handled by telegramWorker in threaded mode
     }
 
@@ -70,10 +70,10 @@ class ZapBot {
         console.log('--- Starting Bot Initialization Sequence ---');
 
         // 1. Initialize data layer
-        if (!this.databaseManager) {
-             throw new Error("DatabaseManager was not injected. Bot cannot start.");
+        if (!this.dataManager) {
+             throw new Error("dataManager was not injected. Bot cannot start.");
         }
-        console.log('1/6: ✅ DatabaseManager is live and ready.');
+        console.log('1/6: ✅ dataManager is live and ready.');
         // No files to init, the database is already connected.
 
         // 2. Initialize Solana connection
@@ -102,7 +102,7 @@ class ZapBot {
         try {
             const TradeNotificationManager = require('./tradeNotifications.js');
             // Pass 'this' (the bot instance) as the first parameter for single-threaded mode
-            this.notificationManager = new TradeNotificationManager(this, this.apiManager, null, this.databaseManager);
+            this.notificationManager = new TradeNotificationManager(this, this.apiManager, null, this.dataManager);
             this.notificationManager.setConnection(this.solanaManager.connection);
             console.log('4/6: ✅ TradeNotificationManager initialized for single-threaded mode.');
         } catch (e) {
@@ -112,17 +112,15 @@ class ZapBot {
         // 5. TelegramUI is handled by telegramWorker in threaded mode, but not needed in single-threaded mode
         console.log('5/6: ⚠️ TelegramUI handled by telegramWorker in threaded mode (not needed in single-threaded).');
 
-        // 6. Initialize TransactionAnalyzer and TradingEngine
+        // 6. Initialize TradingEngine (TransactionAnalyzer removed - using UniversalAnalyzer)
         try {
-    this.transactionAnalyzer = new TransactionAnalyzer(this.solanaManager.connection, this.apiManager);
-    console.log('✅ TransactionAnalyzer created with live connection.');
+            console.log('✅ TransactionAnalyzer removed - using UniversalAnalyzer instead.');
 
             const { TradingEngine } = require('./tradingEngine.js');
             this.tradingEngine = new TradingEngine({
                 solanaManager: this.solanaManager,
-                databaseManager: this.databaseManager,
+                dataManager: this.dataManager,
                 walletManager: this.walletManager,
-                transactionAnalyzer: this.transactionAnalyzer,
                 notificationManager: this.notificationManager, // Now properly initialized for single-threaded mode
                 apiManager: this.apiManager,
                 redisManager: this.redisManager
@@ -457,7 +455,7 @@ class ZapBot {
         // --- IMPORTANT: Find which trader this signature belongs to ---
         // This is the hardest part of manual mode. You need to know which trader to simulate.
         // For this op, let's assume we test against the FIRST configured active trader.
-        const syndicateData = await this.databaseManager.loadTraders();
+        const syndicateData = await this.dataManager.loadTraders();
         const userTraders = syndicateData.user_traders[String(chatId)];
 
         let targetTraderWallet = null;
@@ -488,7 +486,7 @@ class ZapBot {
         console.log(`[Action] START request for ${traderName} from chat ${chatId}`);
         try {
             // Update trader status in database
-            await this.databaseManager.updateTraderStatus(chatId, traderName, true);
+            await this.dataManager.updateTraderStatus(chatId, traderName, true);
             // Re-sync and restart the global snipers to pick up the new active trader
             // this.startGlobalPlatformSnipers(); 
             this.syncAndStartMonitoring();
@@ -502,7 +500,7 @@ class ZapBot {
         console.log(`[Action] STOP request for ${traderName} from chat ${chatId}`);
         try {
             // Update trader status in database
-            await this.databaseManager.updateTraderStatus(chatId, traderName, false);
+            await this.dataManager.updateTraderStatus(chatId, traderName, false);
             // Re-sync and restart the global snipers to remove the inactive trader
             // this.startGlobalPlatformSnipers(); 
             this.syncAndStartMonitoring();
@@ -517,13 +515,13 @@ class ZapBot {
         console.log(`[Action] REMOVE request for ${traderName} from chat ${chatId}`);
         try {
             // Get user to get internal user ID
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found');
             }
             
             // Remove trader from database
-            await this.databaseManager.deleteTrader(user.id, traderName);
+            await this.dataManager.deleteTrader(user.id, traderName);
             
             console.log(`[Action] ✅ Trader ${traderName} removed successfully - handled by telegramWorker`);
         } catch (e) {
@@ -536,13 +534,13 @@ class ZapBot {
         console.log(`[Action] ADD request for ${traderName} from chat ${chatId}`);
         try {
             // Get user to get internal user ID
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (!user) {
                 throw new Error('User not found in database. Cannot add trader.');
             }
 
             // Create the trader in the database, linked to the user's ID
-            await this.databaseManager.createTrader(user.id, traderName, walletAddress);
+            await this.dataManager.createTrader(user.id, traderName, walletAddress);
 
             // Re-sync monitoring to start following the new trader if they were made active.
             this.syncAndStartMonitoring();
@@ -572,7 +570,7 @@ class ZapBot {
     async handleSetSolAmount(chatId, amount) {
         console.log(`[Action] SET SOL amount request for ${amount} from chat ${chatId}`);
         try {
-            await this.databaseManager.updateUserTradingSettings(chatId, { sol_amount_per_trade: amount });
+            await this.dataManager.updateUserTradingSettings(chatId, { sol_amount_per_trade: amount });
             console.log(`[Action] ✅ SOL amount set to ${amount} - handled by telegramWorker`);
         } catch (e) {
             console.error(`[Action] ❌ Failed to set SOL amount: ${e.message}`);
@@ -585,9 +583,9 @@ class ZapBot {
             const { walletInfo, privateKey } = await this.walletManager.generateAndAddWallet(label, 'trading', chatId);
             
             // Also store in database
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (user) {
-                await this.databaseManager.createWallet(
+                await this.dataManager.createWallet(
                     user.id, 
                     label, 
                     walletInfo.publicKey.toBase58(), 
@@ -610,9 +608,9 @@ class ZapBot {
             const walletInfo = await this.walletManager.importWalletFromPrivateKey(privateKey, label, 'trading', chatId);
 
             // Also store in database
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             if (user) {
-                await this.databaseManager.createWallet(
+                await this.dataManager.createWallet(
                     user.id, 
                     label, 
                     walletInfo.publicKey.toBase58(), 
@@ -704,9 +702,9 @@ class ZapBot {
         try {
             console.log(`[Action] ♻️ Performing reset...`);
             // Reset data in database instead of files
-            await this.databaseManager.run('DELETE FROM traders WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
-            await this.databaseManager.run('DELETE FROM user_positions WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
-            await this.databaseManager.run('DELETE FROM trade_stats WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
+            await this.dataManager.run('DELETE FROM traders WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
+            await this.dataManager.run('DELETE FROM user_positions WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
+            await this.dataManager.run('DELETE FROM trade_stats WHERE user_id = (SELECT id FROM users WHERE chat_id = ?)', [chatId]);
             await this.walletManager.initialize();
             console.log(`[Action] ✅ Reset complete! - handled by telegramWorker`);
         } catch (e) {
@@ -759,7 +757,7 @@ class ZapBot {
                 return;
             }
             
-            const syndicateData = await this.databaseManager.loadTraders();
+            const syndicateData = await this.dataManager.loadTraders();
             if (syndicateData && syndicateData.user_traders) {
                 for (const userChatId in syndicateData.user_traders) {
                     const userTraders = syndicateData.user_traders[userChatId];
@@ -825,7 +823,7 @@ syncAndStartMonitoring() {
     async processTrade(tradeDetails, traderName) {
         try {
             // Get the first available trading wallet for the default user
-            const defaultUser = await this.databaseManager.all('SELECT * FROM users LIMIT 1');
+            const defaultUser = await this.dataManager.all('SELECT * FROM users LIMIT 1');
             if (defaultUser.length === 0) throw new Error('No users configured');
             
             const walletInfo = (await this.walletManager.getFirstTradingKeypair(defaultUser[0].chat_id))?.wallet;

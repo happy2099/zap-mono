@@ -22,24 +22,24 @@ class TradingEngine {
     constructor(managers, options = {}) {
         // Option for partial initialization (used by workers for helper methods)
         if (options.partialInit) {
-            if (!managers.databaseManager) {
-                throw new Error("TradingEngine (Partial Init): DatabaseManager is required.");
+            if (!managers.dataManager) {
+                throw new Error("TradingEngine (Partial Init): dataManager is required.");
             }
-            this.databaseManager = managers.databaseManager;
+            this.dataManager = managers.dataManager;
             // Other managers will be null, which is expected
             return;
         }
 
         // Full initialization with safety check
-        const { solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager } = managers;
+        const { solanaManager, dataManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager } = managers;
 
-        if (![solanaManager, databaseManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager].every(Boolean)) {
+        if (![solanaManager, dataManager, walletManager, transactionAnalyzer, notificationManager, apiManager, redisManager].every(Boolean)) {
             throw new Error("TradingEngine: Missing required manager modules for full initialization.");
         }
 
         // Assign all managers
         this.solanaManager = solanaManager;
-        this.databaseManager = databaseManager;
+        this.dataManager = dataManager;
         this.walletManager = walletManager;
         this.transactionAnalyzer = transactionAnalyzer;
         this.notificationManager = notificationManager;
@@ -138,7 +138,7 @@ handleLaserStreamData(sourceWallet, signature, txData) {
 async getMasterTraderWallets() {
     try {
         // Use database instead of old dataManager
-        const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
+        const tradersByUser = await this.dataManager.getTradersGroupedByUser();
         const walletsToMonitor = new Set();
         
         // Iterate through all users and their traders
@@ -168,7 +168,7 @@ async getMasterTraderWallets() {
  */
 async getTraderName(walletAddress) {
     try {
-        const tradersByUser = await this.databaseManager.getTradersGroupedByUser();
+        const tradersByUser = await this.dataManager.getTradersGroupedByUser();
         
         for (const [userId, traders] of Object.entries(tradersByUser)) {
             for (const trader of traders) {
@@ -316,7 +316,7 @@ async executeManualSell(userChatId, tokenMint) {
 
     try {
         // STEP 1: Get the user's position for this token from our database.
-        const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tokenMint);
+        const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tokenMint);
         if (!sellDetails || sellDetails.amountToSellBN.isZero()) {
             throw new Error(`You do not have a recorded position for this token.`);
         }
@@ -386,7 +386,7 @@ async executeManualSell(userChatId, tokenMint) {
 //     const metadata = this.redisManager.getTradeData(targetMint) || {};
 
 //     // Update position in database
-//     await this.databaseManager.recordBuyPosition(
+//     await this.dataManager.recordBuyPosition(
 //         userChatId,
 //         targetMint,
 //         metadata.outputAmountRaw || "0",
@@ -436,7 +436,7 @@ async executeManualSell(userChatId, tokenMint) {
 
 // async _mapTraderToUser(traderWallet) {
 //     try {
-//         const syndicateData = await this.databaseManager.loadTraders();
+//         const syndicateData = await this.dataManager.loadTraders();
 //         for (const userChatId in syndicateData.user_traders) {
 //             const userTraders = syndicateData.user_traders[userChatId];
 //             for (const traderName in userTraders) {
@@ -552,7 +552,7 @@ async _executeCopyForUser(sourceWalletAddress, signature, preFetchedTxData) {
         }
 
         console.log(`[EXECUTE_MASTER] 🔍 Loading traders from database...`);
-        const syndicateData = await this.databaseManager.loadTraders();
+        const syndicateData = await this.dataManager.loadTraders();
         console.log(`[EXECUTE_MASTER] 📊 Found ${Object.keys(syndicateData.user_traders || {}).length} users with traders`);
         
         const copyJobs = [];
@@ -721,7 +721,7 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
     // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
 const isBuy = tradeDetails.tradeType === 'buy';
 if (isBuy) {
-    const userPositions = this.databaseManager.getUserPositions(String(userChatId));
+    const userPositions = this.dataManager.getUserPositions(String(userChatId));
     const tokenToBuy = tradeDetails.outputMint;
 
     // Check if the user ALREADY has a position and it's not empty.
@@ -751,13 +751,13 @@ if (isBuy) {
         let preInstructions = [];
 
         if (isBuy) {
-            const solAmounts = await this.databaseManager.loadSolAmounts();
+            const solAmounts = await this.dataManager.loadSolAmounts();
             solAmountForNotification = solAmounts[String(userChatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
             amountBN = new BN(Math.floor(solAmountForNotification * config.LAMPORTS_PER_SOL_CONST));
             tradeDetails.solSpent = solAmountForNotification;
             preInstructions.push(createAssociatedTokenAccountIdempotentInstruction(keypair.publicKey, getAssociatedTokenAddressSync(new PublicKey(tradeDetails.outputMint), keypair.publicKey), keypair.publicKey, new PublicKey(tradeDetails.outputMint)));
         } else { // SELL logic remains the same
-            const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
+            const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
             if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) throw new Error(`No recorded position for this token.`);
             amountBN = sellDetails.amountToSellBN;
             tradeDetails.originalSolSpent = sellDetails.originalSolSpent;
@@ -814,7 +814,7 @@ if (isBuy) {
         };
         await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, finalizedDetails);
         if (isBuy) {
-            await this.databaseManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, finalizedDetails.outputAmountRaw || "0", solAmountForNotification);
+            await this.dataManager.recordBuyPosition(userChatId, finalizedDetails.outputMint, finalizedDetails.outputAmountRaw || "0", solAmountForNotification);
             finalizedDetails.userChatId = userChatId;
             await this._precacheSellInstruction(signature, finalizedDetails);
                } else {
@@ -823,7 +823,7 @@ if (isBuy) {
             const solReceived = (postSellBalance - preSellBalance + finalizedDetails.solFee * config.LAMPORTS_PER_SOL_CONST) / config.LAMPORTS_PER_SOL_CONST;
             finalizedDetails.solReceived = solReceived;
 
-            await this.databaseManager.updatePositionAfterSell(
+            await this.dataManager.updatePositionAfterSell(
                 userChatId, 
                 tradeDetails.inputMint, 
                 amountBN.toString(), 
@@ -908,7 +908,7 @@ async handleTokenMigration(migrationEvent) {
     console.log(`[MIGRATION-HUB] Event received: ${shortenAddress(tokenMint)} from ${fromPlatform} -> ${toPlatform}.`);
 
     // Step 1: Load the entire syndicate's positions.
-    const allPositions = await this.databaseManager.loadPositions();
+    const allPositions = await this.dataManager.loadPositions();
     if (!allPositions?.user_positions) return;
 
     // Step 2: Loop through every single user in the bot.
@@ -1055,12 +1055,12 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
         let amountToSwap;
 
         if (isBuy) {
-            const solAmounts = await this.databaseManager.loadSolAmounts();
+            const solAmounts = await this.dataManager.loadSolAmounts();
             const solAmountToUse = solAmounts[String(userChatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
             amountToSwap = parseInt((solAmountToUse * config.LAMPORTS_PER_SOL_CONST).toString());
             tradeDetails.solSpent = solAmountToUse;
         } else {
-            const sellDetails = this.databaseManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
+            const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
             if (!sellDetails || !sellDetails.amountToSellBN || sellDetails.amountToSellBN.isZero()) {
                 throw new Error(`Sell copy failed: User has no recorded position for this token.`);
             }
@@ -1112,9 +1112,9 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 
         // Unified post-trade logic
         if (isBuy) {
-            await this.databaseManager.recordBuyPosition(userChatId, tradeDetails.outputMint, "0", tradeDetails.solSpent);
+            await this.dataManager.recordBuyPosition(userChatId, tradeDetails.outputMint, "0", tradeDetails.solSpent);
         } else {
-            await this.databaseManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
+            await this.dataManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, String(amountToSwap));
         }
         await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { 
             ...tradeDetails, 
@@ -1156,7 +1156,7 @@ async executeUniversalApiSwap(tradeDetails, traderName, userChatId, keypairPacke
 //         };
 
 //         // This part correctly fans out the trade to all subscribed users.
-//         const syndicateData = await this.databaseManager.loadTraders();
+//         const syndicateData = await this.dataManager.loadTraders();
 //         for (const userChatId in syndicateData.user_traders) {
 //             const userTraders = syndicateData.user_traders[userChatId];
 //             // Here you'd check if a user has pump.fun sniping enabled. For now, we assume yes.
@@ -1636,7 +1636,7 @@ async checkPumpFunMigration(tokenMint) {
 
         try {
             // Get all users who are actively copying this specific master trader
-            const syndicateData = await this.databaseManager.loadTraders();
+            const syndicateData = await this.dataManager.loadTraders();
             if (!syndicateData?.user_traders) return;
 
             const jobs = [];
@@ -1783,7 +1783,7 @@ async checkPumpFunMigration(tokenMint) {
             
             if (tradeDetails.tradeType === 'buy') {
                 // For BUY trades: Use user's SOL amount per trade setting
-                const solAmounts = await this.databaseManager.loadSolAmounts();
+                const solAmounts = await this.dataManager.loadSolAmounts();
                 const userSolAmount = solAmounts[String(userChatId)] || 0.01; // Default 0.01 SOL
                 const solAmountLamports = Math.floor(userSolAmount * 1e9); // Convert to lamports
                 
@@ -1792,7 +1792,7 @@ async checkPumpFunMigration(tokenMint) {
                 
             } else if (tradeDetails.tradeType === 'sell') {
                 // For SELL trades: Use user's actual token balance
-                const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                const userPositions = await this.dataManager.getUserPositions(userChatId);
                 const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                 
                 if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
@@ -1900,7 +1900,7 @@ async checkPumpFunMigration(tokenMint) {
             // For SELL trades, check if user has position before proceeding
             if (tradeDetails.tradeType === 'sell') {
                 try {
-                    const userPositions = await this.databaseManager.getUserPositions(userChatId);
+                    const userPositions = await this.dataManager.getUserPositions(userChatId);
                     const userTokenBalance = userPositions.get(tradeDetails.inputMint);
                     
                     if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
@@ -2084,7 +2084,7 @@ async checkPumpFunMigration(tokenMint) {
                                 console.log(`[SINGAPORE-SENDER] ✅ FALSE POSITIVE CHECK PASSED: User received ${userTokenBalance.toString()} tokens`);
                                 
                                 // Update user position in database
-                                await this.databaseManager.updateUserPosition(
+                                await this.dataManager.updateUserPosition(
                                     userChatId,
                                     tradeDetails.outputMint,
                                     userTokenBalance.toString(),

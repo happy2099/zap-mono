@@ -3,7 +3,7 @@ const { TransactionAnalyzer } = require('./transactionAnalyzer.js');
 const { UniversalCloner } = require('./universalCloner.js');
 const { SolanaManager } = require('./solanaManager.js');
 const WalletManager = require('./walletManager.js');
-const { DatabaseManager } = require('./database/databaseManager.js');
+const { dataManager } = require('./database/dataManager.js');
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 
@@ -19,9 +19,9 @@ async function testLiveTransaction() {
         const analyzer = new TransactionAnalyzer(connection);
         
         const solanaManager = new SolanaManager();
-        const databaseManager = new DatabaseManager();
-        await databaseManager.initialize();
-        const walletManager = new WalletManager(databaseManager);
+        const dataManager = new dataManager();
+        await dataManager.initialize();
+        const walletManager = new WalletManager(dataManager);
         walletManager.setSolanaManager(solanaManager);
         
         // Fetch the live transaction from Solana

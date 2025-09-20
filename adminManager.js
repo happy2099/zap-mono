@@ -8,8 +8,8 @@ const { shortenAddress, escapeMarkdownV2 } = require('./utils.js');
 const config = require('./config.js');
 
 class AdminManager {
-    constructor(databaseManager, solanaManager, walletManager, tradingEngine) {
-        this.databaseManager = databaseManager;
+    constructor(dataManager, solanaManager, walletManager, tradingEngine) {
+        this.dataManager = dataManager;
         this.solanaManager = solanaManager;
         this.walletManager = walletManager;
         this.tradingEngine = tradingEngine;
@@ -22,7 +22,7 @@ class AdminManager {
      */
     async isAdmin(chatId) {
         try {
-            const user = await this.databaseManager.getUser(chatId);
+            const user = await this.dataManager.getUser(chatId);
             return user && user.is_admin === 1;
         } catch (error) {
             console.error('Error checking admin status:', error);
@@ -36,7 +36,7 @@ class AdminManager {
     async getUserStatistics() {
         try {
             // Get users from database
-            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const dbUsers = await this.dataManager.all('SELECT * FROM users');
             const users = {};
             dbUsers.forEach(user => {
                 const userSettings = JSON.parse(user.settings || '{}');
@@ -49,7 +49,7 @@ class AdminManager {
             });
 
             // Get traders from database
-            const dbTraders = await this.databaseManager.all('SELECT * FROM traders');
+            const dbTraders = await this.dataManager.all('SELECT * FROM traders');
             const traders = { user_traders: {} };
             dbTraders.forEach(trader => {
                 if (!traders.user_traders[trader.user_id]) {
@@ -126,7 +126,7 @@ class AdminManager {
     async getUserActivity() {
         try {
             // Get users from database
-            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const dbUsers = await this.dataManager.all('SELECT * FROM users');
             const users = {};
             dbUsers.forEach(user => {
                 const userSettings = JSON.parse(user.settings || '{}');
@@ -139,7 +139,7 @@ class AdminManager {
             });
 
             // Get traders from database
-            const dbTraders = await this.databaseManager.all('SELECT * FROM traders');
+            const dbTraders = await this.dataManager.all('SELECT * FROM traders');
             const traders = { user_traders: {} };
             dbTraders.forEach(trader => {
                 if (!traders.user_traders[trader.user_id]) {
@@ -201,7 +201,7 @@ class AdminManager {
     async getUserPnl() {
         try {
             // Get users from database
-            const dbUsers = await this.databaseManager.all('SELECT * FROM users');
+            const dbUsers = await this.dataManager.all('SELECT * FROM users');
             const users = {};
             dbUsers.forEach(user => {
                 const userSettings = JSON.parse(user.settings || '{}');
@@ -327,13 +327,13 @@ class AdminManager {
 
         try {
             // Check if user already exists
-            const existingUser = await this.databaseManager.getUser(userId);
+            const existingUser = await this.dataManager.getUser(userId);
             if (existingUser) {
                 throw new Error(`User ${userId} already exists`);
             }
 
             // Create new user
-            await this.databaseManager.createUser(userId, {
+            await this.dataManager.createUser(userId, {
                 username: username,
                 active: true,
                 addedAt: new Date().toISOString(),
@@ -363,7 +363,7 @@ class AdminManager {
 
         try {
             // Check if user exists
-            const existingUser = await this.databaseManager.getUser(userId);
+            const existingUser = await this.dataManager.getUser(userId);
             if (!existingUser) {
                 throw new Error(`User ${userId} not found`);
             }
@@ -372,7 +372,7 @@ class AdminManager {
             const username = userSettings.username || 'Unknown';
             
             // Remove user and all associated data
-            await this.databaseManager.deleteUser(userId);
+            await this.dataManager.deleteUser(userId);
             
             console.log(`[ADMIN MANAGER] User ${userId} (${username}) removed by admin ${chatId}`);
             
@@ -392,7 +392,7 @@ class AdminManager {
     async getUserDetails(userId) {
         try {
             // Get user from database
-            const user = await this.databaseManager.getUser(userId);
+            const user = await this.dataManager.getUser(userId);
             if (!user) {
                 throw new Error(`User ${userId} not found`);
             }
@@ -406,7 +406,7 @@ class AdminManager {
             };
 
             // Get user's traders
-            const dbTraders = await this.databaseManager.getTraders(userId);
+            const dbTraders = await this.dataManager.getTraders(userId);
             const userTraders = {};
             dbTraders.forEach(trader => {
                 userTraders[trader.name] = {

@@ -1,0 +1,9 @@
+{
+  "totalVolume": 0,
+  "totalFees": 0,
+  "averageTradeSize": 0,
+  "bestTrade": 0,
+  "worstTrade": 0,
+  "dailyStats": {},
+  "monthlyStats": {}
+}

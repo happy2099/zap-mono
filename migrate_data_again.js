@@ -1,9 +1,9 @@
-const { DatabaseManager } = require('./database/databaseManager.js');
+const { dataManager } = require('./database/dataManager.js');
 const fs = require('fs').promises;
 const path = require('path');
 
 async function migrateData() {
-    const db = new DatabaseManager();
+    const db = new dataManager();
     await db.initialize();
     
     const dataPath = '/mnt/c/Users/sanjay/zap-mono/data';

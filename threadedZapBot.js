@@ -7,6 +7,9 @@
 const { Worker, isMainThread, parentPort, workerData } = require('worker_threads');
 const path = require('path');
 
+// Import the leader tracker for ultra-low latency execution
+const leaderTracker = require('./leaderTracker.js');
+
 class ThreadedZapBot {
     constructor(options = {}) {
         this.workers = new Map();
@@ -52,19 +55,8 @@ class ThreadedZapBot {
                 file: './workers/dataManagerWorker.js', 
                 options: { maxMemory: '512MB' },
                 required: true
-            },
-            { 
-                name: 'websocket', 
-                file: './workers/websocketWorker.js', 
-                options: { maxMemory: '256MB' },
-                required: false
-            },
-            { 
-                name: 'analyzer', 
-                file: './workers/transactionAnalyzerWorker.js', 
-                options: { maxMemory: '512MB' },
-                required: true
             }
+            // WebSocketWorker removed - was redundant and not actually used
         ];
 
         console.log('🧵 ThreadedZapBot initialized with worker configuration');
@@ -91,13 +83,23 @@ class ThreadedZapBot {
             // Step 4: Setup shutdown handlers
             this.setupShutdownHandlers();
             
-            // Step 5: Wait for all workers to be ready
+            // Step 5: Initialize Leader Tracker for ultra-low latency
+            console.log('🎯 Initializing proactive leader tracking...');
+            try {
+                await leaderTracker.startMonitoring();
+                console.log('✅ Proactive leader tracking has been activated.');
+            } catch (error) {
+                console.warn('⚠️ Leader tracker failed to start:', error.message);
+                console.warn('⚠️ Continuing without leader tracking - performance may be reduced.');
+            }
+            
+            // Step 6: Wait for all workers to be ready
             await this.waitForWorkersReady();
             
             this.isInitialized = true;
             console.log('✅ ThreadedZapBot initialization completed successfully');
             
-            // Step 6: Start trader monitoring
+            // Step 7: Start trader monitoring
             await this.startTraderMonitoring();
             
             // Send startup message
@@ -256,9 +258,7 @@ class ThreadedZapBot {
             console.log(`💾 Cache updated by ${workerName}:`, message.key);
         });
 
-        this.messageHandlers.set('WEBSOCKET_CONNECTED', (workerName, message) => {
-            console.log(`🔌 WebSocket connected in ${workerName}:`, message.connectionId);
-        });
+        // WebSocket message handler removed - WebSocketWorker no longer used
 
         this.messageHandlers.set('TELEGRAM_MESSAGE_SENT', (workerName, message) => {
             console.log(`📱 Telegram message sent by ${workerName}:`, message.chatId);
@@ -269,13 +269,22 @@ class ThreadedZapBot {
             
             // Show trader name if available, otherwise show shortened wallet
             if (message.traderName && message.traderName !== 'Unknown (LaserStream)' && message.traderName !== 'Unknown') {
-                console.log(`   📍 Trader: ${message.traderName} (${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)})`);
-            } else {
+                console.log(`   📍 Trader: ${message.traderName} ${message.traderWallet ? `(${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)})` : ''}`);
+            } else if (message.traderWallet) {
                 console.log(`   📍 Trader: ${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)}`);
+            } else {
+                console.log(`   📍 Trader: Unknown`);
             }
             
-            console.log(`   🔑 Signature: ${message.signature.substring(0,8)}...`);
-            console.log(`   📊 Has pre-fetched data: ${!!message.preFetchedTxData}`);
+            console.log(`   🔑 Signature: ${message.signature ? message.signature.substring(0,8) + '...' : 'Unknown'}`);
+            
+            // Show DEX name if available
+            if (message.dexPrograms && message.dexPrograms.length > 0) {
+                const dexNames = message.dexPrograms.map(id => this.getDexName(id)).join(', ');
+                console.log(`   🏪 DEX: ${dexNames}`);
+            }
+            
+            // Raw data cloning - no pre-fetched data needed
             
             const executorWorker = this.workers.get('executor');
             if (executorWorker && this.workerStates.get('executor') === 'ready') {
@@ -458,6 +467,14 @@ class ThreadedZapBot {
         console.log('🛑 Shutting down ThreadedZapBot...');
 
         try {
+            // Stop leader tracker monitoring
+            try {
+                await leaderTracker.stopMonitoring();
+                console.log('✅ Leader tracker stopped');
+            } catch (error) {
+                console.warn('⚠️ Leader tracker cleanup warning:', error.message);
+            }
+            
             // Send shutdown signal to all workers
             await this.broadcastMessage({ type: 'SHUTDOWN' });
 
@@ -487,6 +504,38 @@ class ThreadedZapBot {
         } catch (error) {
             console.error('❌ Error during shutdown:', error);
         }
+    }
+
+    // Helper function to get DEX/Router name from program ID
+    getDexName(programId) {
+        const dexMappings = {
+            // DEXs
+            '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8': 'Raydium V4',
+            'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj': 'Raydium Launchpad',
+            'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C': 'Raydium CPMM',
+            'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'Raydium CLMM',
+            'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq': 'Pump.fun',
+            '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': 'Pump.fun BC',
+            'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA': 'Pump.fun AMM',
+            'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo': 'Meteora DLMM',
+            'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN': 'Meteora DBC',
+            'DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d': 'Meteora DBC',
+            'CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG': 'Meteora CP AMM',
+            '675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv': 'Raydium AMM',
+            'srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX': 'OpenBook',
+            'srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d': 'OpenBook V3',
+            '5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h': 'Raydium Stable',
+            'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc': 'Whirlpool',
+            
+            // Routers
+            'JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5': 'Jupiter Router',
+            'BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW': 'Photon Router',
+            'AxiomfHaWDemCFBLBayqnEnNwE6b7B2Qz3UmzMpgbMG6': 'Axiom Router',
+            'AxiomxSitiyXyPjKgJ9XSrdhsydtZsskZTEDam3PxKcC': 'Axiom Router',
+            'routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS': 'Raydium Router'
+        };
+        
+        return dexMappings[programId] || programId.substring(0,4) + '...' + programId.slice(-4);
     }
 
     async cleanup() {

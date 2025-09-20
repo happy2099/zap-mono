@@ -4,10 +4,10 @@
 // File: scripts/checkDb.js
 // Description: Check database contents after migration
 
-const { DatabaseManager } = require('../database/databaseManager');
+const { dataManager } = require('../database/dataManager');
 
 async function checkDatabase() {
-    const db = new DatabaseManager();
+    const db = new dataManager();
     await db.initialize();
     
     console.log('📊 Database Contents:');

@@ -7,7 +7,7 @@
 const axios = require('axios');
 const config = require('./config.js'); // CommonJS import for internal module
 const { shortenAddress, logPerformance } = require('./utils.js'); // Added logPerformance
-const { createJupiterApiClient } = require('@jup-ag/api');
+// Jupiter API removed - using universalCloner instead
 const { PublicKey } = require('@solana/web3.js');
 const { getMint } = require('@solana/spl-token');
 
@@ -340,120 +340,161 @@ async startTraderMonitoringStream(tradingEngine) {
     }
   }
 
-  async getQuoteFromJupiter({ inputMint, outputMint, amount, slippageBps }) {
-    console.log(`[Jupiter] Getting quote: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
-    const jupiterApi = createJupiterApiClient({ apiEndpoint: "https://dark-evocative-owl.solana-mainnet.quiknode.pro/497fc975da6984a5a05cb7ab9da031ca4ecea653/jup/v6" });
+  // Jupiter API methods removed - using universalCloner instead
 
-    try {
-      // Get the quote for the swap
-      const quote = await jupiterApi.quoteGet({
-        inputMint: inputMint,
-        outputMint: outputMint,
-        amount: Number(amount), // Jupiter SDK expects a number for amount
-        slippageBps: slippageBps || 2500,
-        onlyDirectRoutes: false, // Set to true for simpler routes if needed
-      });
-
-      if (!quote) {
-        throw new Error("Jupiter failed to find a route.");
-      }
-
-      console.log(`[Jupiter] ✅ Quote received: ${quote.inAmount} -> ${quote.outAmount}`);
-      return {
-        inputAmount: quote.inAmount,
-        outputAmount: quote.outAmount,
-        priceImpactPct: quote.priceImpactPct,
-        quote: quote
-      };
-
-    } catch (err) {
-      console.error(`[Jupiter] ❌ Error during Jupiter quote:`, err.message);
-      throw new Error(`Jupiter quote failed: ${err.message}`);
-    }
-  }
-
-  async getSwapTransactionFromJupiter({ inputMint, outputMint, amount, userWallet, slippageBps }) {
-    console.log(`[Jupiter] Getting swap quote: ${amount} of ${shortenAddress(inputMint)} -> ${shortenAddress(outputMint)}`);
-    const jupiterApi = createJupiterApiClient({ apiEndpoint: "https://dark-evocative-owl.solana-mainnet.quiknode.pro/497fc975da6984a5a05cb7ab9da031ca4ecea653/jup/v6" });
-
-    try {
-      // 1. Get the quote for the swap
-      const quote = await jupiterApi.quoteGet({
-        inputMint: inputMint,
-        outputMint: outputMint,
-        amount: Number(amount), // Jupiter SDK expects a number for amount
-        slippageBps: slippageBps,
-        onlyDirectRoutes: false, // Set to true for simpler routes if needed
-        asLegacyTransaction: false, // We want modern VersionedTransactions
-      });
-
-      if (!quote) {
-        throw new Error("Jupiter failed to find a route.");
-      }
-
-      // 2. Get the serialized transaction from the quote
-      const swapResult = await jupiterApi.swapPost({
-        swapRequest: {
-          quoteResponse: quote,
-          userPublicKey: userWallet,
-          wrapAndUnwrapSol: true, // Automatically handle wrapping/unwrapping SOL
-          // Optional: Set a fee account to support Jupiter
-          // feeAccount: "YOUR_FEE_ACCOUNT_PUBKEY_HERE" 
-        },
-      });
-
-      // The result contains the transaction we need to sign and send
-      const swapTransaction = swapResult.swapTransaction;
-
-      if (!swapTransaction) {
-        throw new Error("Jupiter failed to create the swap transaction.");
-      }
-
-      console.log(`[Jupiter] ✅ Successfully created swap transaction.`);
-      // Jupiter now returns a single transaction string. We wrap it in an array to match the old format.
-      return [swapTransaction];
-
-    } catch (err) {
-      console.error(`[Jupiter] ❌ Error during Jupiter API call:`, err.message);
-      if (err.response?.data) {
-        console.error('Jupiter API Error Details:', err.response.data);
-      }
-      throw new Error(`Jupiter API swap failed: ${err.message}`);
-    }
-  }
+  // Jupiter swap method removed - using universalCloner instead
 
   async getTokenPrices(tokenMints) {
     if (!tokenMints || tokenMints.length === 0) {
       return new Map();
     }
 
-    // The Jupiter price API takes a comma-separated list of mint addresses
-    const ids = tokenMints.join(',');
-    const url = `https://price.jup.ag/v4/price?ids=${ids}`;
-
+    // Check Redis cache first for instant metadata
+    const cachedPrices = new Map();
+    const missingMints = [];
+    
     try {
-      const response = await axios.get(url, {
-        headers: { 'Accept': 'application/json' },
-        timeout: 5000
+      // Get Redis manager from solanaManager if available
+      const redisManager = this.solanaManager?.redisManager;
+      
+      if (redisManager) {
+        for (const mint of tokenMints) {
+          const cached = await redisManager.get(`price:${mint}`);
+          if (cached) {
+            cachedPrices.set(mint, parseFloat(cached));
+          } else {
+            missingMints.push(mint);
+          }
+        }
+        
+        if (missingMints.length === 0) {
+          console.log(`[PriceAPI-HELIUS] ✅ All prices from Redis cache:`, Array.from(cachedPrices.entries()).map(([k,v]) => `${k.slice(-4)}: $${v}`));
+          return cachedPrices;
+        }
+        
+        console.log(`[PriceAPI-HELIUS] 📡 Fetching ${missingMints.length} missing prices from DAS...`);
+      } else {
+        missingMints.push(...tokenMints);
+        console.log(`[PriceAPI-HELIUS] 📡 No Redis cache available, fetching all ${tokenMints.length} prices from DAS...`);
+      }
+      
+      // Use Helius DAS getAssetBatch for reliable token metadata
+      const response = await fetch(config.HELIUS_ENDPOINTS.rpc, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: 'grok-price-fetch',
+          method: 'getAssetBatch',
+          params: { 
+            ids: missingMints, 
+            options: { showFungible: true, showSystemMetadata: true } 
+          }
+        })
       });
 
-      const prices = response.data.data;
-      const priceMap = new Map();
+      if (!response.ok) {
+        throw new Error(`Helius DAS failed: ${response.status}`);
+      }
 
-      for (const mint of tokenMints) {
-        if (prices[mint]) {
-          priceMap.set(mint, prices[mint].price);
+      const data = await response.json();
+      console.log(`[PriceAPI-HELIUS] 🔍 Raw DAS response:`, JSON.stringify(data, null, 2));
+      
+      // Handle DAS API errors
+      if (data.error) {
+        console.warn(`[PriceAPI-HELIUS] ⚠️ DAS API error: ${data.error.message}`);
+        // For new tokens, DAS might return errors - use fallback prices
+        const fallbackPrices = new Map();
+        for (const mint of missingMints) {
+          const price = mint === config.NATIVE_SOL_MINT ? 150 : 0;
+          fallbackPrices.set(mint, price);
+          console.log(`[PriceAPI-HELIUS] 🔄 Using fallback price for ${mint}: $${price}`);
+        }
+        return fallbackPrices;
+      }
+      
+      // Validate response structure
+      if (!data.result || !Array.isArray(data.result)) {
+        throw new Error(`Helius DAS returned invalid result: ${JSON.stringify(data)}`);
+      }
+      
+      // Process results and cache them
+      for (const asset of data.result) {
+        if (asset && asset.id) {
+          const price = asset.price_info?.price_per_token || 0;
+          const decimals = asset.token_info?.decimals || 6;
+          const symbol = asset.token_info?.symbol || 'UNKNOWN';
+          
+          cachedPrices.set(asset.id, price);
+          
+          // Cache for 30 seconds if Redis is available
+          if (redisManager) {
+            await redisManager.set(`price:${asset.id}`, price.toString(), 'EX', 30);
+          }
+          
+          console.log(`[PriceAPI-HELIUS] ✅ ${asset.id}: $${price} (${decimals} decimals, ${symbol})`);
         }
       }
-      return priceMap;
+
+      // Handle SOL separately if still missing
+      if (missingMints.includes(config.NATIVE_SOL_MINT) && !cachedPrices.has(config.NATIVE_SOL_MINT)) {
+        const solResponse = await fetch(config.HELIUS_ENDPOINTS.rpc, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            jsonrpc: '2.0',
+            id: 'grok-sol-price',
+            method: 'getAsset',
+            params: { id: config.NATIVE_SOL_MINT }
+          })
+        });
+        
+        if (solResponse.ok) {
+          const solData = await solResponse.json();
+          if (solData.result) {
+            const solPrice = solData.result.price_info?.price_per_token || 150;
+            cachedPrices.set(config.NATIVE_SOL_MINT, solPrice);
+            if (redisManager) {
+              await redisManager.set(`price:${config.NATIVE_SOL_MINT}`, solPrice.toString(), 'EX', 30);
+            }
+            console.log(`[PriceAPI-HELIUS] ✅ SOL: $${solPrice}`);
+          }
+        }
+      }
+
+      console.log(`[PriceAPI-HELIUS] ✅ Fetched ${missingMints.length} prices from DAS:`, Array.from(cachedPrices.entries()).map(([k,v]) => `${k.slice(-4)}: $${v}`));
+      return cachedPrices;
 
     } catch (error) {
-      console.warn(`[PriceAPI] Failed to fetch token prices from Jupiter: ${error.message}`);
-      // Return an empty map on failure so the bot doesn't crash
-      return new Map();
+      console.error('[PriceAPI-HELIUS] ❌ Failed to fetch prices from DAS:', error.message);
+      // Return fallback prices
+      const fallbackMap = new Map();
+      for (const mint of tokenMints) {
+        fallbackMap.set(mint, mint === config.NATIVE_SOL_MINT ? 150 : 0);
+      }
+      return fallbackMap;
     }
   }
 
+  // 🚀 NEW: Fast price fetcher for copy trading (no DAS dependency)
+  async getTokenPricesFast(tokenMints) {
+    if (!tokenMints || tokenMints.length === 0) {
+      return new Map();
+    }
+
+    console.log(`[PriceAPI-FAST] ⚡ Fast price fetch for ${tokenMints.length} tokens (no DAS)`);
+
+    const fastPrices = new Map();
+    
+    // Simple fallback prices for copy trading
+    for (const mint of tokenMints) {
+      const price = mint === config.NATIVE_SOL_MINT ? 150 : 0;
+      fastPrices.set(mint, price);
+    }
+    
+    console.log(`[PriceAPI-FAST] ✅ Fast prices set (saved ~100-300ms by skipping DAS)`);
+    return fastPrices;
+  }
 
 async findAmmPoolForToken(tokenMint) {
     if (!tokenMint || !config.HELIUS_API_KEY) {

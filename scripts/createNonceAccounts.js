@@ -4,33 +4,49 @@
  * Script to create nonce accounts for existing wallets that don't have them
  */
 
-const { DatabaseManager } = require('../database/databaseManager');
+const { DataManager } = require('../dataManager');
 const WalletManager = require('../walletManager');
 const { SolanaManager } = require('../solanaManager');
 const { encrypt } = require('../encryption');
+const { Keypair } = require('@solana/web3.js');
 const bs58 = require('bs58');
 const { shortenAddress } = require('../utils.js');
 
 class NonceAccountCreator {
     constructor() {
-        this.databaseManager = new DatabaseManager();
+        this.dataManager = new DataManager();
         this.solanaManager = new SolanaManager();
-        this.walletManager = new WalletManager(this.databaseManager);
+        this.walletManager = new WalletManager(this.dataManager);
         this.walletManager.setConnection(this.solanaManager.connection);
     }
 
     async initialize() {
-        await this.databaseManager.initialize();
+        await this.dataManager.initialize();
         console.log('🔧 NonceAccountCreator initialized');
     }
 
     async createNonceAccountsForExistingWallets() {
         console.log('🔍 Finding wallets without nonce accounts...');
         
-        // Get all wallets that don't have nonce accounts
-        const walletsWithoutNonce = await this.databaseManager.all(
-            'SELECT * FROM user_wallets WHERE nonce_account_pubkey IS NULL'
-        );
+        // Get all wallets from the JSON data
+        const walletsData = await this.dataManager.readJsonFile('wallets.json');
+        const walletsWithoutNonce = [];
+
+        // Find wallets without nonce accounts
+        if (walletsData.user_wallets) {
+            for (const [chatId, userWallets] of Object.entries(walletsData.user_wallets)) {
+                for (const [label, walletData] of Object.entries(userWallets)) {
+                    if (!walletData.nonce_account_pubkey) {
+                        walletsWithoutNonce.push({
+                            chatId,
+                            label,
+                            public_key: walletData.publicKey,
+                            private_key: walletData.privateKey
+                        });
+                    }
+                }
+            }
+        }
 
         console.log(`📊 Found ${walletsWithoutNonce.length} wallets without nonce accounts`);
 
@@ -43,18 +59,8 @@ class NonceAccountCreator {
             try {
                 console.log(`\n🔧 Creating nonce account for wallet: ${walletRow.label} (${shortenAddress(walletRow.public_key)})`);
                 
-                // Get the wallet's keypair
-                const wallet = await this.walletManager.getWalletById(walletRow.id);
-                if (!wallet) {
-                    console.error(`❌ Could not retrieve wallet ${walletRow.id}`);
-                    continue;
-                }
-
-                const keypair = await this.walletManager.getKeypairById(walletRow.id);
-                if (!keypair) {
-                    console.error(`❌ Could not retrieve keypair for wallet ${walletRow.id}`);
-                    continue;
-                }
+                // Create keypair from private key
+                const keypair = Keypair.fromSecretKey(bs58.decode(walletRow.private_key));
 
                 // Check wallet balance
                 const balance = await this.solanaManager.connection.getBalance(keypair.publicKey);
@@ -72,11 +78,13 @@ class NonceAccountCreator {
                 // Encrypt the nonce account private key
                 const encryptedNoncePrivateKey = await encrypt(bs58.encode(nonceAccountKeypair.secretKey), this.walletManager.encryptionKey);
 
-                // Update the database
-                await this.databaseManager.run(
-                    'UPDATE user_wallets SET nonce_account_pubkey = ?, encrypted_nonce_private_key = ? WHERE id = ?',
-                    [nonceAccountPubkey.toBase58(), encryptedNoncePrivateKey, walletRow.id]
-                );
+                // Update the wallet data in JSON
+                const walletsData = await this.dataManager.readJsonFile('wallets.json');
+                if (walletsData.user_wallets && walletsData.user_wallets[walletRow.chatId] && walletsData.user_wallets[walletRow.chatId][walletRow.label]) {
+                    walletsData.user_wallets[walletRow.chatId][walletRow.label].nonce_account_pubkey = nonceAccountPubkey.toBase58();
+                    walletsData.user_wallets[walletRow.chatId][walletRow.label].encrypted_nonce_private_key = encryptedNoncePrivateKey;
+                    await this.dataManager.writeJsonFile('wallets.json', walletsData);
+                }
 
                 console.log(`✅ Nonce account ${shortenAddress(nonceAccountPubkey.toBase58())} created and linked to wallet ${walletRow.label}`);
 
@@ -90,7 +98,8 @@ class NonceAccountCreator {
     }
 
     async close() {
-        await this.databaseManager.close();
+        // DataManager doesn't need explicit closing for JSON files
+        console.log('✅ NonceAccountCreator cleanup completed');
     }
 }
 

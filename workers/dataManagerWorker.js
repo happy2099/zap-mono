@@ -6,20 +6,20 @@
 
 const { workerData } = require('worker_threads');
 const BaseWorker = require('./templates/baseWorker');
-const { DatabaseManager } = require('../database/databaseManager');
+const { DataManager } = require('../dataManager');
 
 class DataManagerWorker extends BaseWorker {
     constructor() {
         super();
-        this.databaseManager = null;
+        this.dataManager = null;
         this.cache = new Map();
         this.lastSaveTime = Date.now();
     }
 
     async customInitialize() {
         try {
-            this.databaseManager = new DatabaseManager();
-            await this.databaseManager.initialize();
+            this.dataManager = new DataManager();
+            await this.dataManager.initialize();
             
             this.logInfo('Database manager worker initialized successfully');
         } catch (error) {
@@ -53,27 +53,27 @@ class DataManagerWorker extends BaseWorker {
             switch (dataType) {
                 case 'traders':
                     if (params.userId) {
-                        data = await this.databaseManager.getTraders(params.userId);
+                        data = await this.dataManager.getTraders(params.userId);
                     } else {
                         // Get all traders for all users
-                        data = await this.databaseManager.all('SELECT * FROM traders');
+                        data = await this.dataManager.all('SELECT * FROM traders');
                     }
                     break;
                 case 'user':
-                    data = await this.databaseManager.getUser(params.chatId);
+                    data = await this.dataManager.getUser(params.chatId);
                     break;
                 case 'tradeStats':
                     if (params.userId) {
-                        data = await this.databaseManager.getTradeStats(params.userId);
+                        data = await this.dataManager.getTradeStats(params.userId);
                     } else {
-                        data = await this.databaseManager.all('SELECT * FROM trade_stats');
+                        data = await this.dataManager.all('SELECT * FROM trade_stats');
                     }
                     break;
                 case 'tradeHistory':
-                    data = await this.databaseManager.getTradeHistory(params.userId, params.limit || 50);
+                    data = await this.dataManager.getTradeHistory(params.userId, params.limit || 50);
                     break;
                 case 'withdrawalHistory':
-                    data = await this.databaseManager.getWithdrawalHistory(params.userId, params.limit || 20);
+                    data = await this.dataManager.getWithdrawalHistory(params.userId, params.limit || 20);
                     break;
                 default:
                     throw new Error(`Unknown data type: ${dataType}`);
@@ -97,16 +97,16 @@ class DataManagerWorker extends BaseWorker {
         try {
             switch (dataType) {
                 case 'user':
-                    await this.databaseManager.createUser(params.chatId, data);
+                    await this.dataManager.createUser(params.chatId, data);
                     break;
                 case 'trader':
-                    await this.databaseManager.addTrader(params.userId, data.name, data.wallet);
+                    await this.dataManager.addTrader(params.userId, data.name, data.wallet);
                     break;
                 case 'tradeStats':
-                    await this.databaseManager.updateTradeStats(params.userId, data);
+                    await this.dataManager.updateTradeStats(params.userId, data);
                     break;
                 case 'trade':
-                    await this.databaseManager.recordTrade(
+                    await this.dataManager.recordTrade(
                         params.userId, 
                         params.traderId, 
                         data.signature, 
@@ -118,7 +118,7 @@ class DataManagerWorker extends BaseWorker {
                     );
                     break;
                 case 'withdrawal':
-                    await this.databaseManager.recordWithdrawal(params.userId, data.amount, data.signature);
+                    await this.dataManager.recordWithdrawal(params.userId, data.amount, data.signature);
                     break;
                 default:
                     throw new Error(`Unknown data type: ${dataType}`);
@@ -142,13 +142,13 @@ class DataManagerWorker extends BaseWorker {
         try {
             switch (dataType) {
                 case 'user':
-                    await this.databaseManager.updateUserSettings(params.chatId, data);
+                    await this.dataManager.updateUserSettings(params.chatId, data);
                     break;
                 case 'trader':
-                    await this.databaseManager.updateTraderStatus(params.userId, data.wallet, data.active);
+                    await this.dataManager.updateTraderStatus(params.userId, data.wallet, data.active);
                     break;
                 case 'trade':
-                    await this.databaseManager.updateTradeStatus(data.signature, data.status);
+                    await this.dataManager.updateTradeStatus(data.signature, data.status);
                     break;
                 default:
                     throw new Error(`Unknown data type for update: ${dataType}`);
@@ -172,21 +172,21 @@ class DataManagerWorker extends BaseWorker {
             switch (dataType) {
                 case 'trader':
                     if (params.userId && params.wallet) {
-                        await this.databaseManager.deleteTrader(params.userId, params.wallet);
+                        await this.dataManager.deleteTrader(params.userId, params.wallet);
                     }
                     break;
                 case 'user':
                     if (params.chatId) {
-                        await this.databaseManager.run('DELETE FROM users WHERE chat_id = ?', [params.chatId]);
+                        await this.dataManager.run('DELETE FROM users WHERE chat_id = ?', [params.chatId]);
                     }
                     break;
                 case 'all':
                     // Clear all data (use with caution)
-                    await this.databaseManager.run('DELETE FROM trades');
-                    await this.databaseManager.run('DELETE FROM traders');
-                    await this.databaseManager.run('DELETE FROM trade_stats');
-                    await this.databaseManager.run('DELETE FROM withdrawals');
-                    await this.databaseManager.run('DELETE FROM users');
+                    await this.dataManager.run('DELETE FROM trades');
+                    await this.dataManager.run('DELETE FROM traders');
+                    await this.dataManager.run('DELETE FROM trade_stats');
+                    await this.dataManager.run('DELETE FROM withdrawals');
+                    await this.dataManager.run('DELETE FROM users');
                     break;
                 default:
                     throw new Error(`Unknown data type for deletion: ${dataType}`);
@@ -233,8 +233,8 @@ class DataManagerWorker extends BaseWorker {
     async customCleanup() {
         try {
             // Close database connection
-            if (this.databaseManager) {
-                await this.databaseManager.close();
+            if (this.dataManager) {
+                await this.dataManager.close();
             }
             this.logInfo('Database manager worker cleanup completed');
         } catch (error) {
