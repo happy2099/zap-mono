@@ -4,4 +4,4 @@ node_modules
 transactions/
 *.md
 
-*.log
+*.loglogs/universal-cloning/analysis_2025-09-18.jsonl
