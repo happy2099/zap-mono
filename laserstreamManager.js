@@ -230,7 +230,20 @@ class LaserStreamManager extends EventEmitter {
                     
                     // For logging purposes, encode to string
                     const signatureString = bs58.encode(signatureBuffer);
-                    console.log(`[LASERSTREAM-PRO] ✅ Source Wallet Identified: ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureString)}`);
+                    // Get trader name for better logging
+                    let displayName = shortenAddress(sourceWallet);
+                    if (this.parentWorker && typeof this.parentWorker.getTraderNameFromWallet === 'function') {
+                        try {
+                            const traderName = await this.parentWorker.getTraderNameFromWallet(sourceWallet);
+                            if (traderName) {
+                                displayName = `${traderName} (${shortenAddress(sourceWallet)})`;
+                            }
+                        } catch (e) {
+                            // Fallback to short address if lookup fails
+                        }
+                    }
+                    
+                    console.log(`[LASERSTREAM-PRO] ✅ Source Wallet Identified: ${displayName} | Sig: ${shortenAddress(signatureString)}`);
                     
                     // The handoff to the traderMonitorWorker's handler.
                     if (this.parentWorker && typeof this.parentWorker.handleTraderActivity === 'function') {

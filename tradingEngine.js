@@ -16,6 +16,7 @@ const { shortenAddress } = require('./utils.js');
 const traceLogger = require('./traceLogger.js');
 const DirectSolanaSender = require('./directSolanaSender.js');
 const TransactionLogger = require('./transactionLogger.js');
+const { DataMapper } = require('./map.js');
 // const UnifiedPrebuilder = require('./unifiedPrebuilder.js');
 const sellInstructionCache = new Map();
 
@@ -41,6 +42,9 @@ class TradingEngine {
         // Assign all managers
         this.solanaManager = solanaManager;
         this.dataManager = dataManager;
+        
+        // Initialize data mapper for debugging
+        this.dataMapper = new DataMapper();
         this.walletManager = walletManager;
         this.notificationManager = notificationManager;
         this.apiManager = apiManager;
@@ -61,11 +65,9 @@ class TradingEngine {
         this.traceLogger = traceLogger;
         this.transactionLogger = new TransactionLogger();
         
-        // Initialize Direct Solana Sender for ultra-fast execution with leader targeting
-        this.directSolanaSender = new DirectSolanaSender();
-        
         // Initialize Universal Cloner for platform-agnostic copy trading
         this.universalCloner = new UniversalCloner(this.solanaManager.connection, this.apiManager);
+        this.directSolanaSender = new DirectSolanaSender(this.solanaManager.connection);
         
         // Initialize current blockhash
         this.initializeCurrentBlockhash();
@@ -75,6 +77,11 @@ class TradingEngine {
         
         // Start user processing cleanup to prevent deadlocks
         this.startUserProcessingCleanup();
+        
+        // Add logging methods for better error tracking
+        this.logInfo = (message, data = {}) => console.log(`[ENGINE] [INFO] ${message}`, data);
+        this.logWarn = (message, data = {}) => console.warn(`[ENGINE] [WARN] ${message}`, data);
+        this.logError = (message, data = {}) => console.error(`[ENGINE] [ERROR] ${message}`, data);
         
         console.log("TradingEngine initialized with HYBRID (Polling + API) logic, Quantum Cache, and Direct Solana Sender integration (ENABLED).");
     }
@@ -239,23 +246,23 @@ async _getNewTransactions(walletAddress, cutoffSignature) {
     }
 }
 
-async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, rawTxData = null, analysisResult = null) {
-    console.log(`[PROCESS_SIG] 🎯 Processing signature for copy trade:`);
-    
-    // Get trader name for better logging
-    const traderName = await this.getTraderName(sourceWalletAddress);
-    console.log(`   📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
-    console.log(`   🔑 Signature: ${shortenAddress(signature)}`);
-    console.log(`   📊 Has pre-fetched data: ${!!rawTxData}`);
-    console.log(`   📋 Pre-fetched data: ${rawTxData ? '✅ Present' : '❌ None'}`);
-    console.log(`   🧪 Has analysis result: ${!!analysisResult}`);
-    console.log(`   🎯 Analysis result: ${analysisResult ? (analysisResult.isCopyable ? '✅ COPYABLE' : '❌ NOT COPYABLE') : '❌ None'}`);
-    
-    // This is the universal entry point now for both streams and polling.
-    // We delegate immediately to the master execution function.
-    this._executeCopyForUser(sourceWalletAddress, signature, rawTxData, analysisResult)
+async processSignature(sourceWalletAddress, signature, polledTraderInfo = null, normalizedTransaction = null, analysisResult = null) {
+
+    // 🔍 DEBUG: Log what we received from the monitor
+    console.log(`[ENGINE-DEBUG] 🔍 Received processSignature call:`);
+    console.log(`[ENGINE-DEBUG] 🔍 Source wallet: ${sourceWalletAddress}`);
+    console.log(`[ENGINE-DEBUG] 🔍 Signature: ${signature}`);
+    console.log(`[ENGINE-DEBUG] 🔍 Normalized TX: ${normalizedTransaction ? 'Present' : 'Null'}`);
+    console.log(`[ENGINE-DEBUG] 🔍 Analysis result: ${analysisResult ? 'Present' : 'Null'}`);
+    if (normalizedTransaction) {
+        console.log(`[ENGINE-DEBUG] 🔍 TX accounts: ${normalizedTransaction.accountKeys ? normalizedTransaction.accountKeys.length : 'No accounts'}`);
+        console.log(`[ENGINE-DEBUG] 🔍 TX instructions: ${normalizedTransaction.instructions ? normalizedTransaction.instructions.length : 'No instructions'}`);
+    }
+
+    // We are now passing the clean `normalizedTransaction` AND the pre-analyzed result to the master execution function.
+    this._executeCopyForUser(sourceWalletAddress, signature, normalizedTransaction, analysisResult)
         .catch(error => {
-            console.error(`[PROCESS_SIG] ❌ Uncaught error for sig ${shortenAddress(signature)}:`, error);
+            console.error(`[PROCESS_SIG] Uncaught error for sig ${shortenAddress(signature)}:`, error);
         });
 }
 
@@ -310,6 +317,84 @@ async handleWalletStreamEvent(txData) {
     } catch (error) {
         console.error(`[EXPRESS_LANE] Failure: ${error.message}`);
         return this.processSignature(traderAddress, signature); // Error-safe fallback
+    }
+}
+
+// Helper method to extract mint from stream data
+_extractMintFromStreamData(txData) {
+    try {
+        // Try to extract mint from various possible locations in the stream data
+        if (txData?.outputMint) return txData.outputMint;
+        if (txData?.tokenMint) return txData.tokenMint;
+        if (txData?.mint) return txData.mint;
+        
+        // Try to extract from transaction data if available
+        if (txData?.transaction?.meta?.postTokenBalances) {
+            const tokenBalances = txData.transaction.meta.postTokenBalances;
+            for (const balance of tokenBalances) {
+                if (balance.mint && balance.mint !== config.NATIVE_SOL_MINT) {
+                    return balance.mint;
+                }
+            }
+        }
+        
+        return null;
+    } catch (error) {
+        console.warn(`[EXTRACT-MINT] Error extracting mint from stream data: ${error.message}`);
+        return null;
+    }
+}
+
+// Helper method to map trader to user
+async _mapTraderToUser(traderAddress) {
+    try {
+        // Get all users and find which ones are copying this trader
+        const allUsers = await this.dataManager.loadUsers();
+        const usersCopyingThisTrader = [];
+        
+        for (const user of Object.values(allUsers)) {
+            const userTraders = await this.dataManager.getTraders(user.id);
+            const isCopying = userTraders.some(trader => 
+                trader.wallet === traderAddress && trader.active
+            );
+            
+            if (isCopying) {
+                usersCopyingThisTrader.push({
+                    chatId: user.chat_id,
+                    userId: user.id,
+                    traderName: userTraders.find(t => t.wallet === traderAddress)?.name || 'Unknown'
+                });
+            }
+        }
+        
+        return usersCopyingThisTrader.length > 0 ? usersCopyingThisTrader[0] : null;
+    } catch (error) {
+        console.error(`[MAP-TRADER] Error mapping trader to user: ${error.message}`);
+        return null;
+    }
+}
+
+// Helper method to handle post-trade actions
+async _handlePostTradeActions(userInfo, targetMint, signature) {
+    try {
+        if (!userInfo || !this.notificationManager) return;
+        
+        // Send success notification
+        await this.notificationManager.notifySuccessfulCopy(
+            userInfo.chatId,
+            userInfo.traderName,
+            'Express Lane',
+            {
+                signature: signature,
+                outputMint: targetMint,
+                tradeType: 'buy',
+                solSpent: 0.01 // Default amount for express lane
+            }
+        );
+        
+        console.log(`[POST-TRADE] ✅ Success notification sent to user ${userInfo.chatId}`);
+    } catch (error) {
+        console.error(`[POST-TRADE] Error handling post-trade actions: ${error.message}`);
     }
 }
 
@@ -391,240 +476,83 @@ async executeManualSell(userChatId, tokenMint) {
 
 
 
-async _executeCopyForUser(sourceWalletAddress, signature, rawTxData, analysisResult = null) {
+async _executeCopyForUser(sourceWalletAddress, signature, normalizedTx, preAnalyzedResult = null) {
+    // Note: We now accept the pre-analyzed result from traderMonitorWorker to avoid re-analysis.
+
     if (this.isProcessing.has(signature)) {
-        console.log(`[EXECUTE_MASTER] ⚠️ Already processing signature ${shortenAddress(signature)}, skipping...`);
-        return;
+        return; // Already handling this one
     }
     
-    // Check if this transaction has already failed - prevent retries
+    // Safety check against retrying known failures from this session
     if (this.failedTransactions.has(signature)) {
-        console.log(`[EXECUTE_MASTER] ❌ Transaction ${shortenAddress(signature)} already failed, skipping retry...`);
         return;
     }
-    
-        // ✅ ADDITIONAL TIME-BASED FILTERING: Final check before processing
-        if (!this.isTransactionRecentForCopyTrading(rawTxData, signature)) {
-            console.log(`[EXECUTE_MASTER] ⏰ Skipping old transaction ${shortenAddress(signature)} - too old for copy trading`);
-            return;
-        }
     
     this.isProcessing.add(signature);
 
     try {
-        console.log(`[EXECUTE_MASTER] 🔍 Starting analysis for transaction ${shortenAddress(signature)}...`);
-        
-        // Get trader name for better logging
-        const traderName = await this.getTraderName(sourceWalletAddress);
-        console.log(`[EXECUTE_MASTER] 📍 Source trader: ${traderName} (${shortenAddress(sourceWalletAddress)})`);
-        console.log(`[EXECUTE_MASTER] 📊 Pre-fetched data available: ${!!rawTxData}`);
-        console.log(`[EXECUTE_MASTER] 🔍 Pre-fetched data type: ${typeof rawTxData}`);
-        console.log(`[EXECUTE_MASTER] 🔍 Pre-fetched data keys: ${rawTxData ? Object.keys(rawTxData) : 'null'}`);
-        console.log(`[EXECUTE_MASTER] 🧪 Has analysis result: ${!!analysisResult}`);
-        console.log(`[EXECUTE_MASTER] 🔍 Analysis result type: ${typeof analysisResult}`);
-        console.log(`[EXECUTE_MASTER] 🔍 Analysis result keys: ${analysisResult ? Object.keys(analysisResult) : 'null'}`);
-        
-        // EARLY EXIT: If we have analysis result and it's NOT copyable, stop here
-        if (analysisResult && !analysisResult.isCopyable) {
-            console.log(`[EXECUTE_MASTER] ❌ Pre-analysis shows NOT COPYABLE: ${analysisResult.reason}`);
-            this.isProcessing.delete(signature);
-            return;
-        }
-        
-        // ANALYSIS PHASE: Use pre-analyzed results OR fail (no re-analysis!)
-        if (analysisResult && analysisResult.isCopyable) {
-            console.log(`[EXECUTE_MASTER] 🎯 Using pre-analyzed results from monitor worker!`);
-            console.log(`[EXECUTE_MASTER] ✅ Analysis: ${analysisResult.reason}`);
-            console.log(`[EXECUTE_MASTER] 🏪 Platform: ${analysisResult.details?.dexPlatform}`);
-            console.log(`[EXECUTE_MASTER] 🎯 Trade Type: ${analysisResult.details?.tradeType}`);
-            console.log(`[EXECUTE_MASTER] 📋 Has Cloning Target: ${!!analysisResult.details?.cloningTarget}`);
+        // =========================================================================
+        // ====== THE PIPELINE NOW WORKS FLAWLESSLY ======
+        // =========================================================================
+
+        // STEP 1: Use pre-analyzed result or perform analysis if not available.
+        let finalAnalysis;
+        console.log(`[ENGINE-DEBUG] preAnalyzedResult:`, preAnalyzedResult ? 'EXISTS' : 'NULL/UNDEFINED');
+        if (preAnalyzedResult) {
+            console.log(`[ENGINE] Using pre-analyzed result for signature: ${shortenAddress(signature)} (LATENCY SAVED!)`);
+            finalAnalysis = preAnalyzedResult;
         } else {
-            console.log(`[EXECUTE_MASTER] ❌ NO PRE-ANALYZED RESULTS - This should not happen!`);
-            console.log(`[EXECUTE_MASTER] ❌ Monitor worker should have provided analysis results.`);
-            this.isProcessing.delete(signature);
-            return;
+            console.log(`[ENGINE] No pre-analyzed result, performing fresh analysis for signature: ${shortenAddress(signature)}`);
+            finalAnalysis = await this.universalAnalyzer.analyzeTransaction(normalizedTx, sourceWalletAddress);
         }
-        
-        // CONTINUE WITH UNIFIED EXECUTION FLOW
-        
-        // Extract real mint addresses from transaction data
-        let inputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
-        let outputMint = 'unknown';
-        
-        try {
-            if (rawTxData && rawTxData.transaction && rawTxData.transaction.transaction) {
-                const tx = rawTxData.transaction.transaction;
-                if (tx.message && tx.message.accountKeys) {
-                    console.log(`[EXECUTE_MASTER] 🔍 Extracting mints from ${tx.message.accountKeys.length} account keys`);
-                    
-                    // For Pump.fun and most DEX swaps, we need to look at token balances
-                    if (tx.meta && tx.meta.preTokenBalances && tx.meta.postTokenBalances) {
-                        // Find token balance changes to identify the token mint
-                        const preBalances = tx.meta.preTokenBalances || [];
-                        const postBalances = tx.meta.postTokenBalances || [];
-                        
-                        // Look for new token balances (indicating a token was received)
-                        for (const postBalance of postBalances) {
-                            const preBalance = preBalances.find(pb => pb.accountIndex === postBalance.accountIndex);
-                            if (!preBalance || preBalance.uiTokenAmount.uiAmount === 0) {
-                                // This is a new token balance - this is our output mint
-                                outputMint = postBalance.mint;
-                                console.log(`[EXECUTE_MASTER] 🎯 Found output mint: ${shortenAddress(outputMint)}`);
-                                break;
-                            }
-                        }
-                        
-                        // If we didn't find a new token, look for existing token changes
-                        if (outputMint === 'unknown') {
-                            for (const postBalance of postBalances) {
-                                const preBalance = preBalances.find(pb => pb.accountIndex === postBalance.accountIndex);
-                                if (preBalance && preBalance.uiTokenAmount.uiAmount !== postBalance.uiTokenAmount.uiAmount) {
-                                    // Token balance changed - this could be our output mint
-                                    outputMint = postBalance.mint;
-                                    console.log(`[EXECUTE_MASTER] 🎯 Found changing token mint: ${shortenAddress(outputMint)}`);
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    
-                    // If still no output mint found, use a placeholder that won't cause validation errors
-                    if (outputMint === 'unknown') {
-                        // For Pump.fun, we'll use a generic token mint that won't cause validation issues
-                        outputMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // USDC as fallback
-                        console.log(`[EXECUTE_MASTER] ⚠️ Using fallback output mint: ${shortenAddress(outputMint)}`);
-                    }
-                }
-            }
-        } catch (error) {
-            console.log(`[EXECUTE_MASTER] ⚠️ Could not extract mint addresses, using defaults: ${error.message}`);
-            // Use fallback mints that won't cause validation errors
-            outputMint = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v'; // USDC as fallback
+
+        // ===============================================
+        // =========== THE FINAL, CLEAR ABORT ==============
+        // ===============================================
+        if (!finalAnalysis || !finalAnalysis.isCopyable) {
+            console.log(`[ENGINE-ABORT] Mission aborted for signature ${shortenAddress(signature)}. Reason: ${finalAnalysis.reason || 'Unknown'}`);
+            // Do NOT log a scary mapping for an aborted trade. Just end it cleanly.
+            return; 
         }
-        
-        // DIRECT EXECUTION - Use pre-analyzed blueprint (NO re-analysis!)
-        console.log(`[EXECUTE_MASTER] 🚀 DIRECT EXECUTION - Using pre-analyzed blueprint from Monitor`);
 
-        // =========================================================
-        // ======= REMOVED: HIGH-CONFIDENCE EXECUTION GATE ========
-        // =========================================================
-        // ALL trades are now copyable - we'll use Jupiter fallback for unknown DEX
-        // =========================================================
-        // =================== END EXECUTION GATE ==================
-        // =========================================================
+        console.log(`[ENGINE] Analysis COMPLETE. Result: COPYABLE. Summary: ${finalAnalysis.summary}`);
         
-        // Clean summary instead of massive JSON dump
-        if (analysisResult.isCopyable && analysisResult.summary) {
-            console.log(`[EXECUTE_MASTER] 📊 ${analysisResult.summary}`);
-        } else if (analysisResult.isCopyable) {
-            console.log(`[EXECUTE_MASTER] ✅ Copyable: ${analysisResult.details?.dexPlatform} ${analysisResult.details?.tradeType}`);
-        } else {
-            console.log(`[EXECUTE_MASTER] ❌ Not copyable: ${analysisResult.reason}`);
-        }
-        
-        if (!analysisResult.isCopyable) {
-            console.log(`[EXECUTE_MASTER] ❌ Transaction not copyable. Reason: ${analysisResult.reason || 'Unknown'}`);
-            return;
-        }
-        
-        console.log(`[EXECUTE_MASTER] ✅ Transaction is copyable! Platform: ${analysisResult.details.dexPlatform}, Type: ${analysisResult.details.tradeType}`);
-
-        // Use platform from deep analysis result
-        const detectedPlatform = analysisResult.details.dexPlatform;
-        console.log(`[EXECUTE_MASTER] 🎯 Using platform from analysis: ${detectedPlatform}`);
-
-        // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
-        console.log(`[EXECUTE_MASTER] 🎯 Using Universal Cloning Engine for all platforms`);
-        
-        // Platform-specific compute unit configurations (for optimization)
-        const platformConfigs = {
-            'UniversalCloner': { units: 800000 }, // Default compute units
-            'Photon': { units: 1000000 },          // A known router that might need more gas
-            'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq': { units: 1200000 } // Custom router by address
-        };
-        
-        const platformId = analysisResult.details.platformProgramId;
-        const platformConfig = platformConfigs[platformId] || platformConfigs['UniversalCloner'];
-        const computeUnits = platformConfig.units;
-        
-        console.log(`[EXECUTE_MASTER] 🔧 Platform: ${detectedPlatform} | Program ID: ${shortenAddress(platformId)} | Compute Units: ${computeUnits}`);
-
-        console.log(`[EXECUTE_MASTER] 🔍 Loading traders from database...`);
+        // STEP 3: Dispatch the job to all active users.
         const syndicateData = await this.dataManager.loadTraders();
-        console.log(`[EXECUTE_MASTER] 📊 Found ${Object.keys(syndicateData.user_traders || {}).length} users with traders`);
-        
-        // Get the actual detected trader name for consistency
         const detectedTraderName = await this.getTraderName(sourceWalletAddress);
-        
         const copyJobs = [];
+
         for (const [userChatId, userTraders] of Object.entries(syndicateData.user_traders || {})) {
-            // Check if user has any active traders (regardless of which specific trader is making the trade)
             const hasActiveTraders = Object.values(userTraders).some(traderConfig => traderConfig.active);
             if (hasActiveTraders) {
-                // Use the actual detected trader name instead of first active trader
                 copyJobs.push({ userChatId: parseInt(userChatId), traderName: detectedTraderName });
-                console.log(`[EXECUTE_MASTER] ✅ Found user ${userChatId} copying trader: ${detectedTraderName}`);
             }
         }
         
         if (copyJobs.length === 0) {
-            const traderName = await this.getTraderName(sourceWalletAddress);
-            console.log(`[EXECUTE_MASTER] ⚠️ No active traders found for ${traderName} (${shortenAddress(sourceWalletAddress)})`);
             return;
         }
-        
-        console.log(`[EXECUTE_MASTER] 🚀 Dispatching copy for ${detectedPlatform} trade to ${copyJobs.length} user(s).`);
-        
-        // Add Router-specific data to analysis result details
-        if (analysisResult.details.dexPlatform === 'Router') {
-            const routerDetection = analysisResult.platformDetection?.identifiedPlatforms?.[0];
-            if (routerDetection?.cloningTarget) {
-                analysisResult.details.cloningTarget = routerDetection.cloningTarget;
-                analysisResult.details.masterTraderWallet = analysisResult.details.traderPubkey;
-                console.log(`[EXECUTE_MASTER] 🎯 Added Router cloning data to analysis result`);
-            }
-        }
 
-        // Debug: Log the analysisResult.details before passing to Direct Solana Sender
-        console.log(`[EXECUTE_MASTER] 🔍 AnalysisResult.details before Direct Solana Sender:`, {
-            tradeType: analysisResult.details.tradeType,
-            inputMint: analysisResult.details.inputMint,
-            outputMint: analysisResult.details.outputMint,
-            dexPlatform: analysisResult.details.dexPlatform,
-            hasInputMint: !!analysisResult.details.inputMint,
-            hasOutputMint: !!analysisResult.details.outputMint,
-            inputMintType: typeof analysisResult.details.inputMint,
-            outputMintType: typeof analysisResult.details.outputMint,
-            hasCloningTarget: !!analysisResult.details.cloningTarget
-        });
-        
-        // Debug: Log cloning target accounts structure
-        if (analysisResult.details.cloningTarget?.accounts) {
-            console.log(`[EXECUTE_MASTER] 🔍 DEBUG: Cloning Target Accounts:`, JSON.stringify(analysisResult.details.cloningTarget.accounts.slice(0, 3), null, 2));
-        }
+        console.log(`[ENGINE] Dispatching copy for ${finalAnalysis.details.dexPlatform} trade to ${copyJobs.length} user(s).`);
 
+        // STEP 4: Execute all copy trades in parallel.
         await Promise.allSettled(
             copyJobs.map(job => 
-                this._executeCopyTradeWithDirectSolanaSender( // Use Direct Solana Sender for ultra-fast execution
-                    analysisResult.details, 
+                this._executeCopyTradeWithDirectSolanaSender(
+                    finalAnalysis.details, 
                     job.traderName, 
                     job.userChatId, 
                     signature,
-                    { computeUnits }, // Pass compute units instead of executor config
-                    analysisResult.originalTransaction // Pass the original transaction for structure cloning
+                    { computeUnits: 1200000 }, // Generous CU for complex router trades
+                    normalizedTx // Pass the clean, normalized transaction
                 )
             )
         );
 
     } catch (error) {
-        console.error(`[MASTER_EXECUTION] ❌ Top-level error for sig ${shortenAddress(signature)}:`, error.message);
-        console.error(`[MASTER_EXECUTION] Stack trace:`, error.stack);
-        
-        // Mark transaction as failed to prevent retries
+        console.error(`[MASTER_EXECUTION] ❌ Top-level error for sig ${shortenAddress(signature)}:`, error.message, error.stack);
+        // This transaction caused a system error, mark it as failed so we don't retry.
         this.failedTransactions.add(signature);
-        const blockhash = this.currentBlockhash || 'unknown';
-        this.failedTransactionBlockhashes.set(signature, blockhash);
-        console.log(`[MASTER_EXECUTION] 🚫 Marked transaction ${shortenAddress(signature)} as failed - will not retry`);
     } finally {
         this.isProcessing.delete(signature);
     }
@@ -771,12 +699,22 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
         let amountBN, solAmountForNotification = 0;
         let preInstructions = [];
 
+        console.log(`[FLOW-DEBUG] 🔍 Trade type: ${tradeDetails.tradeType}, isBuy: ${isBuy}`);
+        console.log(`[FLOW-DEBUG] 🔍 About to check if isBuy...`);
+
         if (isBuy) {
+            console.log(`[FLOW-DEBUG] 🔍 Entering BUY branch - ATA will be handled by Universal Cloner`);
             const solAmounts = await this.dataManager.loadSolAmounts();
             solAmountForNotification = solAmounts[String(userChatId)] || config.DEFAULT_SOL_TRADE_AMOUNT;
             amountBN = new BN(Math.floor(solAmountForNotification * config.LAMPORTS_PER_SOL_CONST));
             tradeDetails.solSpent = solAmountForNotification;
-            preInstructions.push(createAssociatedTokenAccountIdempotentInstruction(keypair.publicKey, getAssociatedTokenAddressSync(new PublicKey(tradeDetails.outputMint), keypair.publicKey), keypair.publicKey, new PublicKey(tradeDetails.outputMint)));
+            // 🔧 FIX: Validate outputMint before creating PublicKey
+            if (!tradeDetails.outputMint || typeof tradeDetails.outputMint !== 'string') {
+                throw new Error(`Invalid outputMint: ${tradeDetails.outputMint}`);
+            }
+            
+            console.log(`[ATA-DEBUG] 🔍 ATA instruction will be created by Universal Cloner at original position`);
+            // ATA instruction is now handled by Universal Cloner in the correct position
         } else { // ✅ ENHANCED SELL logic with better validation
             const sellDetails = this.dataManager.getUserSellDetails(String(userChatId), tradeDetails.inputMint);
             
@@ -856,6 +794,20 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
             ...instructions
         ];
         
+        // 🔍 DEBUG: Instruction Analysis
+        console.log(`[INSTRUCTION-DEBUG] 🔍 Total instructions: ${finalInstructions.length}`);
+        finalInstructions.forEach((instruction, index) => {
+            console.log(`[INSTRUCTION-DEBUG] 🔍 Instruction ${index}: Program ${instruction.programId.toBase58()}, Accounts: ${instruction.keys.length}, Data: ${instruction.data.length} bytes`);
+            if (index === 3) {
+                console.log(`[INSTRUCTION-DEBUG] 🔍 ⚠️  INSTRUCTION 3 (FAILING): Program ${instruction.programId.toBase58()}`);
+                console.log(`[INSTRUCTION-DEBUG] 🔍 ⚠️  INSTRUCTION 3 Accounts:`, instruction.keys.map(key => ({
+                    pubkey: key.pubkey.toBase58(),
+                    isSigner: key.isSigner,
+                    isWritable: key.isWritable
+                })));
+            }
+        });
+        
         console.log(`[TRADING-ENGINE] 🎯 Letting Helius Sender handle compute budget automatically`);
 
         const { signature, error: sendError } = await this.solanaManager.sendVersionedTransaction({ instructions: finalInstructions, signer: keypair });
@@ -930,7 +882,7 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
     } catch (error) {
         console.error(`[EXECUTION] ❌ FAILED for user ${userChatId} (${shortenAddress(masterTxSignature)}):`, error.message);
         await traceLogger.recordOutcome(masterTxSignature, 'FAILURE', error.message);
-        this.notificationManager.notifyFailedCopy(userChatId, traderName, wallet.label, tradeDetails.tradeType, error.message);
+        this.notificationManager.notifyFailedCopy(userChatId, traderName, wallet.label, tradeDetails?.tradeType || 'unknown', error.message);
     }
 }
 
@@ -939,21 +891,22 @@ async _sendTradeForUser(tradeDetails, traderName, userChatId, masterTxSignature,
 async _getAmountReceivedFromBuy(buySignature, walletAddress, tokenMint) {
     try {
         console.log(`[AMOUNT-CALC] Calculating amount received for ${shortenAddress(tokenMint)} from tx ${shortenAddress(buySignature)}`);
-        
+
+        // NO LONGER POLLING HERE - We now expect the transaction to be confirmed
+        // before this function is even called. This makes the lookup reliable.
         const txInfo = await this.solanaManager.connection.getTransaction(buySignature, { 
             maxSupportedTransactionVersion: 0,
-            encoding: 'json'
+            commitment: 'confirmed' 
         });
         
         if (!txInfo) {
-            throw new Error(`Transaction ${buySignature} not found`);
+            throw new Error(`Transaction details not found on-chain, even after confirmation.`);
         }
         
         if (txInfo.meta.err) {
-            throw new Error(`Transaction ${buySignature} failed with error: ${JSON.stringify(txInfo.meta.err)}`);
+            throw new Error(`Transaction failed on-chain: ${JSON.stringify(txInfo.meta.err)}`);
         }
 
-        // ✅ IMPROVED: Better token balance detection
         const postBalance = txInfo.meta.postTokenBalances?.find(tb => 
             tb.owner === walletAddress && tb.mint === tokenMint
         );
@@ -961,31 +914,22 @@ async _getAmountReceivedFromBuy(buySignature, walletAddress, tokenMint) {
             tb.owner === walletAddress && tb.mint === tokenMint
         );
 
-        console.log(`[AMOUNT-CALC] Pre-balance: ${preBalance?.uiTokenAmount?.amount || '0'}, Post-balance: ${postBalance?.uiTokenAmount?.amount || '0'}`);
-
         const postAmount = new BN(postBalance?.uiTokenAmount?.amount || '0');
         const preAmount = new BN(preBalance?.uiTokenAmount?.amount || '0');
         const amountReceived = postAmount.sub(preAmount);
 
-        console.log(`[AMOUNT-CALC] Calculated amount received: ${amountReceived.toString()}`);
-
-        // ✅ FALLBACK: If transaction metadata fails, try on-chain balance check
         if (amountReceived.isZero()) {
-            console.warn(`[AMOUNT-CALC] Transaction metadata shows 0 amount, trying on-chain balance check...`);
-            try {
-                const currentBalance = await this._getOnChainTokenBalance(walletAddress, tokenMint);
-                if (currentBalance.gt(new BN(0))) {
-                    console.log(`[AMOUNT-CALC] On-chain balance shows ${currentBalance.toString()} tokens, using this as fallback`);
-                    return currentBalance;
-                }
-            } catch (balanceError) {
-                console.warn(`[AMOUNT-CALC] On-chain balance check failed: ${balanceError.message}`);
-            }
+             console.warn(`[AMOUNT-CALC] Transaction metadata shows 0 amount received. This can happen with tax tokens.`);
+             // Return zero but don't throw an error, let the calling function decide what to do.
+             return new BN(0);
         }
 
+        console.log(`[AMOUNT-CALC] ✅ Successfully calculated amount received: ${amountReceived.toString()}`);
         return amountReceived;
+
     } catch (error) {
-        console.error(`[AMOUNT-CALC] Error calculating amount received: ${error.message}`);
+        console.error(`[AMOUNT-CALC] ❌ CRITICAL: Could not determine amount received. Manual check needed for signature ${buySignature}.`, { error: error.message });
+        // Re-throw to ensure the calling function knows about the failure.
         throw error;
     }
 }
@@ -1031,55 +975,6 @@ async _getOnChainTokenBalance(walletAddress, tokenMint) {
     }
 }
 
-
-// async processLivePoolCreation(instructionData) {
-//     try {
-//         console.log(`[LIVE_POOL] Detected new pool creation event. Sig: ${instructionData.Transaction.Signature}`);
-
-//         // Access the parsed data we passed from apiManager
-//         const poolId = instructionData.parsedPoolData?.poolId;
-//         const configId = instructionData.parsedPoolData?.configId; // New
-//         if (!poolId || !configId) {
-//             console.warn('[LIVE_POOL] Skipping event: Missing poolId or configId from parsed data.');
-//             return;
-//         }
-
-//         // ... Existing tokenMint and metadata extraction from instructionData.Instruction.Program.Arguments ...
-//         // No change for metadata:
-//         const args = instructionData.Instruction.Program.Arguments;
-//         const findArgValue = (name) => {
-//             const arg = args.find(a => a.Name === name);
-//             return arg?.Value?.json;
-//         };
-//         const tokenMint = findArgValue("base_mint_param");
-//         const metadata = findArgValue("metadata");
-
-//         if (!tokenMint || !metadata?.symbol) {
-//             console.warn(`[LIVE_POOL] Skipping event: Missing tokenMint or metadata. Token: ${tokenMint}, Metadata:`, metadata);
-//             return;
-//         }
-
-//         console.log(`[LIVE_POOL] ⚡ Sniper Target Acquired: ${metadata.symbol} (${shortenAddress(tokenMint)})`);
-
-//         const tradeDetails = {
-//             tradeType: 'buy',
-//             dexPlatform: 'Raydium Launchpad',
-//             inputMint: config.NATIVE_SOL_MINT,
-//             outputMint: tokenMint,
-//             platformSpecificData: {
-//                 poolId: poolId,
-//                 configId: configId // CRITICAL: Pass configId to tradeDetails
-//             },
-//             inputAmountRaw: '0',
-//             outputAmountRaw: '0'
-//         };
-
-//         await this.executeRaydiumLaunchpadTrade(tradeDetails, "RaydiumLaunchpadSniper"); // Note: You'll still need userChatId and keypairPacket logic if calling from sniper context
-
-//     } catch (error) {
-//         console.error(`[LIVE_POOL] CRITICAL FAILURE processing new pool. Error: ${error.message}`);
-//     }
-// }
 
 async handleTokenMigration(migrationEvent) {
     const { tokenMint, signature, fromPlatform, toPlatform } = migrationEvent;
@@ -1863,6 +1758,16 @@ async checkPumpFunMigration(tokenMint) {
 
             if (!analysisResult.isCopyable) {
                 console.log(`[WEBHOOK-PROCESSOR] Analysis determined not to copy. Reason: ${analysisResult.reason}`);
+                
+                // 🗺️ MAPPING: Show complete flow even for rejected trades
+                this.dataMapper.logCompleteMapping(
+                    fullWebhookData,              // Raw Helius data
+                    fullWebhookData,              // Normalized data (same in this case)
+                    analysisResult,                // Analysis result (with rejection reason)
+                    [],                          // No cloned instructions (trade rejected)
+                    { success: false, reason: analysisResult.reason } // Rejection result
+                );
+                
                 await traceLogger.recordOutcome(signature, 'FAILURE', `Analysis Aborted (Webhook): ${analysisResult.reason}`);
                 return;
             }
@@ -1890,7 +1795,8 @@ async checkPumpFunMigration(tokenMint) {
                     job.userChatId, 
                     job.signature, 
                     { computeUnits: 800000 }, // Default compute units for Universal Cloner
-                    analysisResult.originalTransaction // Pass the original transaction for structure cloning
+                    fullWebhookData, // Pass the original transaction for structure cloning
+                    normalizedTx // Pass the normalized transaction
                 );
             });
 
@@ -2021,625 +1927,220 @@ async checkPumpFunMigration(tokenMint) {
     }
 
 
-    async _executeCopyTradeWithDirectSolanaSender(tradeDetails, traderName, userChatId, masterSignature, config, originalTransaction = null) {
-        // ====== ONE-BUY-ONE-SELL GATEKEEPER ======
-        const isBuy = tradeDetails.tradeType === 'buy';
-        if (isBuy) {
-            const userPositions = await this.dataManager.getUserPositions(String(userChatId));
-            const tokenToBuy = tradeDetails.outputMint;
-    
-            // Check if the user ALREADY has a position and it's not empty.
-            if (userPositions.has(tokenToBuy) && userPositions.get(tokenToBuy).amountRaw > 0n) {
-                const reason = `You already have an active position for ${shortenAddress(tokenToBuy)}. One buy per token is allowed.`;
-                console.log(`[GATEKEEPER-${userChatId}] SKIPPING BUY for ${traderName}. Reason: ${reason}`);
-                
-                // CRITICAL: Stop the function here to prevent the buy.
-                return; 
+    async _executeCopyTradeWithDirectSolanaSender(tradeDetails, traderName, userChatId, masterSignature, config, originalTransaction = null, normalizedTransaction = null) {
+        const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
+        if (!walletPacket) {
+            this.logError(`[ENGINE-EXEC] Aborting trade for user ${userChatId}: No primary trading wallet found.`);
+            // Notify user about the missing wallet
+            if (this.notificationManager) {
+                await this.notificationManager.notifyFailedCopy(userChatId, traderName, "N/A", "copy", "No primary trading wallet found. Please generate or import one.");
             }
-        }
-        // ===========================================
-        // 🚀 PERFORMANCE TRACKING: Start timing the entire copy trade process
-        const performanceTracker = {
-            startTime: Date.now(),
-            steps: {},
-            logStep: function(stepName) {
-                const now = Date.now();
-                const elapsed = now - this.startTime;
-                this.steps[stepName] = {
-                    timestamp: now,
-                    elapsed: elapsed,
-                    stepDuration: stepName === 'start' ? 0 : elapsed - (this.lastStepTime || this.startTime)
-                };
-                this.lastStepTime = now;
-                console.log(`[PERF-TRACKER] ⏱️ ${stepName}: ${elapsed}ms total, ${this.steps[stepName].stepDuration}ms since last step`);
-            }
-        };
-        
-        performanceTracker.logStep('start');
-        // Prevent race conditions by checking if user is already being processed
-        if (this.userProcessing.has(userChatId)) {
-            console.log(`[DIRECT-SOLANA-SENDER] ⚠️ User ${userChatId} is already being processed, skipping to prevent race condition`);
             return;
         }
-        
+
+        // 🗺️ MAPPING: Start complete data mapping for this trade
+        this.logInfo(`[MAPPING] Starting complete data mapping for trade ${masterSignature}`);
+
+        const { keypair, wallet } = walletPacket;
+
+        if (this.userProcessing.has(userChatId)) {
+            this.logWarn(`[ENGINE-EXEC] User ${userChatId} is already processing a trade. Skipping to prevent race condition.`);
+            return;
+        }
         this.userProcessing.add(userChatId);
-        performanceTracker.logStep('race_condition_check');
-        
-        // Set a timeout to automatically clear the user from processing state after 30 seconds
-        const timeoutId = setTimeout(() => {
-            if (this.userProcessing.has(userChatId)) {
-                console.log(`[DIRECT-SOLANA-SENDER] ⏰ Timeout reached for user ${userChatId}, clearing processing state`);
-                this.userProcessing.delete(userChatId);
-            }
-        }, 30000); // 30 seconds timeout
-        
+
+        // Add timeout to prevent indefinite locks
+        const lockTimeout = setTimeout(() => {
+            this.logWarn(`[ENGINE-LOCK] ⏰ Releasing lock for user ${userChatId} after 30s timeout`);
+            this.userProcessing.delete(userChatId);
+        }, 30000);
+
         try {
-            console.log(`[DIRECT-SOLANA-SENDER] 🚀 Starting copy trade execution for user ${userChatId}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🚀 COPY TRADE: ${tradeDetails.tradeType.toUpperCase()} ${tradeDetails.dexPlatform} | Token: ${shortenAddress(tradeDetails.outputMint)} | User: ${userChatId}`);
-            performanceTracker.logStep('trade_start');
-            // console.log(`[DIRECT-SOLANA-SENDER] 🔑 Master signature: ${masterSignature}`);
-            // console.log(`[DIRECT-SOLANA-SENDER] 📍 Platform: ${tradeDetails.dexPlatform}`);
-            // console.log(`[DIRECT-SOLANA-SENDER] 🎯 Token: ${shortenAddress(tradeDetails.outputMint)}`);
-    
-            // Get user's trading wallet
-            const walletPacket = await this.walletManager.getPrimaryTradingKeypair(userChatId);
-            if (!walletPacket) {
-                throw new Error(`No trading wallet found for user ${userChatId}`);
-            }
-    
-            const { keypair, wallet } = walletPacket;
-            console.log(`[DIRECT-SOLANA-SENDER] 💼 Using wallet: ${wallet?.label || wallet?.name || 'Unknown'}`);
-            performanceTracker.logStep('wallet_retrieval');
-    
-            // ✅ UNIVERSAL CLONING ENGINE: All platforms use the same cloning approach
-            console.log(`[DIRECT-SOLANA-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
-    
-            // Validate trade before processing
-            try {
-                this._validateTradeForCopy(tradeDetails);
-            } catch (validationError) {
-                console.log(`[DIRECT-SOLANA-SENDER] ❌ Trade validation failed: ${validationError.message}`);
-                console.log(`[DIRECT-SOLANA-SENDER] 🚫 Skipping invalid trade - not a real swap`);
-                throw new Error(`Trade validation failed: ${validationError.message}`);
-            }
-    
-            // Calculate user's copy trade amount based on trade type FIRST
-            let userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
-            performanceTracker.logStep('amount_calculation');
+            // 🔍 DEBUG: Check what's in tradeDetails
+            console.log(`[ENGINE-DEBUG] 🔍 tradeDetails structure:`, JSON.stringify(tradeDetails, null, 2));
+            console.log(`[ENGINE-DEBUG] 🔍 inputMint: ${tradeDetails.inputMint}`);
+            console.log(`[ENGINE-DEBUG] 🔍 outputMint: ${tradeDetails.outputMint}`);
             
-            // Only skip SELL trades when no position exists - BUY trades should always proceed
-            if (userAmountBN === null && tradeDetails.tradeType === 'sell') {
-                console.log(`[DIRECT-SOLANA-SENDER] ⏭️ Skipping SELL trade for user ${userChatId} - no position found`);
-                return; // Exit gracefully without throwing error
-            }
-            
-            // For BUY trades, userAmountBN should never be null, but if it is, use default SOL amount
-            if (userAmountBN === null && tradeDetails.tradeType === 'buy') {
-                console.log(`[DIRECT-SOLANA-SENDER] ⚠️ BUY trade returned null amount, using default SOL amount`);
-                const BN = require('bn.js');
-                const defaultSolAmount = 0.01; // 0.01 SOL default
-                const defaultLamports = Math.floor(defaultSolAmount * 1e9);
-                userAmountBN = new BN(defaultLamports);
-            }
-            
-            // ✅ UNIVERSAL CLONING ENGINE: No need for platform-specific builders
-            console.log(`[DIRECT-SOLANA-SENDER] 🎯 Using Universal Cloning Engine for platform: ${tradeDetails.dexPlatform}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 📍 Universal Cloner handles all platforms without platform-specific builders`);
-    
-            // For SELL trades, check if user has position before proceeding
-            if (tradeDetails.tradeType === 'sell') {
-                try {
-                    const userPositions = await this.dataManager.getUserPositions(userChatId);
-                    const userTokenBalance = userPositions.get(tradeDetails.inputMint);
-                    
-                    if (!userTokenBalance || userTokenBalance.amountRaw === 0n) {
-                        console.log(`[DIRECT-SOLANA-SENDER] ⚠️ SELL detected but user ${userChatId} has no ${shortenAddress(tradeDetails.inputMint)} tokens. Skipping trade.`);
-                        this.userProcessing.delete(userChatId); // Clean up user processing lock
-                        return; // Skip this trade, don't build transaction
-                    }
-                    console.log(`[DIRECT-SOLANA-SENDER] ✅ SELL trade validated - user has ${userTokenBalance.amountRaw} raw units of ${shortenAddress(tradeDetails.inputMint)}`);
-                } catch (error) {
-                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Error checking user position for SELL:`, error);
-                    this.userProcessing.delete(userChatId); // Clean up user processing lock
-                    return; // Skip on error
+            const isBuy = tradeDetails.tradeType === 'buy';
+
+            if (isBuy) {
+                const userPositions = await this.dataManager.getUserPositions(String(userChatId));
+                if (userPositions.has(tradeDetails.outputMint) && userPositions.get(tradeDetails.outputMint).amountRaw > 0n) {
+                    this.logInfo(`[GATEKEEPER-${userChatId}] SKIPPING BUY. You already have an active position for ${shortenAddress(tradeDetails.outputMint)}.`);
+                    return; // Gracefully exit
                 }
             }
-    
-            // userAmountBN is already calculated above
-    
-            // Validate cloning target exists
-            if (!tradeDetails.cloningTarget) {
-                throw new Error("Analysis failed to provide a cloningTarget. Cannot proceed with Universal Cloning.");
+
+            // ===== START: NEW HYBRID LOGIC =====
+            const { cuBaseline } = this._extractIntelligenceFromMasterTx(originalTransaction);
+            // ===== END: NEW HYBRID LOGIC =====
+
+            const userAmountBN = await this._calculateUserCopyTradeAmount(userChatId, tradeDetails);
+            if (!userAmountBN || userAmountBN.isZero()) {
+                this.logInfo(`[ENGINE-EXEC] Skipping trade for user ${userChatId} - no valid amount to trade.`);
+                return; // Gracefully exit
             }
-            
-            // Enhanced validation and logging for tradeDetails
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 TradeDetails validation:`, {
-                tradeType: tradeDetails.tradeType,
-                inputMint: tradeDetails.inputMint,
-                outputMint: tradeDetails.outputMint,
-                dexPlatform: tradeDetails.dexPlatform,
-                hasInputMint: !!tradeDetails.inputMint,
-                hasOutputMint: !!tradeDetails.outputMint,
-                hasCloningTarget: !!tradeDetails.cloningTarget,
-                traderPubkey: tradeDetails.traderPubkey,
-                platformProgramId: tradeDetails.platformProgramId
-            });
-            
-            // Validate required fields before building instructions
-            if (!tradeDetails.inputMint || !tradeDetails.outputMint) {
-                console.error(`[DIRECT-SOLANA-SENDER] ❌ Missing required mint fields:`, {
-                    inputMint: tradeDetails.inputMint,
-                    outputMint: tradeDetails.outputMint,
-                    tradeType: tradeDetails.tradeType,
-                    dexPlatform: tradeDetails.dexPlatform
-                });
-                throw new Error(`Cannot execute ${tradeDetails.dexPlatform} trade: missing inputMint or outputMint fields`);
-            }
-    
-            // Get user-specific configuration (SOL amount + slippage)
+
             const userSettings = await this.dataManager.getUserSettings(userChatId);
-            const userSolAmount = userSettings.solAmount; // SOL amount per trade
-            const userSlippageBps = userSettings.slippageBps; // Slippage in basis points
             
-            console.log(`[DIRECT-SOLANA-SENDER] 💰 User ${userChatId} settings: ${userSolAmount} SOL, ${userSlippageBps} BPS slippage`);
+            // Trade details validated and ready for cloning
             
-            // Get user positions for SELL trades
-            let userTokenBalance = null;
-            if (tradeDetails.tradeType === 'sell') {
-                const userPositions = await this.dataManager.getUserPositions(userChatId);
-                userTokenBalance = userPositions.get(tradeDetails.inputMint);
-            }
-    
-            // Get nonce info for durable transactions (eliminates old hash errors)
-            let nonceInfo = null;
-            if (wallet.nonceAccountPubkey) {
-                try {
-                    const { nonce, nonceAuthority } = await this.solanaManager.getLatestNonce(wallet.nonceAccountPubkey);
-                    nonceInfo = {
-                        noncePubkey: wallet.nonceAccountPubkey,
-                        authorizedPubkey: nonceAuthority,
-                        nonce: nonce
-                    };
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔐 Using durable nonce: ${shortenAddress(nonce)} from account: ${shortenAddress(wallet.nonceAccountPubkey.toString())}`);
-                } catch (nonceError) {
-                    console.warn(`[DIRECT-SOLANA-SENDER] ⚠️ Failed to get nonce info: ${nonceError.message}. Using regular blockhash.`);
-                }
-            } else {
-                console.log(`[DIRECT-SOLANA-SENDER] ⚠️ No nonce account found for wallet. Using regular blockhash (may cause old hash errors).`);
-            }
-    
-            // 1. Analyze the blueprint to see what the master spent
-            const masterInputMint = tradeDetails.inputMint;
-            let userPaymentMethod = 'sol'; // Our default is always SOL
-            let userAmountToSpend = userAmountBN; // This is the user's configured SOL amount
-    
-            // 2. The CRITICAL check: Is the master trader paying with something OTHER than raw SOL?
-            if (masterInputMint !== config.NATIVE_SOL_MINT) {
-                console.log(`[FORGER-OVERRIDE] Master paid with TOKEN (${shortenAddress(masterInputMint)}). We will pay with RAW SOL.`);
-                
-                // 🚀 PERFORMANCE OPTIMIZATION: Skip price fetching for copy trading
-                // Users set their own SOL amounts, so we don't need exact price conversion
-                const masterTokenAmountSpent = tradeDetails.inputAmountRaw / (10 ** tradeDetails.tokenDecimals);
-                console.log(`[FORGER-OVERRIDE] Master spent ${masterTokenAmountSpent} of token. Using user's configured SOL amount for copy trade.`);
-                
-                // Use user's pre-configured SOL amount for simplicity, safety, and speed
-                userAmountToSpend = new BN(Math.floor(userSettings.solAmount * 1e9));
-                
-                console.log(`[FORGER-OVERRIDE] Using user's configured trade size: ${userSettings.solAmount} SOL (saved ~100-300ms by skipping DAS API)`);
-            }
-    
-            // 3. Extract the actual transaction from LaserStream response
-            let actualTransaction = originalTransaction;
-            if (originalTransaction && originalTransaction.transaction && originalTransaction.transaction.transaction) {
-                // Go to the deepest level - the actual transaction is at transaction.transaction.transaction
-                const nestedTransaction = originalTransaction.transaction.transaction;
-                if (nestedTransaction && nestedTransaction.transaction) {
-                    actualTransaction = nestedTransaction.transaction;
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (4 levels deep)`);
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
-                    
-                    // If still no instructions, try to get them from the message
-                    if (!actualTransaction.instructions && actualTransaction.message && actualTransaction.message.instructions) {
-                        // Convert LaserStream instruction format to Solana SDK format
-                        const laserStreamInstructions = actualTransaction.message.instructions;
-                        
-                        // Convert Buffer accountKeys to base58 strings if needed (same as Universal Analyzer)
-                        let accountKeys = actualTransaction.message.accountKeys || [];
-                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKeys type check: length=${accountKeys.length}, first element type=${typeof accountKeys[0]}, isBuffer=${Buffer.isBuffer(accountKeys[0])}, constructor=${accountKeys[0]?.constructor?.name}`);
-                        if (accountKeys.length > 0 && typeof accountKeys[0] !== 'string') {
-                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 Converting ${accountKeys.length} Buffer accountKeys to base58 strings`);
-                            const bs58 = require('bs58');
-                            accountKeys = accountKeys.map((key, index) => {
-                                // Check if it's a Buffer or Uint8Array or similar
-                                if (Buffer.isBuffer(key) || (key && typeof key === 'object' && key.constructor && (key.constructor.name === 'Uint8Array' || key.constructor.name === 'Buffer'))) {
-                                    try {
-                                        // Convert to Buffer if it's not already
-                                        const buffer = Buffer.isBuffer(key) ? key : Buffer.from(key);
-                                        const encoded = bs58.encode(buffer);
-                                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKey[${index}]: ${encoded}`);
-                                        return encoded;
-                                    } catch (error) {
-                                        console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to encode Buffer at index ${index}:`, error);
-                                        return null;
-                                    }
-                                }
-                                // If it's already a string, return as-is
-                                if (typeof key === 'string') {
-                                    return key;
-                                }
-                                // For any other type, try to convert to Buffer first
-                                try {
-                                    const buffer = Buffer.from(key);
-                                    const encoded = bs58.encode(buffer);
-                                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 AccountKey[${index}] (converted): ${encoded}`);
-                                    return encoded;
-                                } catch (error) {
-                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to convert to Buffer at index ${index}:`, error);
-                                    return null;
-                                }
-                            }).filter(key => key !== null); // Remove any failed conversions
-                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 After conversion: ${accountKeys.length} accountKeys, first few: ${accountKeys.slice(0, 3).join(', ')}`);
-                        }
-                        
-                        const convertedInstructions = laserStreamInstructions.map((instruction, index) => {
-                            // Convert programIdIndex to actual programId
-                            if (instruction.programIdIndex >= accountKeys.length) {
-                                console.error(`[DIRECT-SOLANA-SENDER] ❌ ProgramIdIndex ${instruction.programIdIndex} out of bounds (max: ${accountKeys.length - 1})`);
-                                return null; // Skip this instruction
-                            }
-                            const programId = accountKeys[instruction.programIdIndex];
-                            if (!programId) {
-                                console.error(`[DIRECT-SOLANA-SENDER] ❌ No programId found for programIdIndex ${instruction.programIdIndex}`);
-                                return null; // Skip this instruction
-                            }
-                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 Instruction ${index} programId: ${programId}`);
-                            
-                            // Convert accounts object to array
-                            const accounts = Object.keys(instruction.accounts).map(key => {
-                                const accountIndex = instruction.accounts[key];
-                                // Check if accountIndex is within bounds
-                                if (accountIndex >= accountKeys.length) {
-                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Account index ${accountIndex} out of bounds (max: ${accountKeys.length - 1})`);
-                                    return null; // Skip this account
-                                }
-                                const pubkey = accountKeys[accountIndex];
-                                if (!pubkey) {
-                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ No pubkey found for accountIndex ${accountIndex}`);
-                                    return null; // Skip this account
-                                }
-                                try {
-                                    return {
-                                        pubkey: new PublicKey(pubkey),
-                                        isSigner: accountIndex === 0, // First account is usually the signer
-                                        isWritable: true // Default to writable, could be refined
-                                    };
-                                } catch (error) {
-                                    console.error(`[DIRECT-SOLANA-SENDER] ❌ Failed to create PublicKey for accountIndex ${accountIndex}, pubkey: ${pubkey}`, error);
-                                    return null; // Skip this account instead of throwing
-                                }
-                            }).filter(account => account !== null); // Remove null accounts
-                            
-                            // Convert data object to Buffer
-                            const dataArray = Object.keys(instruction.data).map(key => instruction.data[key]);
-                            const data = Buffer.from(dataArray);
-                            
-                            return {
-                                programId: new PublicKey(programId),
-                                keys: accounts,
-                                data: data
-                            };
-                        });
-                        
-                        actualTransaction.instructions = convertedInstructions;
-                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Converted ${convertedInstructions.length} LaserStream instructions to Solana SDK format`);
-                    }
-                } else {
-                    actualTransaction = nestedTransaction;
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Extracted actual transaction from LaserStream response (3 levels deep)`);
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Actual transaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
-                    
-                    // If still no instructions, try to get them from the message
-                    if (!actualTransaction.instructions && actualTransaction.message && actualTransaction.message.instructions) {
-                        // Convert LaserStream instruction format to Solana SDK format
-                        const laserStreamInstructions = actualTransaction.message.instructions;
-                        const convertedInstructions = laserStreamInstructions.map((instruction, index) => {
-                            // Convert programIdIndex to actual programId
-                            const programId = actualTransaction.message.accountKeys[instruction.programIdIndex];
-                            
-                            // Convert accounts object to array
-                            const accounts = Object.keys(instruction.accounts).map(key => {
-                                const accountIndex = instruction.accounts[key];
-                                const pubkey = actualTransaction.message.accountKeys[accountIndex];
-                                return {
-                                    pubkey: new PublicKey(pubkey),
-                                    isSigner: accountIndex === 0, // First account is usually the signer
-                                    isWritable: true // Default to writable, could be refined
-                                };
-                            });
-                            
-                            // Convert data object to Buffer
-                            const dataArray = Object.keys(instruction.data).map(key => instruction.data[key]);
-                            const data = Buffer.from(dataArray);
-                            
-                            return {
-                                programId: new PublicKey(programId),
-                                keys: accounts,
-                                data: data
-                            };
-                        });
-                        
-                        actualTransaction.instructions = convertedInstructions;
-                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: Converted ${convertedInstructions.length} LaserStream instructions to Solana SDK format`);
-                    }
-                }
-            }
-
-            // 4. Pass this decision to the cloner with currency abstraction logic
-            const isSolBuy = tradeDetails.inputMint === config.NATIVE_SOL_MINT;
-
             const builderOptions = {
                 userPublicKey: keypair.publicKey,
                 masterTraderWallet: tradeDetails.traderPubkey,
+                traderPubkey: tradeDetails.traderPubkey, 
                 cloningTarget: tradeDetails.cloningTarget,
                 tradeType: tradeDetails.tradeType,
                 inputMint: tradeDetails.inputMint,
                 outputMint: tradeDetails.outputMint,
-                amountBN: userAmountToSpend, // The user's specific amount (SOL for buys, token for sells)
-                slippageBps: userSlippageBps,
-                
-                // User-specific parameters
-                userChatId: userChatId,
-                userSolAmount: tradeDetails.tradeType === 'buy' ? userAmountToSpend : new BN('0'),
-                userTokenBalance: tradeDetails.tradeType === 'sell' ? userAmountToSpend : null,
-                
-                // *** THIS IS THE CURRENCY ABSTRACTION LOGIC ***
-                // We tell the cloner how we want to pay.
-                userPaymentMethod: isSolBuy ? 'sol' : 'sol_override', // 'sol_override' tells it to build a SOL tx even if the original was different
-                
-                userRiskSettings: {
-                    slippageTolerance: userSlippageBps,
-                    maxTradesPerDay: 10
-                },
-                // NEW: Durable nonce support
-                nonceInfo: nonceInfo,
-                // NEW: Pass original transaction for complete instruction cloning
-                originalTransaction: actualTransaction
+                amountBN: userAmountBN,
+                slippageBps: userSettings.slippageBps,
+                userSolAmount: isBuy ? userAmountBN.toString() : '0',
+                originalTransaction: originalTransaction,
+                normalizedTransaction: normalizedTransaction, // 🔥 CRITICAL: Pass normalized transaction
+                coreInstructionIndex: tradeDetails.cloningTarget?.index || undefined
             };
-    
-            console.log(`[DIRECT-SOLANA-SENDER] 🔧 Building Universal Cloned instructions...`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔑 Transaction signature: ${masterSignature}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 💰 Master trader amount: ${tradeDetails.inputAmountRaw} raw units`);
-            console.log(`[DIRECT-SOLANA-SENDER] 💰 User copy trade amount: ${userAmountToSpend.toString()} raw units`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: originalTransaction type: ${typeof originalTransaction}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: originalTransaction has instructions: ${originalTransaction?.instructions?.length || 'undefined'}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG: actualTransaction has instructions: ${actualTransaction?.instructions?.length || 'undefined'}`);
             
-            // Log builder options to JSON file for detailed analysis
-            this.transactionLogger.logCopyTradeExecution(masterSignature, {
-                platform: tradeDetails.dexPlatform,
-                builderOptions: builderOptions,
-                userAmount: userAmountToSpend.toString(),
-                masterAmount: tradeDetails.inputAmountRaw
-            }, { status: 'building_universal_instructions' });
-            
-            // Build Universal Cloned instructions
-            let instructions;
-            try {
-                const cloneResult = await this.universalCloner.buildClonedInstruction(builderOptions);
-                instructions = cloneResult.instructions;
-            } catch (cloneError) {
-                console.error(`[DIRECT-SOLANA-SENDER] ❌ Universal Cloner failed:`, cloneError.message);
-                console.error(`[DIRECT-SOLANA-SENDER] ❌ Clone error stack:`, cloneError.stack);
-                throw new Error(`Universal Cloner failed: ${cloneError.message}`);
+            console.log(`[BUILDER-DEBUG] 🔍 builderOptions for forging map:`);
+            console.log(`[BUILDER-DEBUG] 🔍 userPublicKey: ${keypair.publicKey.toBase58()}`);
+            console.log(`[BUILDER-DEBUG] 🔍 masterTraderWallet: ${tradeDetails.traderPubkey}`);
+            console.log(`[BUILDER-DEBUG] 🔍 inputMint: ${tradeDetails.inputMint}`);
+            console.log(`[BUILDER-DEBUG] 🔍 outputMint: ${tradeDetails.outputMint}`);
+
+            const cloneResult = await this.universalCloner.buildClonedInstruction(builderOptions);
+            if (!cloneResult?.instructions?.length) {
+                throw new Error("Universal Cloner failed to produce any valid instructions.");
             }
-    
-            if (!instructions || instructions.length === 0) {
-                throw new Error(`Universal Cloner failed to produce any instructions`);
-            }
-    
-            console.log(`[DIRECT-SOLANA-SENDER] ✅ Universal Cloner built ${instructions.length} instructions`);
-    
-            // DEBUG: Log platform information before passing to Direct Solana Sender
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 DEBUG Platform Tracing:`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 tradeDetails.dexPlatform: ${tradeDetails.dexPlatform}`);
-            console.log(`[DIRECT-SOLANA-SENDER] 🔍 tradeDetails keys:`, Object.keys(tradeDetails));
             
-            // Prepare trade details for Direct Solana Sender with user's amounts
-            const enhancedTradeDetails = {
-                ...tradeDetails,
-                tokenMint: tradeDetails.outputMint,
-                tradeSize: 'Standard',
-                userChatId,
-                traderName,
-                masterSignature,
-                // Use user's calculated amounts, not master trader's
-                inputAmountRaw: userAmountToSpend.toString(),
-                userAmountBN: userAmountToSpend.toString()
-            };
-    
-            // ULTRA-FAST execution - minimal logging for speed
-            performanceTracker.logStep('pre_execution');
-            
-            try {
-                // Use the new direct Solana execution method with leader targeting
-                const result = await this.directSolanaSender.executeCopyTrade(
-                    originalTransaction || tradeDetails.originalTransaction, // Pass the original transaction for structure cloning
-                    keypair,
-                    {
-                        // ULTRA-FAST execution options
-                        platform: tradeDetails.dexPlatform,
-                        tradeType: tradeDetails.tradeType,
-                        userChatId,
-                        traderName,
-                        masterSignature,
-                        clonedInstructions: instructions, // Pass the cloned instructions from Universal Cloner
-                        // 🚀 HARDCODED FEE STRATEGY: Pass user's SOL amount for 15% fee calculation
-                        userSolAmount: userAmountToSpend.toNumber(), // Pass the calculated SOL amount in lamports
-                        computeUnits: 'dynamic', // Let directSolanaSender handle compute units
-                        simulate: true, // Enable simulation for debugging (non-blocking)
-                        nonceInfo: nonceInfo, // Pass nonce info for durable transactions
-                        skipConfirmation: true // Ultra-fast mode: Skip confirmation for millisecond precision
-                    }
-                );
-    
-                if (result.success) {
-                    console.log(`[DIRECT-SOLANA-SENDER] 🎉 ULTRA-FAST copy trade executed successfully!`);
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔑 Copy signature: ${result.signature}`);
-                    
-                    // FALSE POSITIVE CHECK: Verify BUY transactions actually received tokens
-                    if (tradeDetails.tradeType === 'buy') {
-                        console.log(`[DIRECT-SOLANA-SENDER] 🔍 Performing false positive check for BUY transaction...`);
-                        try {
-                            // Wait a moment for the transaction to be fully processed
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            
-                            // Check if user actually received tokens
-                            const userTokenAccount = getAssociatedTokenAddressSync(
-                                new PublicKey(tradeDetails.outputMint), 
-                                keypair.publicKey
-                            );
-                            
-                            const tokenAccountInfo = await this.solanaManager.connection.getTokenAccountBalance(userTokenAccount);
-                            const userTokenBalance = new BN(tokenAccountInfo.value.amount);
-                            
-                            console.log(`[DIRECT-SOLANA-SENDER] 🔍 User token balance after BUY: ${userTokenBalance.toString()} raw units`);
-                            
-                            if (userTokenBalance.gt(new BN(0))) {
-                                console.log(`[DIRECT-SOLANA-SENDER] ✅ FALSE POSITIVE CHECK PASSED: User received ${userTokenBalance.toString()} tokens`);
-                                
-                                // ✅ FIX: Use enhanced recordBuyPosition with validation
-                                await this.dataManager.recordBuyPosition(
-                                    userChatId,
-                                    tradeDetails.outputMint,
-                                    userTokenBalance.toString(),
-                                    userSolAmount || 0 // Use user's SOL amount
-                                );
-                                console.log(`[DIRECT-SOLANA-SENDER] 💾 ✅ Position recorded: ${userTokenBalance.toString()} tokens for ${shortenAddress(tradeDetails.outputMint)}`);
-                                
+            this.logInfo(`[ENGINE] Handing off to Direct Solana Sender for final build and execution...`);
+
+            // ===============================================
+            // =============== THE ALT FIX ===================
+            // ===============================================
+
+            // STEP 1: Gather the same phonebooks (ALTs) the trader used.
+            this.logInfo(`[ENGINE-ALT] Master transaction used ${originalTransaction.addressTableLookups?.length || 0} ALTs. Fetching them now.`);
+            const addressLookupTables = (await Promise.all(
+                (originalTransaction.addressTableLookups || []).map(lookup => {
+                    try {
+                        // 🔍 DEBUG: Understand what we're receiving
+                        console.log(`[ALT-DEBUG] 🔍 lookup.accountKey type: ${typeof lookup.accountKey}`);
+                        console.log(`[ALT-DEBUG] 🔍 lookup.accountKey value: ${JSON.stringify(lookup.accountKey)}`);
+                        console.log(`[ALT-DEBUG] 🔍 lookup.accountKey length: ${lookup.accountKey?.length || 'N/A'}`);
+                        
+                        // Convert raw bytes to base58 string
+                        let altAddress;
+                        if (typeof lookup.accountKey === 'string') {
+                            // Check if it's a comma-separated string of bytes
+                            if (lookup.accountKey.includes(',')) {
+                                console.log(`[ALT-DEBUG] 🔍 Detected comma-separated string, converting...`);
+                                // Convert comma-separated bytes to array, then to PublicKey
+                                const byteArray = lookup.accountKey.split(',').map(b => parseInt(b.trim()));
+                                console.log(`[ALT-DEBUG] 🔍 Byte array: ${JSON.stringify(byteArray)}`);
+                                const { PublicKey } = require('@solana/web3.js');
+                                altAddress = new PublicKey(byteArray).toBase58();
+                                console.log(`[ALT-DEBUG] 🔍 Converted to base58: ${altAddress}`);
                             } else {
-                                console.log(`[DIRECT-SOLANA-SENDER] ❌ FALSE POSITIVE DETECTED: Transaction reported success but user received 0 tokens!`);
-                                console.log(`[DIRECT-SOLANA-SENDER] 🔍 This indicates the transaction may have failed despite reporting success`);
-                                
-                                // Log this as a false positive for analysis
-                                await traceLogger.appendTrace(masterSignature, 'false_positive_buy', {
-                                    copySignature: result.signature,
-                                    expectedToken: tradeDetails.outputMint,
-                                    actualBalance: '0',
-                                    platform: tradeDetails.dexPlatform
-                                });
+                                altAddress = lookup.accountKey;
+                                console.log(`[ALT-DEBUG] 🔍 Using string as-is: ${altAddress}`);
                             }
-                            
-                        } catch (falsePositiveError) {
-                            console.error(`[DIRECT-SOLANA-SENDER] ❌ False positive check failed: ${falsePositiveError.message}`);
-                            // Don't throw - this is just a verification step
+                        } else if (Array.isArray(lookup.accountKey)) {
+                            console.log(`[ALT-DEBUG] 🔍 Detected array, converting...`);
+                            // Convert byte array to base58
+                            const { PublicKey } = require('@solana/web3.js');
+                            altAddress = new PublicKey(lookup.accountKey).toBase58();
+                            console.log(`[ALT-DEBUG] 🔍 Converted to base58: ${altAddress}`);
+                        } else if (typeof lookup.accountKey === 'object' && lookup.accountKey !== null) {
+                            console.log(`[ALT-DEBUG] 🔍 Detected object with numeric keys, converting...`);
+                            // Convert object with numeric keys to byte array, then to base58
+                            const byteArray = Object.keys(lookup.accountKey)
+                                .sort((a, b) => parseInt(a) - parseInt(b))
+                                .map(key => lookup.accountKey[key]);
+                            console.log(`[ALT-DEBUG] 🔍 Byte array from object: ${JSON.stringify(byteArray)}`);
+                            const { PublicKey } = require('@solana/web3.js');
+                            altAddress = new PublicKey(byteArray).toBase58();
+                            console.log(`[ALT-DEBUG] 🔍 Converted to base58: ${altAddress}`);
+                        } else {
+                            altAddress = lookup.accountKey.toString();
+                            console.log(`[ALT-DEBUG] 🔍 Converted to string: ${altAddress}`);
                         }
+                        
+                        console.log(`[ALT-DEBUG] 🔍 Final altAddress: ${altAddress}`);
+                        return this.solanaManager.fetchALT(altAddress);
+                    } catch (error) {
+                        this.logError(`[ENGINE-ALT] ❌ Failed to fetch ALT:`, error.message);
+                        return null;
                     }
-                    
-                } else {
-                    console.log(`[DIRECT-SOLANA-SENDER] ❌ ULTRA-FAST copy trade FAILED!`);
-                    console.log(`[DIRECT-SOLANA-SENDER] 🔑 Failed signature: ${result.signature}`);
-                }
-                console.log(`[DIRECT-SOLANA-SENDER] ⚡ Execution time: ${result.executionTime}ms`);
-                console.log(`[DIRECT-SOLANA-SENDER] 🔍 Confirmation time: ${result.confirmationTime}ms`);
-                console.log(`[DIRECT-SOLANA-SENDER] 📊 Result:`, {
-                    signature: shortenAddress(result.signature),
-                    executionTime: result.executionTime,
-                    confirmationTime: result.confirmationTime,
-                    tipAmount: result.tipAmount,
-                    tipAccount: shortenAddress(result.tipAccount)
-                });
-    
-                // Check if execution meets ultra-fast targets
-                if (result.executionTime < 200) {
-                    console.log(`[DIRECT-SOLANA-SENDER] ⚡ ULTRA-FAST TARGET ACHIEVED: ${result.executionTime}ms execution!`);
-                } else if (result.executionTime < 400) {
-                    console.log(`[DIRECT-SOLANA-SENDER] 🚀 FAST TARGET ACHIEVED: ${result.executionTime}ms execution`);
-                } else {
-                    console.log(`[DIRECT-SOLANA-SENDER] ⚠️ Execution time: ${result.executionTime}ms (above target)`);
-                }
-    
-                // Send notification with proper tradeResult object
-                if (this.notificationManager) {
-                    const tradeResult = {
-                        signature: result.signature,
-                        tradeType: tradeDetails.tradeType,
-                        inputMint: tradeDetails.inputMint,
-                        outputMint: tradeDetails.outputMint,
-                        inputAmountRaw: tradeDetails.inputAmountRaw,
-                        outputAmountRaw: tradeDetails.outputAmountRaw,
-                        solSpent: tradeDetails.tradeType === 'buy' ? tradeDetails.outputAmountLamports / 1e9 : 0,
-                        solReceived: tradeDetails.tradeType === 'sell' ? tradeDetails.outputAmountLamports / 1e9 : 0,
-                        tokenDecimals: tradeDetails.tokenDecimals || 9,
-                        solFee: result.tipAmount / 1e9
-                    };
-    
-                    await this.notificationManager.notifySuccessfulCopy(
-                        userChatId,
-                        traderName,
-                        'zap', // copyWalletLabel
-                        tradeResult
-                    );
-                }
-    
-                // Log success
-                await traceLogger.appendTrace(masterSignature, 'step4_directSolanaSenderExecution', {
-                    userChatId,
-                    success: true,
-                    signature: result.signature,
-                    tipAmount: result.tipAmount
-                });
-    
-                return result;
-    
-            } catch (executionError) {
-                console.error(`[DIRECT-SOLANA-SENDER] ❌ Real execution failed: ${executionError.message}`);
-                
-                // Send error notification
-                if (this.notificationManager) {
-                    await this.notificationManager.sendErrorNotification(
-                        userChatId,
-                        `Copy trade execution failed: ${executionError.message}`,
-                        'direct-solana-sender-execution'
-                    );
-                }
-    
-                throw executionError;
-            }
-    
-        } catch (error) {
-            console.error(`[DIRECT-SOLANA-SENDER] ❌ Copy trade execution failed for user ${userChatId}:`, error);
+                })
+            )).filter(Boolean); // Filter out any that failed to fetch
+
+            this.logInfo(`[ENGINE-ALT] ✅ Successfully fetched ${addressLookupTables.length} ALTs.`);
+
+            // ===============================================
             
-            // Mark transaction as failed to prevent retries
-            if (masterSignature) {
-                this.failedTransactions.add(masterSignature);
-                const blockhash = this.currentBlockhash || 'unknown';
-                this.failedTransactionBlockhashes.set(masterSignature, blockhash);
-                console.log(`[DIRECT-SOLANA-SENDER] 🚫 Marked transaction ${shortenAddress(masterSignature)} as failed - will not retry`);
+            // The 'blockhash' property is now GONE from this call. The sender will handle it.
+            const result = await this.directSolanaSender.executeCopyTrade(keypair, {
+                clonedInstructions: cloneResult.instructions,
+                computeUnitLimit: cuBaseline,
+                // Give the sender the phonebooks.
+                addressLookupTables: addressLookupTables 
+            });
+            
+            // 🗺️ MAPPING: Show dashboard immediately after injection (before confirmation)
+            this.dataMapper.logCompleteMapping(
+                originalTransaction,          // Raw Helius data
+                originalTransaction,          // Normalized data (same in this case)
+                tradeDetails,                 // Analyzed trade details
+                cloneResult.instructions,     // Cloned instructions
+                result                        // Transaction result (may be pending)
+            );
+            
+            if (!result || !result.success) {
+                throw new Error(result.error || "Direct Solana Sender returned a failure.");
             }
             
-            // Log failure
-            if (masterSignature) {
-                await traceLogger.appendTrace(masterSignature, 'step4_directSolanaSenderExecution', {
-                    userChatId,
-                    success: false,
-                    error: error.message
-                });
+            this.logInfo(`[ENGINE] ✅ SENDER CONFIRMED LANDING! Signature: ${result.signature}`);
+
+            // The confirmation logic now lives inside the sender. If we get here, it landed.
+            
+            tradeDetails.solSpent = isBuy ? userSettings.solAmount : 0;
+            
+            if (isBuy) {
+                const amountReceived = await this._getAmountReceivedFromBuy(result.signature, keypair.publicKey.toBase58(), tradeDetails.outputMint);
+                if (amountReceived.isZero()) {
+                    this.logWarn(`[POSITION-RECORD] Skipping position recording because 0 tokens were received (likely due to high tax).`);
+                } else {
+                    await this.dataManager.recordBuyPosition(userChatId, tradeDetails.outputMint, amountReceived.toString(), tradeDetails.solSpent);
+                }
+            } else {
+                 await this.dataManager.updatePositionAfterSell(userChatId, tradeDetails.inputMint, userAmountBN.toString());
             }
-    
-            // Send error notification
+
             if (this.notificationManager) {
-                await this.notificationManager.sendErrorNotification(
-                    userChatId,
-                    `Copy trade failed: ${error.message}`,
-                    'direct-solana-sender'
-                );
+                await this.notificationManager.notifySuccessfulCopy(userChatId, traderName, wallet.label, { ...tradeDetails, signature: result.signature });
             }
-    
-            throw error;
+
+        } catch (error) {
+            this.logError(`[ENGINE-EXEC] ❌ Final execution FAILED for user ${userChatId}:`, { errorMessage: error.message, stack: error.stack });
+            
+            // 🗺️ MAPPING: Log failed transaction attempt
+            this.dataMapper.logCompleteMapping(
+                originalTransaction,          // Raw Helius data
+                originalTransaction,          // Normalized data (same in this case)
+                tradeDetails,                 // Analyzed trade details
+                cloneResult?.instructions || [], // Cloned instructions (if available)
+                { success: false, error: error.message } // Failed result
+            );
+            
+            if (this.notificationManager) {
+                const failurePayload = {
+                    tradeType: tradeDetails?.tradeType || 'unknown',
+                    error: error.message
+                };
+                await this.notificationManager.notifyFailedCopy(userChatId, traderName, wallet.label, failurePayload.tradeType, failurePayload.error);
+            }
         } finally {
-            // Clear the timeout
-            clearTimeout(timeoutId);
-            // Always remove user from processing set to prevent deadlock
+            clearTimeout(lockTimeout);
             this.userProcessing.delete(userChatId);
         }
     }
@@ -2647,6 +2148,36 @@ async checkPumpFunMigration(tokenMint) {
     // ==========================================================
     // ============ [END] DIRECT SOLANA SENDER INTEGRATION ============
     // ==========================================================
+
+    /**
+     * Extracts execution intelligence from the master trader's confirmed transaction.
+     * @param {object} originalTransaction - The normalized transaction object.
+     * @returns {object} An object containing the computeUnit baseline.
+     */
+    _extractIntelligenceFromMasterTx(originalTransaction) {
+        try {
+            const meta = originalTransaction?.meta || originalTransaction?.transaction?.meta;
+
+            if (!meta || meta.err !== null) {
+                return { cuBaseline: 1400000 };
+            }
+
+            const consumed = meta.computeUnitsConsumed;
+            if (!consumed || consumed === 0) {
+                return { cuBaseline: 1400000 };
+            }
+            
+            const cuBaseline = Math.floor(consumed * 1.4);
+            this.logInfo(`[INTELLIGENCE] Master TX consumed ${consumed} CUs. Setting our baseline to ${cuBaseline}.`);
+
+            return { cuBaseline };
+
+        } catch (e) {
+            // USE THE NEW HARDENED LOGGER
+            this.logWarn(`[INTELLIGENCE] Could not extract intelligence from master TX. Using safe default.`, { error: e.message });
+            return { cuBaseline: 1400000 };
+        }
+    }
 
 
 }

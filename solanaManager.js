@@ -93,7 +93,7 @@ class SolanaManager {
    }
 
 
-   async fetchALTTable(tableAddress) {
+   async fetchALT(tableAddress) {
        const pubkeyStr = typeof tableAddress === 'string' ? tableAddress : tableAddress.toBase58();
 
        // Return from cache if we already have it
@@ -113,6 +113,38 @@ class SolanaManager {
        } catch (err) {
            console.warn(`[ALT_INDEXER] ❌ Failed to fetch ALT ${pubkeyStr}. Reason:`, err.message);
            return null; // Return null on failure so the transaction can proceed without it if necessary
+       }
+   }
+
+   async fetchALTTable(tableAddress) {
+       try {
+           // ================================================================
+           // ====================== THE FINAL, SINGLE-LINE FIX ======================
+           // ================================================================
+           // We now "open the box" here. The PublicKey constructor is smart enough
+           // to handle the raw object/Buffer that Helius sends us.
+           const tableKey = new PublicKey(tableAddress);
+           // ================================================================
+
+           const pubkeyStr = tableKey.toBase58();
+
+           // The rest of the function now works perfectly
+           if (this.altTableCache.has(pubkeyStr)) {
+               return this.altTableCache.get(pubkeyStr);
+           }
+
+           // We use the 'tableKey' PublicKey object we created for the RPC call
+           const lookupAccountInfo = await this.connection.getAddressLookupTable(tableKey);
+           const altAccount = lookupAccountInfo?.value;
+           if (!altAccount) throw new Error('ALT not found on-chain or is invalid.');
+
+           this.altTableCache.set(pubkeyStr, altAccount);
+           console.log(`[ALT_FETCHER] Cached ALT: ${pubkeyStr.substring(0, 4)}... with ${altAccount.state.addresses.length} addresses`);
+           return altAccount;
+
+       } catch (err) {
+           console.warn(`[ALT_FETCHER] Failed to fetch ALT. Reason:`, err.message);
+           return null;
        }
    }
 

@@ -254,9 +254,7 @@ LASERSTREAM_ENDPOINT: process.env.LASERSTREAM_ENDPOINT || 'https://laserstream-m
         METEORA_CP_AMM_PROGRAM_ID: new PublicKey('CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'),
         OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'),
         OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'),
-        // Router program that wraps Pump.fun instructions
-        CUSTOM_ROUTER: new PublicKey('F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq'),
-       
+    
         
     },
 

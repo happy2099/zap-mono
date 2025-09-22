@@ -355,11 +355,16 @@ class TelegramWorker extends BaseWorker {
             // Remove trader from database
             await this.dataManager.deleteTrader(user.id, traderName);
             
+            // Sync active traders to Redis for LaserStream monitoring
+            await this.syncActiveTradersToRedis(chatId);
+            
             const message = `✅ Trader *${escapeMarkdownV2(traderName)}* has been removed successfully`; 
             await this.telegramUi.sendOrEditMessage(chatId, message, {
                 reply_markup: { inline_keyboard: [[{ text: "🔙 Back to Traders List", callback_data: "traders_list" }]] }
             });
             
+            // Signal monitor worker to refresh subscriptions
+            this.signalMessage('REFRESH_SUBSCRIPTIONS', { chatId });
             this.signalMessage('TRADER_REMOVED', { chatId, traderName });
         } catch (error) {
             this.logError('Failed to remove trader', { chatId, traderName, error: error.message });

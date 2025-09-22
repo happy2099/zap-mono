@@ -311,7 +311,7 @@ class TradeNotificationManager {
         try {
             const escTrader = escapeMarkdownV2(traderName);
             const escWallet = escapeMarkdownV2(copyWalletLabel);
-            const escType = escapeMarkdownV2(tradeType?.toUpperCase() || 'TRADE');
+            const escType = escapeMarkdownV2((tradeType || 'TRADE').toUpperCase());
             const escError = escapeMarkdownV2(String(errorMessage || "Unknown Error").substring(0, 500));
 
             let message = `❌ *Copy ${escType} FAILED* ❗️ \\(${escTrader}\\)\n\n`;
@@ -381,7 +381,7 @@ class TradeNotificationManager {
             const escTokenDisplay = escapeMarkdownV2(tokenSymbol);
             const escReq = escapeMarkdownV2(requiredSolFormatted);
             const escCurr = escapeMarkdownV2(currentSolFormatted);
-            const escType = escapeMarkdownV2(tradeTypeStr.toUpperCase());
+            const escType = escapeMarkdownV2((tradeTypeStr || 'TRADE').toUpperCase());
 
             const message = 
                 `⚠️ *Insufficient Balance* ⚠️\n\n` +

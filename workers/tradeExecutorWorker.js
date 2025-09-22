@@ -163,32 +163,39 @@ class TradeExecutorWorker extends BaseWorker {
             });
         }
     }
-
     async executeCopyTrade(copyTradeData) {
-        // Unpack the full data payload from LaserStream
-        const { traderWallet, signature, preFetchedTxData: rawTxData, analysisResult } = copyTradeData;
+        // Unpack the CLEAN data payload from the monitor worker
+        const { traderWallet, signature, normalizedTransaction, analysisResult } = copyTradeData;
 
         try {
-            this.logInfo('🚀 EXECUTING HIGH-SPEED COPY TRADE', { 
-                traderWallet: traderWallet.substring(0,4) + '...' + traderWallet.slice(-4), 
-                signature: signature.substring(0, 8) + '...',
-                hasPreFetchedData: !!rawTxData,
-                hasAnalysisResult: !!analysisResult
+            this.logInfo('EXECUTING CLEAN COPY TRADE', { 
+                traderWallet: traderWallet ? (traderWallet.substring(0,4) + '...' + traderWallet.slice(-4)) : 'unknown', 
+                signature: signature ? (signature.substring(0, 8) + '...') : 'unknown',
             });
             
-            // Pass ALL data to the trading engine for fastest possible execution
-            // Include pre-analyzed results to skip re-analysis
-            await this.tradingEngine.processSignature(traderWallet, signature, null, rawTxData, analysisResult);
+            // ======================================================================
+            // ========================== THE CRITICAL FIX ==========================
+            // ======================================================================
+            // We now pass the pre-analyzed result from the monitor worker
+            // This prevents the "Cannot read properties of null" error
+            
+            await this.tradingEngine.processSignature(
+                traderWallet, 
+                signature, 
+                null, 
+                normalizedTransaction,
+                analysisResult // <-- PASS THE PRE-ANALYZED RESULT
+            );
+            // ========================== END OF THE FIX ============================
             
         } catch (error) {
-            this.logError('❌ HIGH-SPEED COPY TRADE EXECUTION FAILED', { 
-                traderWallet: traderWallet.substring(0,4) + '...' + traderWallet.slice(-4), 
-                signature: signature.substring(0, 8) + '...',
+            this.logError('CLEAN COPY TRADE EXECUTION FAILED', { 
+                traderWallet: traderWallet ? (traderWallet.substring(0,4) + '...' + traderWallet.slice(-4)) : 'unknown', 
+                signature: signature ? (signature.substring(0, 8) + '...') : 'unknown',
                 error: error.message 
             });
         }
     }
-    
     async performTrade(tradeId, tradeData) {
         try {
             const trade = this.pendingTrades.get(tradeId);

@@ -514,9 +514,9 @@ class ThreadedZapBot {
             'LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj': 'Raydium Launchpad',
             'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C': 'Raydium CPMM',
             'CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK': 'Raydium CLMM',
-            'F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq': 'Pump.fun',
             '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P': 'Pump.fun BC',
             'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA': 'Pump.fun AMM',
+            // '6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC': 'Pump.fun AMM V2', // REMOVED: This is a private router, not a DEX
             'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo': 'Meteora DLMM',
             'dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN': 'Meteora DBC',
             'DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d': 'Meteora DBC',

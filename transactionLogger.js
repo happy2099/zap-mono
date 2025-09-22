@@ -55,24 +55,8 @@ class TransactionLogger {
                 logType: 'copy_trade_execution'
             };
 
-            // Handle circular references in JSON serialization
-            const cleanLogData = JSON.parse(JSON.stringify(logData, (key, value) => {
-                // Remove circular references and complex objects
-                if (key === 'connection' || key === '_events' || key === 'context') {
-                    return '[Circular Reference Removed]';
-                }
-                if (typeof value === 'function') {
-                    return '[Function]';
-                }
-                if (value instanceof Error) {
-                    return {
-                        name: value.name,
-                        message: value.message,
-                        stack: value.stack
-                    };
-                }
-                return value;
-            }));
+            // Enhanced circular reference handling with comprehensive cleanup
+            const cleanLogData = this._cleanCircularReferences(logData);
             
             fs.writeFileSync(filepath, JSON.stringify(cleanLogData, null, 2));
             console.log(`[TRANSACTION-LOGGER] 📝 Copy trade logged to: ${filename}`);
@@ -81,6 +65,72 @@ class TransactionLogger {
         } catch (error) {
             console.error(`[TRANSACTION-LOGGER] ❌ Failed to log copy trade:`, error.message);
         }
+    }
+
+    /**
+     * Enhanced circular reference cleaner
+     */
+    _cleanCircularReferences(obj, seen = new WeakSet()) {
+        if (obj === null || typeof obj !== 'object') {
+            return obj;
+        }
+
+        // Handle circular references
+        if (seen.has(obj)) {
+            return '[Circular Reference]';
+        }
+        seen.add(obj);
+
+        // Handle different object types
+        if (obj instanceof Error) {
+            return {
+                name: obj.name,
+                message: obj.message,
+                stack: obj.stack
+            };
+        }
+
+        if (obj instanceof Date) {
+            return obj.toISOString();
+        }
+
+        if (Buffer.isBuffer(obj)) {
+            return `[Buffer: ${obj.length} bytes]`;
+        }
+
+        if (typeof obj === 'function') {
+            return '[Function]';
+        }
+
+        if (Array.isArray(obj)) {
+            return obj.map(item => this._cleanCircularReferences(item, seen));
+        }
+
+        // Handle objects
+        const cleaned = {};
+        for (const [key, value] of Object.entries(obj)) {
+            // Skip problematic keys
+            if (key === 'connection' || key === '_events' || key === 'context' || 
+                key === 'solanaManager' || key === 'dataManager' || key === 'walletManager' ||
+                key === 'apiManager' || key === 'redisManager' || key === 'notificationManager') {
+                cleaned[key] = '[Manager Object]';
+                continue;
+            }
+
+            // Skip large objects that aren't essential
+            if (key === 'rawTransaction' || key === 'originalTransaction' || key === 'meta') {
+                cleaned[key] = '[Large Object - Truncated]';
+                continue;
+            }
+
+            try {
+                cleaned[key] = this._cleanCircularReferences(value, seen);
+            } catch (error) {
+                cleaned[key] = `[Error cleaning: ${error.message}]`;
+            }
+        }
+
+        return cleaned;
     }
 
     /**

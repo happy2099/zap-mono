@@ -6,7 +6,7 @@
         "user_id": "1758133086172",
         "name": "Eu",
         "wallet": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
-        "active": false,
+        "active": true,
         "created_at": "2025-05-24T08:37:53.854Z",
         "updated_at": "2025-09-20T14:03:27.409Z"
       },
@@ -15,9 +15,9 @@
         "user_id": "1758133086172",
         "name": "H",
         "wallet": "Av3xWHJ5EsoLZag6pr7LKbrGgLRTaykXomDD5kBhL9YQ",
-        "active": false,
+        "active": true,
         "created_at": "2025-05-24T08:38:53.150Z",
-        "updated_at": "2025-09-22T15:42:07.825Z"
+        "updated_at": "2025-09-21T06:53:43.043Z"
       },
       "oz": {
         "id": "1758133961125",
@@ -26,14 +26,14 @@
         "wallet": "DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam",
         "active": true,
         "created_at": "2025-05-24T08:39:21.125Z",
-        "updated_at": "2025-09-22T07:30:13.953Z"
+        "updated_at": "2025-09-21T06:53:57.091Z"
       },
       "Orange": {
         "id": "1758133989617",
         "user_id": "1758133086172",
         "name": "Orange",
         "wallet": "96sErVjEN7LNJ6Uvj63bdRWZxNuBngj56fnT9biHLKBf",
-        "active": false,
+        "active": true,
         "created_at": "2025-05-24T08:39:49.617Z",
         "updated_at": "2025-09-18T11:31:21.790Z"
       },
@@ -42,7 +42,7 @@
         "user_id": "1758133086172",
         "name": "L",
         "wallet": "7iabBMwmSvS4CFPcjW2XYZY53bUCHzXjCFEFhxeYP4CY",
-        "active": false,
+        "active": true,
         "created_at": "2025-05-24T08:40:19.260Z",
         "updated_at": "2025-06-11T17:35:52.901Z"
       },
@@ -51,7 +51,7 @@
         "user_id": "1758133086172",
         "name": "K",
         "wallet": "BCnqsPEtA1TkgednYEebRpkmwFRJDCjMQcKZMMtEdArc",
-        "active": false,
+        "active": true,
         "created_at": "2025-05-24T08:41:12.005Z",
         "updated_at": "2025-09-20T07:47:01.916Z"
       },
@@ -60,34 +60,34 @@
         "user_id": "1758133086172",
         "name": "Y",
         "wallet": "EKDDjxzJ39Bjkr47NiARGJDKFVxiiV9WNJ5XbtEhPEXP",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-08T10:59:22.494Z",
-        "updated_at": "2025-09-21T15:51:14.782Z"
+        "updated_at": "2025-09-20T07:46:47.182Z"
       },
       "alo": {
         "id": "1758191707068",
         "user_id": "1758133086172",
         "name": "alo",
         "wallet": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-09T15:35:07.068Z",
-        "updated_at": "2025-09-22T15:41:54.008Z"
+        "updated_at": "2025-09-20T14:03:19.047Z"
       },
       "otta": {
         "id": "1758191590310",
         "user_id": "1758133086172",
         "name": "otta",
         "wallet": "As7HjL7dzzvbRbaD3WCun47robib2kmAKRXMvjHkSMB5",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-12T13:53:10.301Z",
-        "updated_at": "2025-09-22T15:42:02.883Z"
+        "updated_at": "2025-09-20T07:46:52.672Z"
       },
       "Ea": {
         "id": "1758191879274",
         "user_id": "1758133086172",
         "name": "Ea",
         "wallet": "F2SuErm4MviWJ2HzKXk2nuzBC6xe883CFWUDCPz6cyWm",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-12T14:37:59.274Z",
         "updated_at": "2025-09-20T07:46:41.860Z"
       },
@@ -96,7 +96,7 @@
         "user_id": "1758133086172",
         "name": "cup",
         "wallet": "suqh5sHtr8HyJ7q8scBimULPkPpA557prMG47xCHQfK",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-12T19:08:20.262Z",
         "updated_at": "2025-09-19T16:19:25.322Z"
       },
@@ -105,7 +105,7 @@
         "user_id": "1758133086172",
         "name": "A",
         "wallet": "ByXk1FEfaaX9sf9hSwFfkuZLBRZ7S9cutZsWMRQw2TjR",
-        "active": false,
+        "active": true,
         "created_at": "2025-06-29T11:25:54.947Z",
         "updated_at": "2025-07-04T15:37:37.763Z"
       },
@@ -114,7 +114,7 @@
         "user_id": "1758133086172",
         "name": "axiom",
         "wallet": "GEZgmU3PbKWKG9Yp4iDuH6uh3LnodBa9PdeD7RJ8P7B",
-        "active": false,
+        "active": true,
         "created_at": "2025-09-05T08:44:16.926Z",
         "updated_at": "2025-09-20T14:03:23.016Z"
       },
@@ -123,7 +123,7 @@
         "user_id": "1758133086172",
         "name": "tu",
         "wallet": "5T229oePmJGE5Cefys8jE9Jq8C7qfGNNWy3RVA7SmwEP",
-        "active": false,
+        "active": true,
         "created_at": "2025-09-05T09:27:51.431Z",
         "updated_at": "2025-09-18T10:47:26.055Z"
       },
@@ -134,7 +134,7 @@
         "wallet": "4BdKaxN8G6ka4GYtQQWk4G4dZRUTX2vQH9GcXdBREFUk",
         "active": true,
         "created_at": "2025-09-18T16:13:40.974Z",
-        "updated_at": "2025-09-22T15:42:19.258Z"
+        "updated_at": "2025-09-21T06:53:50.754Z"
       },
       "cupsey-2": {
         "id": "1758297968429",
@@ -143,34 +143,16 @@
         "wallet": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
         "active": true,
         "created_at": "2025-09-19T16:06:08.429Z",
-        "updated_at": "2025-09-21T13:53:40.969Z"
+        "updated_at": "2025-09-21T06:53:34.066Z"
       },
       "TestTrader": {
         "id": "1758354254455",
         "user_id": "1758133086172",
         "name": "TestTrader",
         "wallet": "TestWallet123456789",
-        "active": false,
+        "active": true,
         "created_at": "2025-09-20T07:44:14.455Z",
         "updated_at": "2025-09-20T07:44:14.487Z"
-      },
-      "Yenni": {
-        "id": "1758459570903",
-        "user_id": "1758133086172",
-        "name": "Yenni",
-        "wallet": "5B52w1ZW9tuwUduueP5J7HXz5AcGfruGoX6YoAudvyxG",
-        "active": true,
-        "created_at": "2025-09-21T12:59:30.903Z",
-        "updated_at": "2025-09-21T15:51:19.677Z"
-      },
-      "Kev": {
-        "id": "1758459646483",
-        "user_id": "1758133086172",
-        "name": "Kev",
-        "wallet": "BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd",
-        "active": false,
-        "created_at": "2025-09-21T13:00:46.483Z",
-        "updated_at": "2025-09-21T15:22:14.310Z"
       }
     }
   }

@@ -43,7 +43,6 @@ const DEX_PROGRAM_IDS = new Set([
   "srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX", // OpenBook
   "srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d", // OpenBook V3
   "whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc", // Whirlpool
-  "F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq"  // Custom Router
 ]);
 
 // Associated Token Program ID (for ATA creation detection)
@@ -99,7 +98,7 @@ async function startLaserStream() {
       "675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv", // Raydium V4
       "JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5", // Jupiter
       "BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW", // Photon
-      "F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq"  // Custom Router
+      
     ];
     
     console.log(`📡 Monitoring ${walletsToMonitor.length} trader wallets and ${majorPrograms.length} DEX programs...`);

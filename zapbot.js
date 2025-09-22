@@ -5,7 +5,7 @@
 // Description: Main orchestrator for the modularized Solana copy trading bot.
 
 // Core Node.js Modules / Utils
-const TelegramBot = require('node-telegram-bot-api');
+// const TelegramBot = require('node-telegram-bot-api'); // Disabled in threaded mode
 const path = require('path');
 const fs = require('fs/promises');
 

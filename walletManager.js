@@ -187,6 +187,11 @@ class WalletManager extends EventEmitter {
     }
 
     try {
+        // Validate base58 format before decoding
+        if (!privateKeyBs58.match(/^[1-9A-HJ-NP-Za-km-z]+$/)) {
+            throw new Error('Invalid base58 format in private key');
+        }
+        
         const secretKeyBytes = bs58.decode(privateKeyBs58);
         if (secretKeyBytes.length !== 64) throw new Error('Invalid private key format or length.');
         
@@ -553,6 +558,11 @@ class WalletManager extends EventEmitter {
     console.log(`[DIAGNOSTIC] Attempting to get Keypair for wallet ID: ${id}`);
     const privateKeyBs58 = await this.getDecryptedPrivateKeyBs58(id);
     try {
+      // Validate base58 format before decoding
+      if (!privateKeyBs58.match(/^[1-9A-HJ-NP-Za-km-z]+$/)) {
+        throw new Error(`[DIAGNOSTIC] Invalid base58 format in private key`);
+      }
+      
       const secretKeyBytes = bs58.decode(privateKeyBs58);
       if (secretKeyBytes.length !== 64) {
         throw new Error(`[DIAGNOSTIC] Invalid secret key length after decode: ${secretKeyBytes.length} bytes. Expected 64.`);
@@ -589,7 +599,12 @@ async getNonceKeypairByWalletId(walletId) {
 
     try {
       const privateKeyBs58 = await decrypt(wallet.encryptedNonceAccountPrivateKey, this.encryptionKey);
-      // Fix: Changed privateKeyBs558 to privateKeyBs58
+      
+      // Validate base58 format before decoding
+      if (!privateKeyBs58.match(/^[1-9A-HJ-NP-Za-km-z]+$/)) {
+        throw new Error(`[DIAGNOSTIC] Invalid base58 format in nonce private key`);
+      }
+      
       return Keypair.fromSecretKey(bs58.decode(privateKeyBs58));
     } catch (error) {
       console.error(`❌ [WM Nonce] Error decrypting nonce keypair for wallet ID ${walletId}: ${error.message}`);

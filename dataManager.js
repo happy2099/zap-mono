@@ -399,24 +399,28 @@ class DataManager {
         const user = await this.getUser(chatId);
         if (!user) throw new Error(`User with chat_id ${chatId} not found`);
 
-        if (!amountRaw || amountRaw === "0" || BigInt(amountRaw) <= 0n) {
+        // Handle both string formats: "0n" and "1000000000n"
+        const amountStr = amountRaw.toString().replace('n', '');
+        if (!amountRaw || amountRaw === "0" || amountRaw === "0n" || BigInt(amountStr) <= 0n) {
             console.warn(`[JSON-DB-VALIDATION] Skipping position recording: Invalid amount (${amountRaw}) for token ${tokenMint}`);
             return;
         }
 
         const positions = await this.readJsonFile('positions.json');
         
-        if (!positions.positions[user.id]) {
-            positions.positions[user.id] = {};
+        if (!positions.user_positions) {
+            positions.user_positions = {};
         }
         
-        positions.positions[user.id][tokenMint] = {
-            user_id: user.id,
-            token_mint: tokenMint,
-            amount_raw: amountRaw,
-            sol_spent: solSpent,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
+        if (!positions.user_positions[chatId]) {
+            positions.user_positions[chatId] = {};
+        }
+        
+        positions.user_positions[chatId][tokenMint] = {
+            amountRaw: amountRaw,
+            solSpent: solSpent,
+            buyTimestamp: Date.now(),
+            sellTimestamp: null
         };
         
         await this.writeJsonFile('positions.json', positions);
@@ -427,19 +431,21 @@ class DataManager {
         if (!user) throw new Error(`User with chat_id ${chatId} not found`);
 
         const positions = await this.readJsonFile('positions.json');
-        const position = positions.positions[user.id]?.[tokenMint];
+        const position = positions.user_positions?.[chatId]?.[tokenMint];
         
         if (!position) return;
 
-        const newAmount = BigInt(position.amount_raw) - BigInt(amountSold);
+        // Handle both string formats: "0n" and "1000000000n"
+        const positionAmountStr = position.amountRaw.toString().replace('n', '');
+        const newAmount = BigInt(positionAmountStr) - BigInt(amountSold);
         
         if (newAmount <= 0) {
             // Position fully sold, delete it
-            delete positions.positions[user.id][tokenMint];
+            delete positions.user_positions[chatId][tokenMint];
         } else {
             // Update remaining amount
-            positions.positions[user.id][tokenMint].amount_raw = newAmount.toString();
-            positions.positions[user.id][tokenMint].updated_at = new Date().toISOString();
+            positions.user_positions[chatId][tokenMint].amountRaw = newAmount.toString();
+            positions.user_positions[chatId][tokenMint].sellTimestamp = Date.now();
         }
         
         await this.writeJsonFile('positions.json', positions);
@@ -455,25 +461,29 @@ class DataManager {
         const positions = await this.readJsonFile('positions.json');
         console.log(`[DataManager] 🔍 Positions file structure:`, {
             hasPositions: !!positions,
-            hasPositionsProperty: !!(positions && positions.positions),
-            userExists: !!(positions && positions.positions && positions.positions[user.id])
+            hasPositionsProperty: !!(positions && positions.user_positions),
+            userExists: !!(positions && positions.user_positions && positions.user_positions[chatId])
         });
         
         // Check if positions file exists and has proper structure
-        if (!positions || !positions.positions) {
-            console.log(`[DataManager] ⚠️ Positions file missing or invalid structure for user ${user.id}`);
+        if (!positions || !positions.user_positions) {
+            console.log(`[DataManager] ⚠️ Positions file missing or invalid structure for user ${chatId}`);
             return new Map();
         }
         
-        const userPositions = positions.positions[user.id] || {};
-        console.log(`[DataManager] 🔍 User positions for ${user.id}:`, Object.keys(userPositions));
+        const userPositions = positions.user_positions[chatId] || {};
+        console.log(`[DataManager] 🔍 User positions for ${chatId}:`, Object.keys(userPositions));
 
         const positionMap = new Map();
         for (const [tokenMint, pos] of Object.entries(userPositions)) {
-            if (BigInt(pos.amount_raw) > 0) {
+            // Handle both string formats: "0n" and "1000000000n"
+            const amountStr = pos.amountRaw.toString().replace('n', '');
+            const amountBigInt = BigInt(amountStr);
+            
+            if (amountBigInt > 0) {
                 positionMap.set(tokenMint, {
-                    amountRaw: BigInt(pos.amount_raw),
-                    solSpent: pos.sol_spent || 0
+                    amountRaw: amountBigInt,
+                    solSpent: pos.solSpent || 0
                 });
             }
         }
@@ -482,16 +492,30 @@ class DataManager {
 
     async getUserSellDetails(chatId, tokenMint) {
         const user = await this.getUser(chatId);
-        if (!user) return null;
+        if (!user) {
+            console.log(`[DataManager DEBUG] No user found for chatId: ${chatId}`);
+            return null;
+        }
 
         const positions = await this.readJsonFile('positions.json');
-        const position = positions.positions[user.id]?.[tokenMint];
+        
+        // DEFENSIVE CHECK: Handle cases where the file is new, empty, or malformed
+        if (!positions || !positions.user_positions || !positions.user_positions[chatId]) {
+            console.log(`[DataManager DEBUG] No position data found for user ${chatId}.`);
+            return null;
+        }
+        
+        const position = positions.user_positions[chatId][tokenMint];
 
-        if (!position || BigInt(position.amount_raw) <= 0) return null;
+        // Handle both string formats: "0n" and "1000000000n"
+        const amountStr = position.amountRaw.toString().replace('n', '');
+        const amountBigInt = BigInt(amountStr);
+        
+        if (!position || amountBigInt <= 0) return null;
 
         return {
-            amountToSellBN: new BN(position.amount_raw),
-            originalSolSpent: position.sol_spent || 0
+            amountToSellBN: new BN(amountStr),
+            originalSolSpent: position.solSpent || 0
         };
     }
 

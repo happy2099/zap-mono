@@ -22,8 +22,8 @@ const HELIUS_API_KEY = process.env.HELIUS_API_KEY;
 
 // These endpoints are the definitive, single source of truth for all connections.
 const HELIUS_ENDPOINTS = {
-    rpc: `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,          // Your dedicated, regional RPC for ALL standard calls
-    websocket: `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,     // Your dedicated, regional WebSocket
+    rpc: process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,          // Your premium RPC
+    websocket: process.env.HELIUS_WS_URL || `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,     // Your premium WebSocket
     laserstream_grpc: process.env.LASERSTREAM_GRPC_URL,                         // Primary gRPC for detection
     laserstream_grpc_alt: process.env.LASERSTREAM_GRPC_ALT_URL,               // Fallback gRPC
     sender: process.env.SENDER_ENDPOINT                                         // Primary API for sending transactions
@@ -40,7 +40,8 @@ const config = {
     
     // --- Singapore Regional Endpoints (Optimized for Asia-Pacific) ---
     SINGAPORE_ENDPOINTS: {
-        rpc: `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+        rpc: process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
+        websocket: process.env.HELIUS_WS_URL || `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
         sender: process.env.SENDER_ENDPOINT || 'https://mainnet.helius-rpc.com/fast',
         laserstream: process.env.LASERSTREAM_GRPC_URL,
     },
@@ -84,6 +85,7 @@ const config = {
             LOG_EARLY_FILTERS: true
         }
     },
+
     TIP_ACCOUNTS: [
         "4ACfpUFoaSD9bfPdeu6DBt89gB6ENTeHBXCAi87NhDEE", "D2L6yPZ2FmmmTKPgzaMKdhu6EWZcTpLy1Vhx8uvZe7NZ",
         "9bnz4RShgq1hAnLnZbP8kbgBg1kEmcJBYQq3gQbmnSta", "5VY91ws6B2hMmBFRsXkoAAdsPHBJwRfBht4DXox3xkwn",
@@ -112,6 +114,7 @@ const config = {
         RAYDIUM_CLMM: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
         PUMP_FUN: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'), // Actual Pump.fun BC Program ID
         PUMP_FUN_AMM: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
+        // PUMP_FUN_AMM_V2: new PublicKey('6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC'), // REMOVED: This is a private router, not a DEX
         METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'),
         METEORA_DBC: [
             new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // REAL Meteora DBC program ID from log messages
@@ -119,8 +122,14 @@ const config = {
         ],
         METEORA_CP_AMM: new PublicKey('CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'),
         JUPITER: new PublicKey('JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5'),
+        JUPITER_V6: new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'), // Jupiter Aggregator v6
+        JUPITER_AMM_ROUTING: new PublicKey('routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS'), // Jupiter AMM Routing
         RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'),
+        RAYDIUM_STABLE_SWAP: new PublicKey('5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h'), // Raydium Stable Swap AMM
         WHIRLPOOL: new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'),
+        SERUM_DEX_V3: new PublicKey('9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin'), // Serum DEX v3
+        OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'), // OpenBook DEX
+        OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'), // OpenBook V3
     },
     
     // --- PUMP.FUN Specifics (Needed for Reconstruction Logic) ---
