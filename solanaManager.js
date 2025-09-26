@@ -93,6 +93,9 @@ class SolanaManager {
    }
 
 
+   /**
+    * Fetch Address Lookup Table (ALT) from on-chain data
+    */
    async fetchALT(tableAddress) {
        const pubkeyStr = typeof tableAddress === 'string' ? tableAddress : tableAddress.toBase58();
 
@@ -116,6 +119,9 @@ class SolanaManager {
        }
    }
 
+   /**
+    * Fetch Address Lookup Table (ALT) from on-chain data
+    */
    async fetchALTTable(tableAddress) {
        try {
            // ================================================================
@@ -247,112 +253,15 @@ class SolanaManager {
        }
    }
 
-   async sendRawSerializedTransaction(txString) {
-       try {
-           const txBuffer = Buffer.from(txString, 'base64');
-           const signature = await this.connection.sendRawTransaction(txBuffer, { skipPreflight: true });
-           // Don't wait for confirmation here for max speed, let it confirm in the background.
-           return { signature, error: null };
-       } catch (error) {
-           return { signature: null, error: error.message };
-       }
-   }
+   // REMOVED: sendRawSerializedTransaction - Use singaporeSenderManager.js for all transaction sending
 
 
 
-   async sendVersionedTransaction({ instructions, signer, lookupTableAddresses = [] }) {
-    let lastError;
-    const maxRetries = config.MAX_RETRIES || 3;
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-        try {
-            const { blockhash } = await this.getBlockhashWithRetry();
-            
-            const lookupTables = (await Promise.all(
-                lookupTableAddresses.map(addr => this.fetchALTTable(addr))
-            )).filter(Boolean);
-
-            const messageV0 = new TransactionMessage({
-                payerKey: signer.publicKey,
-                recentBlockhash: blockhash,
-                instructions: instructions,
-            }).compileToV0Message(lookupTables);
-
-            const transaction = new VersionedTransaction(messageV0);
-            transaction.sign([signer]);
-            const serializedTx = transaction.serialize();
-            
-            // Direct-to-sender execution
-            const response = await fetch(config.HELIUS_ENDPOINTS.sender, {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    "jsonrpc": "2.0",
-                    "id": "zapbot-sender-1",
-                    "method": "sendTransaction",
-                    "params": [bs58.encode(serializedTx)]
-                }),
-            });
-
-            const data = await response.json();
-
-            if (data.error) {
-                throw new Error(`Helius Sender API Error: ${data.error.message}`);
-            }
-            
-            // We don't wait for confirmation here for max speed. We just need the signature.
-            // The confirmation logic will be handled higher up, if needed.
-            return { signature: data.result, error: null };
-
-        } catch (error) {
-            console.error(`[SolanaManager] Send Attempt ${attempt} failed:`, error.message);
-            lastError = error;
-            if(attempt < maxRetries) await sleep(500 * attempt); // Wait longer between retries
-        }
-    }
-    
-    return { signature: null, error: `Tx failed after all retries: ${lastError?.message || 'Unknown Sender Error'}` };
-}
+   // REMOVED: sendVersionedTransaction - Use singaporeSenderManager.js for all transaction sending
 
 // ADD this new function inside the SolanaManager class in solanaManager.js
 
-   async getPriorityFeeEstimate(instructions, signerPublicKey, lookupTables = []) {
-       try {
-           const messageV0 = new TransactionMessage({
-               payerKey: signerPublicKey,
-               recentBlockhash: '11111111111111111111111111111111', // Dummy blockhash
-               instructions: instructions,
-           }).compileToV0Message(lookupTables);
-
-           const transaction = new VersionedTransaction(messageV0);
-           const serializedTx = bs58.encode(transaction.serialize());
-
-           const response = await fetch(this.connection.rpcEndpoint, {
-               method: "POST",
-               headers: { "Content-Type": "application/json" },
-               body: JSON.stringify({
-                 jsonrpc: "2.0",
-                 id: "zapbot-fee-estimate",
-                 method: "getPriorityFeeEstimate",
-                 params: [{ transaction: serializedTx, options: { includeAllFees: true } }],   
-               }),
-             });
-             
-           const data = await response.json();
-           
-           // Helius provides different levels, we will take the high estimate for sniping
-           if (data.result?.priorityFeeLevels?.high) {
-               console.log(`[Fee Estimator] Dynamic priority fee: ${data.result.priorityFeeLevels.high} microLamports`);
-               return data.result.priorityFeeLevels.high;
-           }
-
-       } catch (error) {
-           console.warn(`[Fee Estimator] Failed to get dynamic priority fee, falling back. Error: ${error.message}`);
-       }
-       
-       // Fallback to our existing method if the API call fails
-       return this.getDynamicPriorityFee('ultra');
-   }
+   // REMOVED: getPriorityFeeEstimate - Use singaporeSenderManager.js for all fee calculations
 
 
 
@@ -411,11 +320,7 @@ class SolanaManager {
        } catch { return null; }
    }
 
-   getDynamicPriorityFee(level = 'high') {
-       let fee = config.MEV_PROTECTION.priorityFees[level] || config.MEV_PROTECTION.priorityFees.normal;
-       const mult = { low: 0.8, normal: 1.0, high: 1.8 }[config.MEV_PROTECTION.networkState.congestionLevel] || 1.0;
-       return Math.ceil(fee * mult);
-   }
+   // REMOVED: getDynamicPriorityFee - Use singaporeSenderManager.js for all fee calculations
 
    calculateJitoTip(level = 'high') {
        const factor = { low: 0.5, normal: 1.0, medium: 1.5, high: 2.5, ultra: 5.0 }[level] || 1.0;
@@ -438,53 +343,7 @@ class SolanaManager {
        console.log("SolanaManager stopped.");
    }
 
-   async sendSol(fromWalletLabel, toAddress, amountSol) {
-       try {
-           const fromKeypair = await this.walletManager.getKeypairByLabel(fromWalletLabel);
-           if (!fromKeypair) throw new Error(`Wallet '${fromWalletLabel}' not found.`);
-
-           const toPublicKey = new PublicKey(toAddress);
-           const amountLamports = amountSol * config.LAMPORTS_PER_SOL_CONST;
-
-           const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
-
-           const instructions = [
-               SystemProgram.transfer({
-                   fromPubkey: fromKeypair.publicKey,
-                   toPubkey: toPublicKey,
-                   lamports: amountLamports,
-               }),
-           ];
-
-           const messageV0 = new TransactionMessage({
-               payerKey: fromKeypair.publicKey,
-               recentBlockhash: blockhash,
-               instructions,
-           }).compileToLegacyMessage(); // Compile to legacy message for simple transfers
-
-           const transaction = new Transaction().add(instructions[0]); // Add the transfer instruction
-           transaction.recentBlockhash = blockhash;
-           transaction.feePayer = fromKeypair.publicKey;
-           transaction.sign(fromKeypair);
-
-           const signature = await this.connection.sendRawTransaction(transaction.serialize(), {
-               skipPreflight: false,
-               preflightCommitment: 'confirmed'
-           });
-
-           await this.connection.confirmTransaction({
-               signature,
-               blockhash,
-               lastValidBlockHeight
-           }, 'confirmed');
-
-           console.log(`✅ Sent ${amountSol} SOL from ${shortenAddress(fromKeypair.publicKey.toBase58())} to ${shortenAddress(toAddress)}. TXID: ${signature}`);
-           return signature;
-       } catch (error) {
-           console.error(`❌ Failed to send SOL: ${error.message}`);
-           throw error;
-       }
-   }
+   // REMOVED: sendSol - Use singaporeSenderManager.js for all transaction sending
 
 
 

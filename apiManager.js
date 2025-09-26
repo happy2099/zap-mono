@@ -7,7 +7,7 @@
 const axios = require('axios');
 const config = require('./config.js'); // CommonJS import for internal module
 const { shortenAddress, logPerformance } = require('./utils.js'); // Added logPerformance
-// Jupiter API removed - using universalCloner instead
+// Jupiter API removed - using direct copy logic instead
 const { PublicKey } = require('@solana/web3.js');
 const { getMint } = require('@solana/spl-token');
 
@@ -340,9 +340,9 @@ async startTraderMonitoringStream(tradingEngine) {
     }
   }
 
-  // Jupiter API methods removed - using universalCloner instead
+  // Jupiter API methods removed - using direct copy logic instead
 
-  // Jupiter swap method removed - using universalCloner instead
+  // Jupiter swap method removed - using direct copy logic instead
 
   async getTokenPrices(tokenMints) {
     if (!tokenMints || tokenMints.length === 0) {

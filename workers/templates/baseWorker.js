@@ -8,7 +8,7 @@ const { parentPort, workerData } = require('worker_threads');
 
 class BaseWorker {
     constructor() {
-        this.workerName = workerData.workerName || 'unknown';
+        this.workerName = workerData?.workerName || 'unknown';
         this.isShuttingDown = false;
         this.messageHandlers = new Map();
         this.startTime = Date.now();

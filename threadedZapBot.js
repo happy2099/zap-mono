@@ -297,6 +297,35 @@ class ThreadedZapBot {
             }
         });
 
+        this.messageHandlers.set('HANDLE_SMART_COPY', (workerName, message) => {
+            console.log(`🧠 FORWARDING SMART COPY from ${workerName} to executor:`);
+            
+            // Show trader info
+            if (message.traderName && message.traderName !== 'Unknown' && message.traderName !== 'Unknown (LaserStream)') {
+                console.log(`   📍 Trader: ${message.traderName} (${message.traderWallet ? message.traderWallet.substring(0,4) + '...' + message.traderWallet.slice(-4) : 'Unknown'})`);
+            } else if (message.traderWallet) {
+                console.log(`   📍 Trader: ${message.traderWallet.substring(0,4)}...${message.traderWallet.slice(-4)}`);
+            } else {
+                console.log(`   📍 Trader: Unknown`);
+            }
+            
+            console.log(`   🔑 Signature: ${message.signature ? message.signature.substring(0,8) + '...' : 'Unknown'}`);
+            
+            // Show platform info if available
+            if (message.analysisResult && message.analysisResult.swapDetails) {
+                console.log(`   🏪 Platform: ${message.analysisResult.swapDetails.platform}`);
+                console.log(`   💰 Amount: ${message.analysisResult.swapDetails.inputAmount}`);
+            }
+            
+            const executorWorker = this.workers.get('executor');
+            if (executorWorker && this.workerStates.get('executor') === 'ready') {
+                console.log(`✅ Executor worker ready, forwarding smart copy message...`);
+                executorWorker.postMessage(message); 
+            } else {
+                console.error(`❌ Executor worker not ready for smart copy execution. Status: ${this.workerStates.get('executor')}`);
+            }
+        });
+
         // =========================================================================================
         // ================================ START: ADD THIS CODE BLOCK ===============================
         // =========================================================================================

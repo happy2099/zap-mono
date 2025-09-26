@@ -537,6 +537,30 @@ class DataManager {
         };
     }
 
+    async getSettings() {
+        try {
+            const settingsData = await this.readJsonFile('settings.json');
+            return settingsData;
+        } catch (error) {
+            this.logger.error('Error loading settings:', error);
+            return {
+                botSettings: {
+                    scaleFactor: 0.1,
+                    minSolAmount: 0.1,
+                    maxSolAmount: 10.0,
+                    maxSlippage: 0.05,
+                    enableATASlicing: true,
+                    ataSliceOffset: 64,
+                    ataSliceLength: 8,
+                    supportedPlatforms: ['PumpFun', 'Raydium', 'Jupiter', 'Meteora', 'Orca'],
+                    enableRouterDetection: true,
+                    computeBudgetUnits: 200000,
+                    computeBudgetFee: 0
+                }
+            };
+        }
+    }
+
     async updateUserSlippage(chatId, slippageBps) {
         const settings = await this.readJsonFile('settings.json');
         

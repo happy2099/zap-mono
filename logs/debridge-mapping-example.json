@@ -1,0 +1,105 @@
+[
+  {
+    "timestamp": "2025-09-24T09:07:45.771Z",
+    "signature": "5WzHjM2hDeBridgeExample...",
+    "debridge": {
+      "processed": true,
+      "benefits": {
+        "automaticALT": true,
+        "automaticCPI": true,
+        "automaticIDL": true,
+        "noManualCode": true,
+        "betterPerformance": true
+      },
+      "altHandling": "DeBridge Automatic",
+      "manualCodeRequired": false
+    },
+    "flow": {
+      "stage1_detection": "LaserStream gRPC → DeBridge Worker",
+      "stage2_normalization": "DeBridge Automatic ALT Resolution",
+      "stage3_analysis": "DeBridge Parser → Trade Detection",
+      "stage4_cloning": "DeBridge Cloner → User Instructions",
+      "stage5_execution": "DeBridge-Validated → Blockchain"
+    },
+    "performance": {
+      "byteVolume": {
+        "totalBytes": 32,
+        "instructionCount": 1,
+        "averageBytes": 32,
+        "instructionBreakdown": [
+          {
+            "index": 0,
+            "programId": "6EF8...wF6P",
+            "accounts": 0,
+            "dataBytes": 0,
+            "totalBytes": 32
+          }
+        ],
+        "sizeCategory": "SMALL"
+      },
+      "latency": {
+        "detectionToExecution": 232153771,
+        "blockTimeToExecution": 232153771,
+        "executionLatency": 232153771,
+        "blockTime": "2025-09-21T16:38:32.000Z",
+        "currentTime": "2025-09-24T09:07:45.771Z",
+        "status": "COMPLETED",
+        "performanceGrade": "SLOW"
+      },
+      "injectionStatus": {
+        "status": "INJECTED_SUCCESS",
+        "signature": "3moAcDeBridgeExample...",
+        "success": true,
+        "error": null,
+        "verification": {
+          "integrity": "VERIFIED",
+          "reason": "Transaction successfully injected with valid signature",
+          "recommendation": "Monitor for confirmation"
+        }
+      }
+    },
+    "stages": {
+      "raw": {
+        "signature": "5WzHjM2hDeBridgeExample...",
+        "accountKeysCount": 4,
+        "instructions": [
+          {
+            "programIdIndex": 1,
+            "accountsCount": 3,
+            "data": "AQAAAAAAAAB......"
+          }
+        ]
+      },
+      "normalized": {
+        "signature": "5WzHjM2hDeBridgeExample...",
+        "accountKeysCount": 7,
+        "instructions": []
+      },
+      "analyzed": {
+        "tradeType": "buy",
+        "traderPubkey": "xXpR...hHQh",
+        "inputMint": "So11...1112",
+        "outputMint": "yN8d...pump",
+        "dexPlatform": "Unknown",
+        "amount": "N/A",
+        "solSpent": 0
+      },
+      "cloned": {
+        "count": 1,
+        "instructions": [
+          {
+            "index": 0,
+            "programId": "6EF8...wF6P",
+            "accounts": [],
+            "data": "... (hex)"
+          }
+        ]
+      },
+      "final": {
+        "success": true,
+        "signature": "3moAcDeBridgeExample...",
+        "error": null
+      }
+    }
+  }
+]

@@ -1,0 +1,286 @@
+/**
+ * IDL-Based Transaction Analyzer
+ * Uses IDLs to provide precise instruction analysis and cloning guidance
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+class IDLAnalyzer {
+    constructor() {
+        this.idls = new Map();
+        this.loadIDLs();
+    }
+
+    /**
+     * Load all IDL files from the idls directory
+     */
+    loadIDLs() {
+        const idlDir = path.join(__dirname, 'idls');
+        if (!fs.existsSync(idlDir)) {
+            console.log('[IDL-ANALYZER] No IDL directory found, creating...');
+            fs.mkdirSync(idlDir, { recursive: true });
+            return;
+        }
+
+        const files = fs.readdirSync(idlDir);
+        files.forEach(file => {
+            if (file.endsWith('.json')) {
+                try {
+                    const idlPath = path.join(idlDir, file);
+                    const idl = JSON.parse(fs.readFileSync(idlPath, 'utf8'));
+                    const programId = idl.metadata?.address;
+                    if (programId) {
+                        this.idls.set(programId, idl);
+                        console.log(`[IDL-ANALYZER] ✅ Loaded IDL for ${programId} (${file})`);
+                    }
+                } catch (error) {
+                    console.error(`[IDL-ANALYZER] ❌ Failed to load IDL ${file}:`, error.message);
+                }
+            }
+        });
+    }
+
+    /**
+     * Analyze a transaction using IDL knowledge
+     */
+    analyzeTransaction(transaction) {
+        const results = {
+            detectedOperations: [],
+            cloningGuidance: {},
+            instructionAnalysis: []
+        };
+
+        if (!transaction.instructions) {
+            return results;
+        }
+
+        transaction.instructions.forEach((instruction, index) => {
+            const programId = instruction.programId;
+            const idl = this.idls.get(programId);
+            
+            if (idl) {
+                const analysis = this.analyzeInstruction(instruction, idl, index);
+                results.instructionAnalysis.push(analysis);
+                
+                if (analysis.isTradeOperation) {
+                    results.detectedOperations.push(analysis);
+                }
+            }
+        });
+
+        // Generate cloning guidance
+        results.cloningGuidance = this.generateCloningGuidance(results.detectedOperations);
+        
+        return results;
+    }
+
+    /**
+     * Analyze a single instruction using IDL
+     */
+    analyzeInstruction(instruction, idl, index) {
+        const analysis = {
+            index,
+            programId: instruction.programId,
+            isTradeOperation: false,
+            operationType: null,
+            accounts: [],
+            parameters: {},
+            cloningStrategy: null
+        };
+
+        // Find matching instruction in IDL
+        const idlInstruction = this.findMatchingInstruction(instruction, idl);
+        if (idlInstruction) {
+            analysis.operationType = idlInstruction.name;
+            analysis.isTradeOperation = this.isTradeOperation(idlInstruction.name);
+            analysis.accounts = this.analyzeAccounts(instruction, idlInstruction);
+            analysis.parameters = this.extractParameters(instruction, idlInstruction);
+            analysis.cloningStrategy = this.getCloningStrategy(idlInstruction.name);
+        }
+
+        return analysis;
+    }
+
+    /**
+     * Find matching instruction in IDL using discriminator
+     */
+    findMatchingInstruction(instruction, idl) {
+        // Extract discriminator from instruction data (first 8 bytes)
+        if (instruction.data && instruction.data.length >= 8) {
+            const discriminator = Array.from(instruction.data.slice(0, 8));
+            
+            // Find matching instruction by discriminator
+            return idl.instructions.find(ix => {
+                if (ix.discriminator && Array.isArray(ix.discriminator)) {
+                    return JSON.stringify(ix.discriminator) === JSON.stringify(discriminator);
+                }
+                return false;
+            });
+        }
+        
+        // Fallback to name matching
+        return idl.instructions.find(ix => 
+            ix.name === 'buy' || ix.name === 'sell' || ix.name === 'swap'
+        );
+    }
+
+    /**
+     * Check if this is a trade operation
+     */
+    isTradeOperation(instructionName) {
+        const tradeOperations = ['buy', 'sell', 'swap', 'trade'];
+        return tradeOperations.includes(instructionName.toLowerCase());
+    }
+
+    /**
+     * Analyze accounts using IDL structure
+     */
+    analyzeAccounts(instruction, idlInstruction) {
+        const accountAnalysis = [];
+        
+        instruction.accounts.forEach((account, index) => {
+            const idlAccount = idlInstruction.accounts[index];
+            if (idlAccount) {
+                accountAnalysis.push({
+                    index,
+                    pubkey: account.pubkey,
+                    isSigner: account.isSigner,
+                    isWritable: account.isWritable,
+                    role: idlAccount.name,
+                    isMut: idlAccount.isMut,
+                    isSignerRequired: idlAccount.isSigner
+                });
+            }
+        });
+
+        return accountAnalysis;
+    }
+
+    /**
+     * Extract parameters from instruction data
+     */
+    extractParameters(instruction, idlInstruction) {
+        // This would decode the instruction data based on the IDL args
+        // For now, return basic info
+        return {
+            dataLength: instruction.data.length,
+            hasArgs: idlInstruction.args && idlInstruction.args.length > 0,
+            args: idlInstruction.args || []
+        };
+    }
+
+    /**
+     * Get cloning strategy for this operation
+     */
+    getCloningStrategy(operationType) {
+        const strategies = {
+            'buy': {
+                type: 'SOL_TO_TOKEN',
+                requiresATA: true,
+                requiresSOL: true,
+                surgicalTarget: 'solAmount',
+                accountMapping: {
+                    user: 'REPLACE_WITH_USER',
+                    userTokenAccount: 'CREATE_USER_ATA',
+                    feeRecipient: 'KEEP_ORIGINAL'
+                }
+            },
+            'sell': {
+                type: 'TOKEN_TO_SOL',
+                requiresATA: true,
+                requiresSOL: false,
+                surgicalTarget: 'tokenAmount',
+                accountMapping: {
+                    user: 'REPLACE_WITH_USER',
+                    userTokenAccount: 'CREATE_USER_ATA',
+                    feeRecipient: 'KEEP_ORIGINAL'
+                }
+            },
+            'swap': {
+                type: 'TOKEN_TO_TOKEN',
+                requiresATA: true,
+                requiresSOL: false,
+                surgicalTarget: 'inputAmount',
+                accountMapping: {
+                    user: 'REPLACE_WITH_USER',
+                    userTokenAccount: 'CREATE_USER_ATA',
+                    feeRecipient: 'KEEP_ORIGINAL'
+                }
+            }
+        };
+
+        return strategies[operationType] || {
+            type: 'UNKNOWN',
+            requiresATA: false,
+            requiresSOL: false,
+            surgicalTarget: null,
+            accountMapping: {}
+        };
+    }
+
+    /**
+     * Generate cloning guidance based on detected operations
+     */
+    generateCloningGuidance(operations) {
+        if (operations.length === 0) {
+            return { strategy: 'NO_OPERATIONS', instructions: [] };
+        }
+
+        const guidance = {
+            strategy: 'IDL_BASED_CLONING',
+            operations: operations.map(op => ({
+                index: op.index,
+                type: op.operationType,
+                strategy: op.cloningStrategy,
+                accounts: op.accounts,
+                parameters: op.parameters
+            })),
+            recommendations: []
+        };
+
+        // Generate specific recommendations
+        operations.forEach(op => {
+            if (op.cloningStrategy.requiresATA) {
+                guidance.recommendations.push({
+                    type: 'CREATE_ATA',
+                    instruction: `Create ATA for user at index ${op.index}`,
+                    priority: 'HIGH'
+                });
+            }
+
+            if (op.cloningStrategy.requiresSOL) {
+                guidance.recommendations.push({
+                    type: 'SURGICAL_OVERRIDE',
+                    instruction: `Apply SOL amount override to ${op.cloningStrategy.surgicalTarget}`,
+                    priority: 'HIGH'
+                });
+            }
+        });
+
+        return guidance;
+    }
+
+    /**
+     * Get IDL for a specific program
+     */
+    getIDL(programId) {
+        return this.idls.get(programId);
+    }
+
+    /**
+     * Check if we have IDL for a program
+     */
+    hasIDL(programId) {
+        return this.idls.has(programId);
+    }
+
+    /**
+     * Get all loaded program IDs
+     */
+    getLoadedPrograms() {
+        return Array.from(this.idls.keys());
+    }
+}
+
+module.exports = IDLAnalyzer;

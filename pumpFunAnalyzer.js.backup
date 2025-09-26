@@ -1,0 +1,312 @@
+/**
+ * Pump.fun Specific Analyzer
+ * Uses official Pump.fun IDLs for precise instruction analysis
+ */
+
+const fs = require('fs');
+const path = require('path');
+
+class PumpFunAnalyzer {
+    constructor() {
+        this.pumpIDL = null;
+        this.pumpAMMIDL = null;
+        this.pumpFeesIDL = null;
+        this.loadOfficialIDLs();
+    }
+
+    /**
+     * Load official Pump.fun IDLs
+     */
+    loadOfficialIDLs() {
+        try {
+            // Load main Pump.fun IDL
+            const pumpPath = path.join(__dirname, 'idls', 'pump-official.json');
+            if (fs.existsSync(pumpPath)) {
+                this.pumpIDL = JSON.parse(fs.readFileSync(pumpPath, 'utf8'));
+                console.log(`[PUMP-ANALYZER] ✅ Loaded official Pump.fun IDL`);
+            }
+
+            // Load Pump.fun AMM IDL
+            const ammPath = path.join(__dirname, 'idls', 'pump-amm-official.json');
+            if (fs.existsSync(ammPath)) {
+                this.pumpAMMIDL = JSON.parse(fs.readFileSync(ammPath, 'utf8'));
+                console.log(`[PUMP-ANALYZER] ✅ Loaded official Pump.fun AMM IDL`);
+            }
+
+            // Load Pump.fun Fees IDL
+            const feesPath = path.join(__dirname, 'idls', 'pump-fees-official.json');
+            if (fs.existsSync(feesPath)) {
+                this.pumpFeesIDL = JSON.parse(fs.readFileSync(feesPath, 'utf8'));
+                console.log(`[PUMP-ANALYZER] ✅ Loaded official Pump.fun Fees IDL`);
+            }
+
+        } catch (error) {
+            console.error(`[PUMP-ANALYZER] ❌ Failed to load official IDLs:`, error.message);
+        }
+    }
+
+    /**
+     * Analyze Pump.fun transaction with official IDL precision
+     */
+    analyzePumpTransaction(transaction) {
+        const results = {
+            isPumpTransaction: false,
+            pumpOperations: [],
+            cloningGuidance: {},
+            programAnalysis: {}
+        };
+
+        if (!transaction.instructions) {
+            return results;
+        }
+
+        // Check if this is a Pump.fun transaction
+        const pumpProgramId = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+        const hasPumpInstructions = transaction.instructions.some(ix => 
+            ix.programId === pumpProgramId
+        );
+
+        if (!hasPumpInstructions) {
+            return results;
+        }
+
+        results.isPumpTransaction = true;
+
+        // Analyze each instruction
+        transaction.instructions.forEach((instruction, index) => {
+            if (instruction.programId === pumpProgramId) {
+                const analysis = this.analyzePumpInstruction(instruction, index);
+                if (analysis.isTradeOperation) {
+                    results.pumpOperations.push(analysis);
+                }
+            }
+        });
+
+        // Generate cloning guidance
+        results.cloningGuidance = this.generatePumpCloningGuidance(results.pumpOperations);
+        
+        return results;
+    }
+
+    /**
+     * Analyze a single Pump.fun instruction
+     */
+    analyzePumpInstruction(instruction, index) {
+        const analysis = {
+            index,
+            programId: instruction.programId,
+            isTradeOperation: false,
+            operationType: null,
+            discriminator: null,
+            accounts: [],
+            parameters: {},
+            cloningStrategy: null,
+            isPumpFun: true
+        };
+
+        // Extract discriminator (first 8 bytes)
+        if (instruction.data && instruction.data.length >= 8) {
+            analysis.discriminator = Array.from(instruction.data.slice(0, 8));
+        }
+
+        // Find matching instruction in IDL
+        const idlInstruction = this.findPumpInstruction(instruction);
+        if (idlInstruction) {
+            analysis.operationType = idlInstruction.name;
+            analysis.isTradeOperation = this.isPumpTradeOperation(idlInstruction.name);
+            analysis.accounts = this.analyzePumpAccounts(instruction, idlInstruction);
+            analysis.parameters = this.extractPumpParameters(instruction, idlInstruction);
+            analysis.cloningStrategy = this.getPumpCloningStrategy(idlInstruction.name);
+        }
+
+        return analysis;
+    }
+
+    /**
+     * Find matching Pump.fun instruction using discriminator
+     */
+    findPumpInstruction(instruction) {
+        if (!this.pumpIDL || !instruction.data || instruction.data.length < 8) {
+            return null;
+        }
+
+        const discriminator = Array.from(instruction.data.slice(0, 8));
+        
+        return this.pumpIDL.instructions.find(ix => {
+            if (ix.discriminator && Array.isArray(ix.discriminator)) {
+                return JSON.stringify(ix.discriminator) === JSON.stringify(discriminator);
+            }
+            return false;
+        });
+    }
+
+    /**
+     * Check if this is a Pump.fun trade operation
+     */
+    isPumpTradeOperation(instructionName) {
+        const tradeOperations = ['buy', 'sell'];
+        return tradeOperations.includes(instructionName.toLowerCase());
+    }
+
+    /**
+     * Analyze Pump.fun accounts using official IDL
+     */
+    analyzePumpAccounts(instruction, idlInstruction) {
+        const accountAnalysis = [];
+        
+        instruction.accounts.forEach((account, index) => {
+            const idlAccount = idlInstruction.accounts[index];
+            if (idlAccount) {
+                accountAnalysis.push({
+                    index,
+                    pubkey: account.pubkey,
+                    isSigner: account.isSigner,
+                    isWritable: account.isWritable,
+                    role: idlAccount.name,
+                    isMut: idlAccount.mut || false,
+                    isSignerRequired: idlAccount.signer || false,
+                    pda: idlAccount.pda || null
+                });
+            }
+        });
+
+        return accountAnalysis;
+    }
+
+    /**
+     * Extract Pump.fun parameters from instruction data
+     */
+    extractPumpParameters(instruction, idlInstruction) {
+        // This would decode the instruction data based on the IDL args
+        // For now, return basic info
+        return {
+            dataLength: instruction.data.length,
+            hasArgs: idlInstruction.args && idlInstruction.args.length > 0,
+            args: idlInstruction.args || [],
+            discriminator: Array.from(instruction.data.slice(0, 8))
+        };
+    }
+
+    /**
+     * Get Pump.fun specific cloning strategy
+     */
+    getPumpCloningStrategy(operationType) {
+        const strategies = {
+            'buy': {
+                type: 'PUMP_BUY',
+                requiresATA: true,
+                requiresSOL: true,
+                surgicalTarget: 'solAmount',
+                accountMapping: {
+                    user: 'REPLACE_WITH_USER',
+                    userTokenAccount: 'CREATE_USER_ATA',
+                    global: 'KEEP_ORIGINAL',
+                    bondingCurve: 'KEEP_ORIGINAL',
+                    associatedBondingCurve: 'KEEP_ORIGINAL',
+                    mint: 'KEEP_ORIGINAL',
+                    feeRecipient: 'KEEP_ORIGINAL'
+                },
+                discriminator: [102, 6, 61, 18, 1, 218, 235, 234]
+            },
+            'sell': {
+                type: 'PUMP_SELL',
+                requiresATA: true,
+                requiresSOL: false,
+                surgicalTarget: 'tokenAmount',
+                accountMapping: {
+                    user: 'REPLACE_WITH_USER',
+                    userTokenAccount: 'CREATE_USER_ATA',
+                    global: 'KEEP_ORIGINAL',
+                    bondingCurve: 'KEEP_ORIGINAL',
+                    associatedBondingCurve: 'KEEP_ORIGINAL',
+                    mint: 'KEEP_ORIGINAL',
+                    feeRecipient: 'KEEP_ORIGINAL'
+                },
+                discriminator: [51, 230, 133, 164, 1, 127, 131, 173]
+            }
+        };
+
+        return strategies[operationType] || {
+            type: 'PUMP_UNKNOWN',
+            requiresATA: false,
+            requiresSOL: false,
+            surgicalTarget: null,
+            accountMapping: {}
+        };
+    }
+
+    /**
+     * Generate Pump.fun specific cloning guidance
+     */
+    generatePumpCloningGuidance(operations) {
+        if (operations.length === 0) {
+            return { strategy: 'NO_PUMP_OPERATIONS', instructions: [] };
+        }
+
+        const guidance = {
+            strategy: 'PUMP_FUN_CLONING',
+            operations: operations.map(op => ({
+                index: op.index,
+                type: op.operationType,
+                strategy: op.cloningStrategy,
+                accounts: op.accounts,
+                parameters: op.parameters,
+                discriminator: op.discriminator
+            })),
+            recommendations: []
+        };
+
+        // Generate Pump.fun specific recommendations
+        operations.forEach(op => {
+            if (op.cloningStrategy.requiresATA) {
+                guidance.recommendations.push({
+                    type: 'CREATE_PUMP_ATA',
+                    instruction: `Create ATA for user at index ${op.index} for Pump.fun token`,
+                    priority: 'HIGH',
+                    discriminator: op.discriminator
+                });
+            }
+
+            if (op.cloningStrategy.requiresSOL) {
+                guidance.recommendations.push({
+                    type: 'PUMP_SURGICAL_OVERRIDE',
+                    instruction: `Apply SOL amount override to ${op.cloningStrategy.surgicalTarget} for Pump.fun buy`,
+                    priority: 'HIGH',
+                    discriminator: op.discriminator
+                });
+            }
+        });
+
+        return guidance;
+    }
+
+    /**
+     * Get Pump.fun program ID
+     */
+    getPumpProgramId() {
+        return "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+    }
+
+    /**
+     * Check if a program ID is Pump.fun
+     */
+    isPumpProgram(programId) {
+        return programId === this.getPumpProgramId();
+    }
+
+    /**
+     * Get buy instruction discriminator
+     */
+    getBuyDiscriminator() {
+        return [102, 6, 61, 18, 1, 218, 235, 234];
+    }
+
+    /**
+     * Get sell instruction discriminator
+     */
+    getSellDiscriminator() {
+        return [51, 230, 133, 164, 1, 127, 131, 173];
+    }
+}
+
+module.exports = PumpFunAnalyzer;

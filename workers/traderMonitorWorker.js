@@ -3,20 +3,16 @@
 // =================================================================
 
 const BaseWorker = require('./templates/baseWorker');
-const { TradingEngine } = require('../tradingEngine');
 const { DataManager } = require('../dataManager');
 const { RedisManager } = require('../redis/redisManager');
 const { SolanaManager } = require('../solanaManager');
 const { PublicKey } = require('@solana/web3.js');
-const { UniversalAnalyzer } = require('../universalAnalyzer.js');
-const { UniversalCloningLogger } = require('../universalCloningLogger.js');
 const TransactionLogger = require('../transactionLogger.js');
 const config = require('../config.js');
 const bs58 = require('bs58');
 const { shortenAddress } = require('../utils');
-const { LaserStreamManager } = require('../laserstreamManager'); // gRPC LaserStream// Smart router discovery
+const { LaserStreamManager } = require('../laserstreamManager'); // gRPC LaserStream
 const { quickMap } = require('../map.js');
-
 
 class TraderMonitorWorker extends BaseWorker {
     constructor() {
@@ -63,8 +59,6 @@ class TraderMonitorWorker extends BaseWorker {
             await this.solanaManager.initialize();
             this.logInfo('✅ SolanaManager initialized.');
 
-
-            
             // Initialize Golden Filter with static DEX programs
             this.knownDexPrograms = new Set();
             for (const key in config.PLATFORM_IDS) {
@@ -85,36 +79,28 @@ class TraderMonitorWorker extends BaseWorker {
             await this.loadRouterDatabase();
             await this.loadActiveTraders();
 
-            // Instantiate LaserStreamManager passing this worker for callbacks
-            const tempEngineForLaserstream = new TradingEngine(
-                { dataManager: this.dataManager },
-                { partialInit: true }
-            );
-
+            // Initialize LaserStreamManager (SIMPLE COPY BOT)
             this.laserstreamManager = new LaserStreamManager(
-                this,  // <--- `this` (TraderMonitorWorker instance) is passed as parentWorker
+                this,  // Pass this worker directly
                 config, 
                 this.redisManager
-                // NO 4th argument, LaserStreamManager will use `this.parentWorker.handleTraderActivity` internally.
             );
-            this.laserstreamManager.tradingEngine = tempEngineForLaserstream;
+            
+            // Load bot configuration and set it in LaserStreamManager
+            await this.loadBotConfiguration();
             
             // Set the transaction notification callback
             this.laserstreamManager.transactionNotificationCallback = this.handleTraderActivity.bind(this);
 
-            // Initialize SolanaManager for Universal Analyzer
+            // Initialize SolanaManager
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
             
-            // Initialize Universal Analyzer, Cloning Logger, and Transaction Logger
-            this.universalAnalyzer = new UniversalAnalyzer(this.solanaManager.connection);
-            this.universalCloningLogger = new UniversalCloningLogger();
+            // Initialize Transaction Logger only
             this.transactionLogger = new TransactionLogger();
             
             // Listen for raw transaction events for cloning
             this.laserstreamManager.on('transaction', this.handleRawTransaction.bind(this));
-            // REMOVED: this.laserstreamManager.on('copy_trade_detected', this.handleCopyTradeDetected.bind(this));
-            // Using only 'transaction' event to avoid duplicate analysis
 
             this.logInfo('✅ Initialized LaserStreamManager, Universal Analyzer, and Cloning Logger. Ready to start monitoring.');
            
@@ -130,6 +116,57 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
     
+    async loadBotConfiguration() {
+        try {
+            // Load settings from dataManager
+            const settings = await this.dataManager.getSettings();
+            
+            const botConfig = {
+                // Transaction scaling settings
+                scaleFactor: settings.botSettings?.scaleFactor || 0.1,
+                minTransactionAmount: settings.botSettings?.minSolAmount || 0.1,
+                maxTransactionAmount: settings.botSettings?.maxSolAmount || 10.0,
+                
+                // ATA slicing settings
+                enableATASlicing: settings.botSettings?.enableATASlicing || true,
+                ataSliceOffset: settings.botSettings?.ataSliceOffset || 64,
+                ataSliceLength: settings.botSettings?.ataSliceLength || 8,
+                
+                // Platform settings
+                supportedPlatforms: settings.botSettings?.supportedPlatforms || ['PumpFun', 'Raydium', 'Jupiter', 'Meteora', 'Orca'],
+                enableRouterDetection: settings.botSettings?.enableRouterDetection || true,
+                
+                // Risk management
+                maxSlippage: settings.botSettings?.maxSlippage || 0.05,
+                computeBudgetUnits: settings.botSettings?.computeBudgetUnits || 200000,
+                computeBudgetFee: settings.botSettings?.computeBudgetFee || 0
+            };
+            
+            // Set the configuration in LaserStreamManager
+            this.laserstreamManager.setBotConfiguration(botConfig);
+            
+            this.logInfo(`✅ Bot configuration loaded: Scale Factor: ${botConfig.scaleFactor}, Min Amount: ${botConfig.minTransactionAmount} SOL`);
+            
+        } catch (error) {
+            this.logError('❌ Error loading bot configuration:', error);
+            // Use default configuration
+            const defaultConfig = {
+                scaleFactor: 0.1,
+                minTransactionAmount: 0.1,
+                maxTransactionAmount: 10.0,
+                enableATASlicing: true,
+                ataSliceOffset: 64,
+                ataSliceLength: 8,
+                supportedPlatforms: ['PumpFun', 'Raydium', 'Jupiter', 'Meteora', 'Orca'],
+                enableRouterDetection: true,
+                maxSlippage: 0.05,
+                computeBudgetUnits: 200000,
+                computeBudgetFee: 0
+            };
+            this.laserstreamManager.setBotConfiguration(defaultConfig);
+        }
+    }
+
     async loadRouterDatabase() {
         try {
             const routerData = await this.redisManager.get('router:intelligence:database');
@@ -163,21 +200,21 @@ class TraderMonitorWorker extends BaseWorker {
                     
                     // Get all traders for this user from the DB to find their wallets
                     // Use user.id (internal ID) not user.chat_id
-                     const allUserTraders = await this.dataManager.getTraders(user.id);
-                     this.logInfo(`[Monitor] Loaded ${allUserTraders.length} total traders from DB for user ${user.id}`);
-                     
-                     for (const traderName of activeTraderNames) {
-                         const traderInfo = allUserTraders.find(t => t.name === traderName);
-                         if (traderInfo && traderInfo.wallet) {
-                             allActiveWallets.add(traderInfo.wallet);
-                             this.logInfo(`[Monitor] ✅ Added trader ${traderName} with wallet ${traderInfo.wallet}`);
-                             
-                             // PRE-SYNC trader names to Redis for ultra-fast lookup
-                             await this.syncTraderNameToRedis(traderName, traderInfo.wallet);
-                         } else {
-                             this.logWarn(`[Monitor] ⚠️ Trader ${traderName} not found in DB or missing wallet`);
-                         }
-                     }
+                    const allUserTraders = await this.dataManager.getTraders(user.id);
+                    this.logInfo(`[Monitor] Loaded ${allUserTraders.length} total traders from DB for user ${user.id}`);
+                    
+                    for (const traderName of activeTraderNames) {
+                        const traderInfo = allUserTraders.find(t => t.name === traderName);
+                        if (traderInfo && traderInfo.wallet) {
+                            allActiveWallets.add(traderInfo.wallet);
+                            this.logInfo(`[Monitor] ✅ Added trader ${traderName} with wallet ${traderInfo.wallet}`);
+                            
+                            // PRE-SYNC trader names to Redis for ultra-fast lookup
+                            await this.syncTraderNameToRedis(traderName, traderInfo.wallet);
+                        } else {
+                            this.logWarn(`[Monitor] ⚠️ Trader ${traderName} not found in DB or missing wallet`);
+                        }
+                    }
                 } else {
                     this.logInfo(`[Monitor] No active traders found for user ${user.chat_id}`);
                 }
@@ -188,8 +225,8 @@ class TraderMonitorWorker extends BaseWorker {
             this.logInfo(`[Monitor] ⚡ Pre-synced ${this.activeTraders.length} trader names to Redis for instant lookup.`);
 
         } catch(error) {
-             this.logError("CRITICAL FAILURE loading traders from Redis.", { error: error.message, stack: error.stack});
-             this.activeTraders = []; // Safety reset
+            this.logError("CRITICAL FAILURE loading traders from Redis.", { error: error.message, stack: error.stack});
+            this.activeTraders = []; // Safety reset
         }
     }
 
@@ -197,13 +234,14 @@ class TraderMonitorWorker extends BaseWorker {
         this.registerHandler('REFRESH_SUBSCRIPTIONS', this.handleRefreshSubscriptions.bind(this));
         this.registerHandler('TRADER_ADDED', this.handleTraderAdded.bind(this));
         this.registerHandler('TRADER_STARTED', this.handleTraderStarted.bind(this));
+        this.registerHandler('HANDLE_SMART_COPY', this.handleSmartCopy.bind(this));
     }
 
     async handleMessage(message) {
         const handler = this.messageHandlers.get(message.type);
         if (handler) {
             await handler(message);
-            } else {
+        } else {
             await super.handleMessage(message);
         }
     }
@@ -273,6 +311,38 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
+    async handleSmartCopy(message) {
+        try {
+            this.logInfo(`[SMART-COPY] 🔧 Handling smart copy from LaserStream`);
+            this.logInfo(`[SMART-COPY] 🔍 Trader: ${message.traderWallet}`);
+            this.logInfo(`[SMART-COPY] 🔍 Signature: ${message.signature} (type: ${typeof message.signature})`);
+            this.logInfo(`[SMART-COPY] 🔍 Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
+            this.logInfo(`[SMART-COPY] 🔍 Analysis result: ${message.analysisResult ? 'Present' : 'Missing'}`);
+            
+            // Forward to executor with proper data structure
+            this.logInfo(`[SMART-COPY] 🔍 Sending to executor - Signature: ${message.signature} (type: ${typeof message.signature})`);
+            this.logInfo(`[SMART-COPY] 🔍 Sending to executor - Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
+            
+            this.signalMessage('HANDLE_SMART_COPY', {
+                traderWallet: message.traderWallet,
+                traderName: message.traderName, // <-- ADD TRADER NAME
+                signature: message.signature,
+                analysisResult: message.analysisResult,
+                originalTransaction: message.originalTransaction,
+                meta: message.meta,
+                programIds: message.programIds,
+                routerInfo: message.routerInfo,
+                userConfig: message.userConfig,
+                smartCopyMode: true
+            });
+            
+            this.logInfo(`[SMART-COPY] ✅ Smart copy forwarded to executor`);
+            
+        } catch (error) {
+            this.logError(`[SMART-COPY] ❌ Error handling smart copy: ${error.message}`);
+        }
+    }
+
     // Method for LaserStream to get active trader wallets
     getMasterTraderWallets() {
         return this.activeTraders.map(trader => trader.walletAddress);
@@ -291,6 +361,8 @@ class TraderMonitorWorker extends BaseWorker {
     // Helper function to get trader name from wallet address - ULTRA-FAST Redis lookup
     async getTraderNameFromWallet(walletAddress) {
         try {
+            this.logInfo(`[TRADER-LOOKUP] 🔍 Looking up trader name for wallet: ${walletAddress}`);
+            
             // ULTRA-FAST: Try Redis lookup first (instant)
             const traderName = await this.redisManager.get(`trader_name:${walletAddress}`);
             if (traderName) {
@@ -373,7 +445,7 @@ class TraderMonitorWorker extends BaseWorker {
             setTimeout(async () => {
                 this.logInfo('🔄 Retrying LaserStream connection...');
                 try {
-        await this.laserstreamManager.startMonitoring(walletAddresses);
+                    await this.laserstreamManager.startMonitoring(walletAddresses);
                     this.logInfo('✅ LaserStream monitoring started successfully on retry');
                 } catch (retryError) {
                     this.logError('❌ LaserStream retry failed:', retryError.message);
@@ -382,7 +454,7 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
-  // =================================================================
+    // =================================================================
     // =========== TREASURE HUNTER (BATTLE-TESTED) ====================
     // =================================================================
     // This version intelligently finds the correct transaction object,
@@ -405,7 +477,6 @@ class TraderMonitorWorker extends BaseWorker {
         }
         return null;
     }
-
 
     // =======================================================================
     // ====== SMART GATEKEEPER - THE FINAL FILTER ============================
@@ -803,8 +874,6 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
-
-
     /**
      * Detect original platform intent by looking for specific indicators
      */
@@ -1126,10 +1195,29 @@ class TraderMonitorWorker extends BaseWorker {
     // ====== HANDLE TRADER ACTIVITY (v9 - WITH SMART GATEKEEPER) ============
     // =======================================================================
     
-    // SECOND: Replace your handleTraderActivity function with this final version
     async handleTraderActivity(sourceWallet, signature, transactionUpdate) {
+        // 🔧 FIX: Add timeout wrapper to prevent getting stuck
+        const ACTIVITY_TIMEOUT = 15000; // 15 seconds total timeout
+        
         try {
-            const signatureString = bs58.encode(signature);
+            const activityPromise = this._processTraderActivity(sourceWallet, signature, transactionUpdate);
+            const timeoutPromise = new Promise((_, reject) => 
+                setTimeout(() => reject(new Error('Trader activity processing timeout')), ACTIVITY_TIMEOUT)
+            );
+            
+            await Promise.race([activityPromise, timeoutPromise]);
+        } catch (error) {
+            if (error.message.includes('timeout')) {
+                this.logWarn(`[MONITOR] ⏰ Trader activity processing timed out for ${signature}`);
+                return;
+            }
+            throw error;
+        }
+    }
+    
+    async _processTraderActivity(sourceWallet, signature, transactionUpdate) {
+        try {
+            const signatureString = bs58.encode(new Uint8Array(signature));
             const coreTx = this.getCoreTransaction(transactionUpdate.transaction);
 
             if (!coreTx || !coreTx.meta || !coreTx.message || coreTx.meta.err) {
@@ -1187,6 +1275,34 @@ class TraderMonitorWorker extends BaseWorker {
             this.logInfo(`[MAPPING] 📥 RAW: ${coreTx.message.accountKeys?.length || 0} base accounts`);
             this.logInfo(`[MAPPING] 🔄 NORMALIZED: ${fullAccountListStrings.length} total accounts (including ALT)`);
             this.logInfo(`[MAPPING] 📋 Instructions: ${normalizedTx.instructions.length}`);
+            
+            // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
+            this.logInfo(`[MAPPING] 📊 SERIALIZED PARSED DATA:`);
+            this.logInfo(`[MAPPING] 📊 preTokenBalances: [ ${normalizedTx.preTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 postTokenBalances: [ ${normalizedTx.postTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 preBalances: [ ${normalizedTx.preBalances?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 postBalances: [ ${normalizedTx.postBalances?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 logMessages: [ ${normalizedTx.logMessages?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 instructions: [ ${normalizedTx.instructions?.length || 0} items ]`);
+            this.logInfo(`[MAPPING] 📊 accountKeys: [ ${normalizedTx.accountKeys?.length || 0} items ]`);
+            
+            // ===== DETAILED TOKEN BALANCE STRUCTURE =====
+            if (normalizedTx.preTokenBalances && normalizedTx.preTokenBalances.length > 0) {
+                this.logInfo(`[MAPPING] 📊 preTokenBalances structure:`, JSON.stringify(normalizedTx.preTokenBalances, null, 2));
+            }
+            if (normalizedTx.postTokenBalances && normalizedTx.postTokenBalances.length > 0) {
+                this.logInfo(`[MAPPING] 📊 postTokenBalances structure:`, JSON.stringify(normalizedTx.postTokenBalances, null, 2));
+            }
+            
+            // ===== DETAILED TRANSACTION STRUCTURE =====
+            this.logInfo(`[MAPPING] 📊 Transaction structure:`);
+            this.logInfo(`[MAPPING] 📊 hasTransaction: ${!!normalizedTx}`);
+            this.logInfo(`[MAPPING] 📊 hasMeta: ${!!normalizedTx.meta}`);
+            this.logInfo(`[MAPPING] 📊 transaction keys: ${normalizedTx ? Object.keys(normalizedTx).join(', ') : 'none'}`);
+            this.logInfo(`[MAPPING] 📊 meta keys: ${normalizedTx.meta ? Object.keys(normalizedTx.meta).join(', ') : 'none'}`);
+            
+            // ===== FULL NORMALIZED TRANSACTION STRUCTURE =====
+            this.logInfo(`[MAPPING] 📊 Full normalized transaction structure:`, JSON.stringify(normalizedTx, null, 2));
             // =========================================================================
 
             // ===============================================
@@ -1242,7 +1358,8 @@ class TraderMonitorWorker extends BaseWorker {
             console.log(`[MONITOR-DEBUG] 🔍 Analysis result: ${analysisResult}`);
             
             this.signalMessage('EXECUTE_COPY_TRADE', {
-                traderWallet: sourceWallet, 
+                traderWallet: sourceWallet,
+                traderName: traderName, // <-- ADD TRADER NAME
                 signature: signatureString,
                 normalizedTransaction: normalizedTx,
                 analysisResult: analysisResult // <-- THE CRITICAL FIX
@@ -1254,8 +1371,6 @@ class TraderMonitorWorker extends BaseWorker {
             this.logError('Error in Unified Trader Activity Handler:', { error: error.message, stack: error.stack, signature: sigForError });
         }
     }
-
-// REMOVED: Faulty gatekeeper function that was blocking valid trades
 
     // Helper: Check if it's just a simple fee payment
     _isSimpleFeePayment(coreTx) {
@@ -1278,7 +1393,6 @@ class TraderMonitorWorker extends BaseWorker {
         // If only 1-2 accounts have significant changes, it's likely just a fee payment
         return significantChanges <= 2;
     }
-
 
     updateMonitoringStats(notification) {
         try {
@@ -1307,7 +1421,6 @@ class TraderMonitorWorker extends BaseWorker {
         } catch (error) {
             this.logWarn('Failed to update monitoring stats:', error.message);
         }
-
     }
 
     logMonitoringStats() {
@@ -1368,11 +1481,40 @@ class TraderMonitorWorker extends BaseWorker {
             
             if (!rawTransaction) {
                 this.logWarn('[RAW-TX] ⚠️ No raw transaction data received');
-            return;
-        }
+                return;
+            }
 
             // Log transaction detection
             this.logInfo(`[RAW-TX] ✅ Raw transaction detected and ready for cloning`);
+            
+            // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
+            this.logInfo(`[RAW-TX] 📊 SERIALIZED PARSED DATA:`);
+            this.logInfo(`[RAW-TX] 📊 preTokenBalances: [ ${rawTransaction.meta?.preTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 postTokenBalances: [ ${rawTransaction.meta?.postTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 preBalances: [ ${rawTransaction.meta?.preBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 postBalances: [ ${rawTransaction.meta?.postBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 logMessages: [ ${rawTransaction.meta?.logMessages?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 innerInstructions: [ ${rawTransaction.meta?.innerInstructions?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 accountKeys: [ ${rawTransaction.transaction?.message?.accountKeys?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 instructions: [ ${rawTransaction.transaction?.message?.instructions?.length || 0} items ]`);
+            
+            // ===== DETAILED TOKEN BALANCE STRUCTURE =====
+            if (rawTransaction.meta?.preTokenBalances && rawTransaction.meta.preTokenBalances.length > 0) {
+                this.logInfo(`[RAW-TX] 📊 preTokenBalances structure:`, JSON.stringify(rawTransaction.meta.preTokenBalances, null, 2));
+            }
+            if (rawTransaction.meta?.postTokenBalances && rawTransaction.meta.postTokenBalances.length > 0) {
+                this.logInfo(`[RAW-TX] 📊 postTokenBalances structure:`, JSON.stringify(rawTransaction.meta.postTokenBalances, null, 2));
+            }
+            
+            // ===== DETAILED TRANSACTION STRUCTURE =====
+            this.logInfo(`[RAW-TX] 📊 Transaction structure:`);
+            this.logInfo(`[RAW-TX] 📊 hasTransaction: ${!!rawTransaction}`);
+            this.logInfo(`[RAW-TX] 📊 hasMeta: ${!!rawTransaction.meta}`);
+            this.logInfo(`[RAW-TX] 📊 transaction keys: ${rawTransaction ? Object.keys(rawTransaction).join(', ') : 'none'}`);
+            this.logInfo(`[RAW-TX] 📊 meta keys: ${rawTransaction.meta ? Object.keys(rawTransaction.meta).join(', ') : 'none'}`);
+            
+            // ===== FULL RAW TRANSACTION STRUCTURE =====
+            this.logInfo(`[RAW-TX] 📊 Full raw transaction structure:`, JSON.stringify(rawTransaction, null, 2));
             
             // Save raw transaction data for debugging
             if (this.transactionLogger && transactionData.signature) {
@@ -1399,95 +1541,187 @@ class TraderMonitorWorker extends BaseWorker {
             
             // Send to universal analyzer for processing (if available)
             let analysisResult = null;
-            if (this.universalAnalyzer) {
-                try {
-                    // Find the trader wallet from the account keys (first monitored wallet found)
-                    const traderWallet = transactionData.accountKeys?.find(key => 
-                        this.activeTraderWallets && this.activeTraderWallets.has(key)
-                    ) || transactionData.source;
+            // ======================================================================
+            // ===================== DIRECT COPY LOGIC (NO DEBRIDGE) ==============
+            // ======================================================================
+            try {
+                // Find the trader wallet from the account keys (first monitored wallet found)
+                const traderWallet = transactionData.accountKeys?.find(key => 
+                    this.activeTraderWallets && this.activeTraderWallets.has(key)
+                ) || transactionData.source;
+                
+                // Extract analysis data from transactionData
+                const balanceAnalysis = transactionData.balanceAnalysis || { solChange: 0, tokenChanges: [] };
+                const platform = transactionData.platform || 'Jupiter';
+                const routerInfo = transactionData.routerInfo || [];
+                const classification = transactionData.classification || { type: 'DEX' };
+                const programIds = transactionData.programIds || [];
+                
+                // ✅ FIXED: Load user configuration for proper SOL amount injection
+                const userConfig = {
+                    scaleFactor: this.laserstreamManager.botConfig?.scaleFactor || 0.1,
+                    solAmount: this.laserstreamManager.botConfig?.minTransactionAmount || 0.1,
+                    slippageBps: 5000, // 0.5% default slippage
+                    maxSlippage: this.laserstreamManager.botConfig?.maxSlippage || 0.05
+                };
+                
+                this.logInfo(`[RAW-TX] 🔧 User config: Scale Factor: ${userConfig.scaleFactor}, SOL Amount: ${userConfig.solAmount}`);
+                
+                // ======================================================================
+                // ===================== DIRECT COPY LOGIC (NO DEBRIDGE) ==============
+                // ======================================================================
+                this.logInfo(`[DIRECT-COPY] 🚀 Using DIRECT copy logic`);
+                
+                // Extract token info from transaction data
+                this.logInfo(`[DIRECT-COPY] 🔧 Extracting token info from actual transaction data...`);
+                
+                // Extract input/output mints from the actual transaction
+                let inputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
+                let outputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
+                
+                // Extract from transaction data
+                if (rawTransaction && rawTransaction.meta && rawTransaction.meta.postTokenBalances) {
+                    const tokenBalances = rawTransaction.meta.postTokenBalances;
+                    this.logInfo(`[DIRECT-COPY] 🔍 Found ${tokenBalances.length} token balances in transaction`);
                     
-                    analysisResult = await this.universalAnalyzer.analyzeTransaction(rawTransaction, traderWallet);
-                    this.logInfo(`[RAW-TX] ✅ Analysis completed: ${analysisResult?.isCopyable ? 'COPYABLE' : 'NOT COPYABLE'}`);
+                    // Find the most significant token change
+                    let maxChange = 0;
+                    let significantToken = null;
                     
-                    // Save analysis result for debugging
-                    if (this.transactionLogger && transactionData.signature && analysisResult) {
-                        try {
-                            this.transactionLogger.logTransactionAnalysis(
-                                `${transactionData.signature}_analysis`, 
-                                {
-                                    signature: transactionData.signature,
-                                    timestamp: new Date().toISOString(),
-                                    analysisResult: analysisResult,
-                                    traderWallet: traderWallet,
-                                    logType: 'analysis_result'
-                                }
-                            );
-                        } catch (analysisSaveError) {
-                            this.logWarn('[RAW-TX] ⚠️ Failed to save analysis result:', analysisSaveError.message);
+                    for (const balance of tokenBalances) {
+                        if (balance.uiTokenAmount && Math.abs(balance.uiTokenAmount.amount) > maxChange) {
+                            maxChange = Math.abs(balance.uiTokenAmount.amount);
+                            significantToken = balance;
                         }
                     }
-                } catch (analyzerError) {
-                    this.logWarn('[RAW-TX] ⚠️ Universal analyzer error:', analyzerError.message);
+                    
+                    if (significantToken && significantToken.mint) {
+                        outputMint = significantToken.mint;
+                        this.logInfo(`[DIRECT-COPY] 🎯 Found significant token: ${significantToken.mint}`);
+                    }
                 }
-            }
-            
-            // Send to universal cloning logger (if available)
-            if (this.universalCloningLogger) {
-                try {
-                    await this.universalCloningLogger.logTransactionAnalysis({
-                        rawTransaction: rawTransaction,
-                        timestamp: transactionData.timestamp,
-                        source: transactionData.source
+                
+                // Calculate scaled input amount
+                const originalSolAmount = Math.abs(balanceAnalysis.solChange) * 1e9; // SOL change in lamports
+                const scaledInputAmount = Math.floor(originalSolAmount * userConfig.scaleFactor); 
+                
+                analysisResult = {
+                    isCopyable: true,
+                    swapDetails: {
+                        platform: platform || 'Jupiter', // Use detected platform
+                        inputMint: inputMint,
+                        outputMint: outputMint,
+                        inputAmount: scaledInputAmount, // Scaled amount in lamports
+                        outputAmount: 0,
+                        scaleFactor: userConfig.scaleFactor,
+                        originalAmount: Math.abs(balanceAnalysis.solChange),
+                        scaledAmount: Math.abs(balanceAnalysis.solChange) * userConfig.scaleFactor,
+                        isPrivateRouter: this.isPrivateRouter(platform),
+                        requiresATACreation: outputMint !== inputMint,
+                        requiresPDARecovery: platform === 'PumpFun' || platform === 'Raydium',
+                        routerUsed: routerInfo?.length > 0 ? routerInfo[0] : null,
+                        routerId: undefined,
+                        transactionType: classification?.type || 'DEX',
+                        realDexProgramId: classification?.programId || undefined
+                    },
+                    blueprint: {
+                        originalTransaction: rawTransaction,
+                        meta: rawTransaction.meta,
+                        programIds,
+                        routerInfo: routerInfo || [],
+                        accountMapping: {},
+                        classification: classification || { type: 'UNKNOWN' }
+                    },
+                    reason: 'Direct copy ',
+                    userConfig
+                };
+                
+                this.logInfo(`[DIRECT-COPY] ✅ Analysis: ${inputMint} → ${outputMint}, Original: ${Math.abs(balanceAnalysis.solChange)} SOL, Scaled: ${scaledInputAmount/1e9} SOL`);
+                
+                this.logInfo(`[DIRECT-COPY] ✅ Analysis completed: ${analysisResult?.isCopyable ? 'COPYABLE' : 'NOT COPYABLE'}`);
+                
+                // ======================================================================
+                // ================ DIRECT EXECUTOR CALL (NO CLONING) ==================
+                // ======================================================================
+                if (analysisResult && analysisResult.isCopyable) {
+                    this.logInfo(`[DIRECT-COPY] 🚀 Transaction is copyable! Proceeding to direct execution...`);
+                    
+                    // Send directly to executor - NO cloning needed!
+                    this.signalMessage('HANDLE_SMART_COPY', {
+                        traderWallet,
+                        traderName: await this.getTraderNameFromWallet(traderWallet), // <-- ADD TRADER NAME
+                        signature: rawTransaction.signature,
+                        analysisResult,
+                        originalTransaction: rawTransaction,
+                        meta: rawTransaction.meta,
+                        programIds,
+                        routerInfo: routerInfo || [],
+                        userConfig
                     });
-                } catch (loggerError) {
-                    this.logWarn('[RAW-TX] ⚠️ Cloning logger error:', loggerError.message);
+                    
+                    this.logInfo(`[DIRECT-COPY] ✅ Smart copy message sent to executor `);
+                } else {
+                    this.logInfo(`[DIRECT-COPY] ⏭️ Transaction not copyable: ${analysisResult?.reason || 'Unknown reason'}`);
                 }
+                
+                // Save analysis result for debugging
+                if (this.transactionLogger && transactionData.signature && analysisResult) {
+                    try {
+                        this.transactionLogger.logTransactionAnalysis(
+                            `${transactionData.signature}_analysis`, 
+                            {
+                                signature: transactionData.signature,
+                                timestamp: new Date().toISOString(),
+                                analysisResult: analysisResult,
+                                traderWallet: traderWallet,
+                                logType: 'analysis_result'
+                            }
+                        );
+                    } catch (analysisSaveError) {
+                        this.logWarn('[RAW-TX] ⚠️ Failed to save analysis result:', analysisSaveError.message);
+                    }
+                }
+            } catch (analyzerError) {
+                this.logWarn('[RAW-TX] ⚠️ Universal analyzer error:', analyzerError.message);
             }
             
-            // Get trader name from wallet address
-            const traderName = await this.getTraderNameFromWallet(transactionData.source);
+            // ======================================================================
+            // ================ DIRECT COPY LOGIC - NO CLONING LOGGER ==============
+            // ======================================================================
+            // Direct copy logic - no need for universal cloning logger
             
-            // Send transaction to executor worker for processing (with pre-analyzed data!)
-            this.signalMessage('EXECUTE_COPY_TRADE', {
-                rawTransaction: rawTransaction,
-                timestamp: transactionData.timestamp,
-                source: transactionData.source,
-                traderName: traderName,
-                traderWallet: transactionData.source,
-                dexPrograms: transactionData.dexPrograms || [],
-                signature: transactionData.signature,
-                preFetchedTxData: rawTransaction, // Raw transaction data
-                analysisResult: analysisResult // Pre-completed analysis results!
-            });
-            
+            try {
+                // Get trader name from wallet address
+                const traderName = await this.getTraderNameFromWallet(transactionData.source);
+                
+                // Send transaction to executor worker for processing (with pre-analyzed data!)
+                this.signalMessage('EXECUTE_COPY_TRADE', {
+                    rawTransaction: rawTransaction,
+                    timestamp: transactionData.timestamp,
+                    source: transactionData.source,
+                    traderName: traderName,
+                    traderWallet: transactionData.source,
+                    dexPrograms: transactionData.dexPrograms || [],
+                    signature: transactionData.signature,
+                    preFetchedTxData: rawTransaction, // Raw transaction data
+                    analysisResult: analysisResult // Pre-completed analysis results!
+                });
+                
+            } catch (error) {
+                this.logError('[RAW-TX] ❌ Error handling raw transaction:', error);
+            }
         } catch (error) {
             this.logError('[RAW-TX] ❌ Error handling raw transaction:', error);
         }
     }
     
-    // REMOVED: Handle copy trade detection (using Monitor → Executor flow instead)
-    // async handleCopyTradeDetected(tradeData) {
-    //     try {
-    //         this.logInfo(`🎯 SWAP DETECTED: ${tradeData.signature}`);
-    //         
-    //         // Send to universal analyzer for cloning
-    //         if (this.universalAnalyzer) {
-    //             await this.universalAnalyzer.analyzeTransaction(tradeData.rawData, tradeData.accountKeys[0]);
-    //         }
-    //         
-    //         // Send to universal cloning logger
-    //         if (this.universalCloningLogger) {
-    //             await this.universalCloningLogger.logCloningAttempt(tradeData);
-    //         }
-    //         
-    //     } catch (error) {
-    //         this.logError('Error handling copy trade:', error);
-    //     }
-    // }
-
-
+    // Helper method to check if platform is a private router
+    isPrivateRouter(platform) {
+        const privateRouters = ['BloomRouter', 'PrivateRouter', 'BLURRouter'];
+        return privateRouters.includes(platform);
+    }
+    
     async customCleanup() {
-       
         if (this.laserstreamManager) {
             await this.laserstreamManager.stop();
             this.logInfo('LaserStreamManager connection closed.');
@@ -1500,7 +1734,7 @@ class TraderMonitorWorker extends BaseWorker {
         if (this.redisManager) await this.redisManager.close();
         if (this.dataManager) await this.dataManager.shutdown();
     }
-}
+} // <-- Closing the class definition
 
 if (require.main === module) {
     const worker = new TraderMonitorWorker();
@@ -1528,4 +1762,4 @@ TraderMonitorWorker.prototype.getMasterTraderWallets = function() {
     return Array.from(this.activeTraders.map(trader => trader.walletAddress));
 };
 
-module.exports = TraderMonitorWorker;    
+module.exports = TraderMonitorWorker;

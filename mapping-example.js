@@ -104,7 +104,7 @@ async function exampleMapping() {
         ]
     };
 
-    // Example trade details
+    // Example trade details (with DeBridge benefits)
     const tradeDetails = {
         tradeType: "buy",
         traderPubkey: "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
@@ -116,7 +116,18 @@ async function exampleMapping() {
             accounts: [0, 2, 3]
         },
         solAmount: 0.1,
-        tokenAmount: "1000000000"
+        tokenAmount: "1000000000",
+        // DeBridge benefits
+        debridgeProcessed: true,
+        debridgeBenefits: {
+            automaticALT: true,
+            automaticCPI: true,
+            automaticIDL: true,
+            noManualCode: true,
+            betterPerformance: true
+        },
+        altHandling: 'DeBridge Automatic',
+        manualCodeRequired: false
     };
 
     // Example cloned instructions
@@ -154,13 +165,20 @@ async function exampleMapping() {
     // Show quick mapping examples
     console.log('\n🔍 QUICK MAPPING EXAMPLES:');
     
-    // Map the complete flow
+    // Map the complete flow with DeBridge
     quickMap.completeFlow(
         "5WzHjM2h...",
         "alo",
         "buy",
-        "Pump.fun BC"
+        "Pump.fun BC",
+        true // isDeBridge = true
     );
+    
+    // Map DeBridge benefits
+    quickMap.debridgeBenefits(tradeDetails.debridgeBenefits);
+    
+    // Map performance comparison
+    quickMap.performanceComparison(1035, 605); // Manual vs DeBridge latency
     
     // Map a raw instruction
     quickMap.rawInstruction(
@@ -172,7 +190,7 @@ async function exampleMapping() {
     quickMap.forging(
         "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
         "HyF8...EACS",
-        "Trader wallet → User wallet"
+        "Trader wallet → User wallet (DeBridge automatic)"
     );
 
     // Map cloned instruction

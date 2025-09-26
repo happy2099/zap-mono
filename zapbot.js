@@ -22,7 +22,7 @@ const { shortenAddress } = require('./utils.js');
 const { PublicKey } = require('@solana/web3.js');
 const { RedisManager } = require('./redis/redisManager.js');
 const { LaserStreamManager } = require('./laserstreamManager.js');
-// platformBuilders removed - using universalCloner instead
+// platformBuilders removed - using direct copy logic instead
 
 class ZapBot {
     constructor() {

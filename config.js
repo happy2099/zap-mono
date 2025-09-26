@@ -114,7 +114,7 @@ const config = {
         RAYDIUM_CLMM: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
         PUMP_FUN: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'), // Actual Pump.fun BC Program ID
         PUMP_FUN_AMM: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
-        // PUMP_FUN_AMM_V2: new PublicKey('6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC'), // REMOVED: This is a private router, not a DEX
+        PUMP_FUN_V2: new PublicKey('6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC'), // Newer Pump.fun Program ID
         METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'),
         METEORA_DBC: [
             new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // REAL Meteora DBC program ID from log messages
@@ -128,6 +128,8 @@ const config = {
         RAYDIUM_STABLE_SWAP: new PublicKey('5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h'), // Raydium Stable Swap AMM
         WHIRLPOOL: new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'),
         SERUM_DEX_V3: new PublicKey('9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin'), // Serum DEX v3
+        BLOOM_ROUTER: new PublicKey('b1oomGGqPKGD6errbyfbVMBuzSC8WtAAYo8MwNafWW1'),
+    PRIVATE_ROUTER: new PublicKey('AzcZqCRUQgKEg5FTAgY7JacATABEYCEfMbjXEzspLYFB'), // Bloom Router
         OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'), // OpenBook DEX
         OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'), // OpenBook V3
     },

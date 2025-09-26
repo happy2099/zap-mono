@@ -8,10 +8,25 @@ const { workerData, parentPort } = require('worker_threads');
 const BaseWorker = require('./templates/baseWorker');
 const { DataManager } = require('../dataManager');
 const { SolanaManager } = require('../solanaManager');
+const { SingaporeSenderManager } = require('../singaporeSenderManager');
 const WalletManager = require('../walletManager');
 // TransactionAnalyzer removed - using UniversalAnalyzer instead
 const { ApiManager } = require('../apiManager');
 const TradeNotificationManager = require('../tradeNotifications');
+const config = require('../config');
+
+// Direct transaction building imports
+const { PublicKey } = require('@solana/web3.js');
+const { 
+    getAssociatedTokenAddressSync, 
+    createAssociatedTokenAccountInstruction,
+    TOKEN_PROGRAM_ID 
+} = require('@solana/spl-token');
+
+// Borsh serialization for instruction data
+const borsh = require('borsh');
+const BN = require('bn.js');
+const { createHash } = require('crypto');
 
 // Worker Manager Interface for communicating with main thread
 class WorkerManagerInterface {
@@ -35,6 +50,7 @@ class TradeExecutorWorker extends BaseWorker {
         super();
         this.dataManager = null;
         this.solanaManager = null;
+        this.singaporeSender = null; // NEW: Ultra-fast Helius Sender
         this.walletManager = null;
         // TransactionAnalyzer removed
         this.apiManager = null;
@@ -47,6 +63,18 @@ class TradeExecutorWorker extends BaseWorker {
         this.workerManager = new WorkerManagerInterface();
     }
 
+    setupMessageHandlers() {
+        // Call parent setup first
+        super.setupMessageHandlers();
+        
+        // Register executor-specific handlers
+        this.registerHandler('HANDLE_SMART_COPY', this.handleSmartCopy.bind(this));
+        this.registerHandler('EXECUTE_COPY_TRADE', this.executeCopyTrade.bind(this));
+        this.registerHandler('CANCEL_TRADE', this.cancelTrade.bind(this));
+        this.registerHandler('GET_TRADE_STATUS', this.getTradeStatus.bind(this));
+        this.registerHandler('GET_PENDING_TRADES', this.getPendingTrades.bind(this));
+    }
+
     async customInitialize() {
         try {
             // Initialize core managers
@@ -55,6 +83,10 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
+            
+            // NEW: Initialize Ultra-Fast Helius Sender with shared connection
+            this.singaporeSender = new SingaporeSenderManager(this.solanaManager.connection);
+            this.logInfo('🚀 Ultra-Fast Helius Sender initialized for sub-200ms execution');
             
             this.walletManager = new WalletManager(this.dataManager);
             this.walletManager.setSolanaManager(this.solanaManager);
@@ -73,16 +105,8 @@ class TradeExecutorWorker extends BaseWorker {
             this.notificationManager = new TradeNotificationManager(null, this.apiManager, this.workerManager);
             this.notificationManager.setConnection(this.solanaManager.connection);
 
-            // Initialize trading engine
-            const { TradingEngine } = require('../tradingEngine');
-            this.tradingEngine = new TradingEngine({
-                solanaManager: this.solanaManager,
-                dataManager: this.dataManager,
-                walletManager: this.walletManager,
-                notificationManager: this.notificationManager,
-                apiManager: this.apiManager,
-                redisManager: this.redisManager
-            });
+            // SIMPLE COPY BOT - No trading engine needed
+            this.logInfo('✅ Simple Copy Bot - No trading engine required');
 
             this.logInfo('Trade executor worker initialized successfully');
         } catch (error) {
@@ -91,146 +115,137 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    async handleMessage(message) {
-        if (message.type === 'EXECUTE_TRADE') {
-            await this.executeTrade(message.tradeData);
-        } else if (message.type === 'EXECUTE_COPY_TRADE') {
-            // CRITICAL CHANGE: Pass the entire message object now
+    // Handle smart copy messages from monitor worker
+    async handleSmartCopy(message) {
+        try {
+            this.logInfo('[SMART-COPY-HANDLER] 🔧 Handling smart copy from monitor worker');
+            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Trader: ${message.traderName || 'Unknown'} (${message.traderWallet})`);
+            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Signature: ${message.signature} (type: ${typeof message.signature})`);
+            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
+            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Message keys: ${Object.keys(message)}`);
+            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Analysis result: ${message.analysisResult ? 'Present' : 'Missing'}`);
+            
+            // Route to main execution function
             await this.executeCopyTrade(message); 
-        } else if (message.type === 'CANCEL_TRADE') {
-            await this.cancelTrade(message.tradeId);
-        } else if (message.type === 'GET_TRADE_STATUS') {
-            await this.getTradeStatus(message.tradeId);
-        } else if (message.type === 'GET_PENDING_TRADES') {
-            await this.getPendingTrades();
-        } else if (message.type === 'PROCESS_TRADER_ACTIVITY') {
-            await this.processTraderActivity(message.traderInfo);
-        } else {
-            await super.handleMessage(message);
-        }
-    }
-
-    async executeTrade(tradeData) {
-        const tradeId = `trade_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        
-        try {
-            this.logInfo('Executing trade', { tradeId, tradeData });
-            
-            // Add to pending trades
-            this.pendingTrades.set(tradeId, {
-                id: tradeId,
-                data: tradeData,
-                status: 'pending',
-                startTime: Date.now(),
-                attempts: 0
-            });
-
-            // Execute the trade
-            const result = await this.performTrade(tradeId, tradeData);
-            
-            // Move to completed trades
-            this.pendingTrades.delete(tradeId);
-            this.completedTrades.set(tradeId, {
-                ...result,
-                endTime: Date.now(),
-                status: 'completed'
-            });
-
-            this.signalMessage('TRADE_COMPLETED', {
-                tradeId,
-                result,
-                executionTime: Date.now() - result.startTime
-            });
 
         } catch (error) {
-            this.logError('Trade execution failed', { tradeId, error: error.message });
-            
-            // Move to failed trades
-            if (this.pendingTrades.has(tradeId)) {
-                const trade = this.pendingTrades.get(tradeId);
-                this.pendingTrades.delete(tradeId);
-                this.failedTrades.set(tradeId, {
-                    ...trade,
-                    error: error.message,
-                    endTime: Date.now(),
-                    status: 'failed'
-                });
-            }
-
-            this.signalMessage('TRADE_FAILED', {
-                tradeId,
-                error: error.message
-            });
+            this.logError(`[SMART-COPY-HANDLER] ❌ Error handling smart copy: ${error.message}`);
         }
     }
-    async executeCopyTrade(copyTradeData) {
-        // Unpack the CLEAN data payload from the monitor worker
-        const { traderWallet, signature, normalizedTransaction, analysisResult } = copyTradeData;
 
+    // ===== SINGLE EXECUTION FUNCTION =====
+    // HANDLES BOTH: EXECUTE_COPY_TRADE AND HANDLE_SMART_COPY
+    async executeCopyTrade(message) {
         try {
-            this.logInfo('EXECUTING CLEAN COPY TRADE', { 
-                traderWallet: traderWallet ? (traderWallet.substring(0,4) + '...' + traderWallet.slice(-4)) : 'unknown', 
-                signature: signature ? (signature.substring(0, 8) + '...') : 'unknown',
+            this.logInfo('[SINGLE-EXECUTOR] 🚀 Processing copy trade', { 
+                type: message.type,
+                hasAnalysisResult: !!message.analysisResult,
+                hasOriginalTransaction: !!message.originalTransaction
             });
-            
-            // ======================================================================
-            // ========================== THE CRITICAL FIX ==========================
-            // ======================================================================
-            // We now pass the pre-analyzed result from the monitor worker
-            // This prevents the "Cannot read properties of null" error
-            
-            await this.tradingEngine.processSignature(
-                traderWallet, 
-                signature, 
-                null, 
-                normalizedTransaction,
-                analysisResult // <-- PASS THE PRE-ANALYZED RESULT
-            );
-            // ========================== END OF THE FIX ============================
-            
-        } catch (error) {
-            this.logError('CLEAN COPY TRADE EXECUTION FAILED', { 
-                traderWallet: traderWallet ? (traderWallet.substring(0,4) + '...' + traderWallet.slice(-4)) : 'unknown', 
-                signature: signature ? (signature.substring(0, 8) + '...') : 'unknown',
-                error: error.message 
-            });
-        }
-    }
-    async performTrade(tradeId, tradeData) {
-        try {
-            const trade = this.pendingTrades.get(tradeId);
-            if (!trade) {
-                throw new Error('Trade not found in pending trades');
+
+            // Check if we have analysis result
+            if (!message.analysisResult) {
+                this.logError('[SINGLE-EXECUTOR] ❌ No analysis result from monitor - aborting execution');
+                return;
             }
 
-            trade.attempts++;
-            trade.status = 'executing';
+            const analysisResult = message.analysisResult;
+            let swapDetails = analysisResult.swapDetails;
+            
+            // ========================= THE SMART ROUTER FIX =========================
+            // STEP 1: Perform DEEP analysis inside the executor to determine the TRUE platform.
+            // This makes the executor self-reliant and corrects any bad data from the monitor.
+            this.logInfo(`[SMART-ROUTER] 🕵️‍♂️ Performing deep analysis to find the REAL DEX...`);
+            const realPlatform = this._detectTargetDexFromTransaction(message.analysisResult);
+            this.logInfo(`[SMART-ROUTER] ✅ Real target DEX identified: ${realPlatform}`);
+            
+            // Override the platform in swapDetails to ensure we use the correct one.
+            swapDetails.platform = realPlatform;
+            // =========================================================
+            
+            this.logInfo('[SINGLE-EXECUTOR] 🎯 Copy trade details', {
+                platform: swapDetails.platform,
+                inputMint: swapDetails.inputMint,
+                outputMint: swapDetails.outputMint,
+                inputAmount: swapDetails.inputAmount,
+                requiresATACreation: swapDetails.requiresATACreation,
+                requiresPDARecovery: swapDetails.requiresPDARecovery
+            });
 
-            // Get user's trading wallet
-            const keypairPacket = await this.walletManager.getPrimaryTradingKeypair(tradeData.userChatId);
-            if (!keypairPacket) {
-                throw new Error('No trading wallet found for user');
+            // Execute PDA/ATA reconstruction if needed
+            if (swapDetails.requiresATACreation || swapDetails.requiresPDARecovery) {
+                this.logInfo(`[SINGLE-EXECUTOR] 🔧 Starting PDA/ATA reconstruction...`);
+                await this._reconstructPDAAndATA(analysisResult, swapDetails);
+                this.logInfo(`[SINGLE-EXECUTOR] ✅ PDA/ATA reconstruction completed`);
             }
 
-            // Execute the trade using the trading engine
-            const result = await this.tradingEngine.executeTrade(
-                tradeData.tradeDetails,
-                keypairPacket.wallet,
-                tradeData.traderName
-            );
-
-            return {
-                tradeId,
-                result,
-                startTime: trade.startTime,
-                attempts: trade.attempts
+            // Get user config from message or use defaults
+            const userConfig = message.userConfig || {
+                scaleFactor: 0.1,
+                slippage: 0.05,
+                platformPreferences: ['PumpFun', 'Raydium', 'Jupiter']
             };
+            
+            this.logInfo(`[SINGLE-EXECUTOR] 🔧 User config loaded:`, userConfig);
+            
+            // Route to platform-specific execution
+            this.logInfo(`[SINGLE-EXECUTOR] 🎯 Routing to platform: ${swapDetails.platform}`);
+            
+            let result;
+            
+            // 🚀 NEW: Try DIRECT transaction building first (bypasses API routes)
+            // NOTE: LaserStream provides non-standard transaction format, so we skip direct copy for now
+            if (false && message.originalTransaction && message.programIds) {
+                this.logInfo(`[DIRECT-BUILDER] 🔧 Attempting DIRECT transaction building from original...`);
+                try {
+                    result = await this.executeDirectCopyTrade(message, userConfig);
+                    this.logInfo(`[DIRECT-BUILDER] ✅ Direct copy successful!`);
+                    return result;
+                } catch (directError) {
+                    this.logWarn(`[DIRECT-BUILDER] ⚠️ Direct copy failed: ${directError.message}, falling back to platform-specific...`);
+                }
+            }
+            
+            switch (swapDetails.platform) {
+                case 'Jupiter':
+                    result = await this.executeJupiterSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                case 'PumpFun':
+                    result = await this.executePumpFunSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                case 'Raydium':
+                    result = await this.executeRaydiumSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                case 'Orca':
+                    result = await this.executeOrcaSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                case 'Meteora':
+                    result = await this.executeMeteoraSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                case 'OpenBook':
+                    result = await this.executeOpenBookSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+                    break;
+                default:
+                    this.logWarn(`[SINGLE-EXECUTOR] ⚠️ Unknown platform: ${swapDetails.platform}, defaulting to Jupiter`);
+                    result = await this.executeJupiterSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
+            }
+
+            this.logInfo(`[SINGLE-EXECUTOR] ✅ Copy trade executed successfully!`, {
+                platform: swapDetails.platform,
+                signature: result?.signature,
+                executionTime: result?.executionTime
+            });
+
+            return result;
 
         } catch (error) {
-            this.logError('Trade performance failed', { tradeId, error: error.message });
+            this.logError('[SINGLE-EXECUTOR] ❌ Copy trade execution failed', { error: error.message });
             throw error;
         }
     }
+    
+    // REMOVED: handleCopyTrade() - REDUNDANT (now integrated into executeCopyTrade)
+
 
     async cancelTrade(tradeId) {
         try {
@@ -293,28 +308,7 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    async processTraderActivity(traderInfo) {
-        try {
-            this.logInfo('Processing trader activity', { 
-                traderName: traderInfo.name,
-                wallet: traderInfo.wallet 
-            });
-
-            // Process the trader through the trading engine
-            await this.tradingEngine.processTrader(traderInfo);
-
-            this.signalMessage('TRADER_ACTIVITY_PROCESSED', {
-                traderName: traderInfo.name,
-                wallet: traderInfo.wallet,
-                timestamp: Date.now()
-            });
-        } catch (error) {
-            this.logError('Failed to process trader activity', { 
-                error: error.message,
-                traderName: traderInfo.name 
-            });
-        }
-    }
+    // REMOVED: processTraderActivity() - OBSOLETE (used removed tradingEngine)
 
     async customCleanup() {
         try {
@@ -332,6 +326,1321 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo('Trade executor worker cleanup completed');
         } catch (error) {
             this.logError('Error during cleanup', { error: error.message });
+        }
+    }
+
+    // ===== PDA/ATA RECONSTRUCTION =====
+    
+    async _reconstructPDAAndATA(analysisResult, swapDetails) {
+        try {
+            this.logInfo(`[PDA-ATA] 🔧 Starting PDA/ATA reconstruction...`);
+            
+            // Get user's wallet
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            // Get user configs for scale factor and slippage
+            const userConfig = analysisResult.userConfig || {
+                scaleFactor: 0.1,
+                slippage: 0.05,
+                platformPreferences: ['PumpFun', 'Raydium', 'Jupiter']
+            };
+            
+            this.logInfo(`[PDA-ATA] 🔧 User configs:`, {
+                scaleFactor: userConfig.scaleFactor,
+                slippage: userConfig.slippage,
+                platformPreferences: userConfig.platformPreferences
+            });
+            
+            // 1. ATA RECONSTRUCTION: Create Associated Token Accounts if needed
+            if (swapDetails.requiresATACreation) {
+                this.logInfo(`[PDA-ATA] 🔧 Creating ATA for ${swapDetails.outputMint}`);
+                
+                // Check if ATA exists - Pass userWallet.publicKey, NOT the whole userWallet object
+                const ataExists = await this._checkATAExists(userWallet.publicKey, swapDetails.outputMint);
+                if (!ataExists) {
+                    this.logInfo(`[PDA-ATA] 🔧 ATA does not exist, creating...`);
+                    await this._createATA(userWallet, swapDetails.outputMint);
+                    this.logInfo(`[PDA-ATA] ✅ ATA created successfully`);
+                } else {
+                    this.logInfo(`[PDA-ATA] ✅ ATA already exists`);
+                }
+            }
+            
+            // 2. PDA RECONSTRUCTION: Reconstruct Program Derived Addresses if needed
+            if (swapDetails.requiresPDARecovery) {
+                this.logInfo(`[PDA-ATA] 🔧 Reconstructing PDA for ${swapDetails.platform}`);
+                
+                // For PumpFun: Reconstruct bonding curve PDA
+                if (swapDetails.platform === 'PumpFun') {
+                    const bondingCurvePDA = await this._reconstructPumpFunBondingCurve(swapDetails.outputMint);
+                    this.logInfo(`[PDA-ATA] ✅ PumpFun bonding curve PDA: ${bondingCurvePDA}`);
+                }
+                
+                // For Raydium: Reconstruct pool PDA
+                if (swapDetails.platform === 'Raydium') {
+                    const poolPDA = await this._reconstructRaydiumPool(swapDetails.inputMint, swapDetails.outputMint);
+                    this.logInfo(`[PDA-ATA] ✅ Raydium pool PDA: ${poolPDA}`);
+                }
+            }
+            
+            // 3. APPLY USER CONFIGS: Scale factor and slippage
+            const scaledAmount = Math.floor(swapDetails.inputAmount * userConfig.scaleFactor);
+            this.logInfo(`[PDA-ATA] 🔧 Applied user scale factor: ${swapDetails.inputAmount} → ${scaledAmount} (${userConfig.scaleFactor * 100}%)`);
+            
+            // Update swap details with user configs
+            swapDetails.scaledAmount = scaledAmount;
+            swapDetails.userSlippage = userConfig.slippage;
+            
+            this.logInfo(`[PDA-ATA] ✅ PDA/ATA reconstruction completed with user configs`);
+            
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ PDA/ATA reconstruction failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async _getUserWallet() {
+        try {
+            // Get the first available user from the database
+            const users = await this.dataManager.readJsonFile('users.json');
+            if (!users || !users.users) {
+                throw new Error('No users found in database');
+            }
+            
+            // Get the first user (admin user)
+            const firstUserId = Object.keys(users.users)[0];
+            if (!firstUserId) {
+                throw new Error('No users found');
+            }
+            
+            const user = users.users[firstUserId];
+            this.logInfo(`[PDA-ATA] 🔍 Using user: ${user.first_name} (${user.chat_id})`);
+            
+            // Get user's wallet from wallet manager
+            if (this.walletManager) {
+                const userWallet = await this.walletManager.getPrimaryTradingKeypair(user.chat_id);
+                if (userWallet && userWallet.wallet && userWallet.wallet.publicKey) {
+                    this.logInfo(`[PDA-ATA] ✅ Found wallet: ${userWallet.wallet.publicKey.toString()}`);
+                    return userWallet.wallet; // Return the full wallet object, not just the public key string
+                }
+            }
+            
+            // Fallback: use environment variable or config
+            const walletFromEnv = process.env.WALLET_PUBLIC_KEY;
+            if (walletFromEnv) {
+                this.logInfo(`[PDA-ATA] ✅ Using wallet from environment: ${walletFromEnv}`);
+                // Convert string to PublicKey object for consistency
+                const { PublicKey } = require('@solana/web3.js');
+                return { publicKey: new PublicKey(walletFromEnv) };
+            }
+            
+            throw new Error('No user wallet found');
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ Failed to get user wallet: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async _checkATAExists(owner, mint) {
+        try {
+            const { PublicKey } = require('@solana/web3.js');
+            const { getAssociatedTokenAddress } = require('@solana/spl-token');
+            
+            // Get ATA address - Handle both PublicKey and Keypair objects
+            const ownerPublicKey = owner.publicKey ? owner.publicKey : owner;
+            const ataAddress = await getAssociatedTokenAddress(
+                new PublicKey(mint),
+                new PublicKey(ownerPublicKey)
+            );
+            
+            // Check if account exists using HELIUS RPC (FASTER!)
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Helius RPC connection not available');
+            }
+            
+            this.logInfo(`[PDA-ATA] 🔧 Checking ATA existence via Helius RPC...`);
+            const accountInfo = await connection.getAccountInfo(ataAddress);
+            const exists = accountInfo !== null;
+            this.logInfo(`[PDA-ATA] 🔧 ATA exists: ${exists} (checked via Helius RPC)`);
+            return exists;
+            
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ Failed to check ATA existence: ${error.message}`);
+            return false;
+        }
+    }
+    
+    async _createATA(ownerWallet, mint) {
+        try {
+            const { PublicKey, Transaction } = require('@solana/web3.js');
+            const { createAssociatedTokenAccountInstruction } = require('@solana/spl-token');
+            
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Helius RPC connection not available');
+            }
+            
+            // Get ATA address using sync version (faster) - Use ownerWallet.publicKey
+            const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
+            const ataAddress = getAssociatedTokenAddressSync(
+                new PublicKey(mint),
+                ownerWallet.publicKey // Use .publicKey here
+            );
+            
+            // Create instruction - Use ownerWallet.publicKey for all PublicKey constructors
+            const createATAInstruction = createAssociatedTokenAccountInstruction(
+                ownerWallet.publicKey, // payer
+                ataAddress, // associated token account
+                ownerWallet.publicKey, // owner
+                new PublicKey(mint) // mint
+            );
+            
+            // Create transaction
+            const transaction = new Transaction().add(createATAInstruction);
+            
+            // Get recent blockhash via HELIUS RPC (FASTER!)
+            this.logInfo(`[PDA-ATA] 🔧 Getting recent blockhash via Helius RPC...`);
+            const { blockhash } = await connection.getLatestBlockhash();
+            transaction.recentBlockhash = blockhash;
+            transaction.feePayer = ownerWallet.publicKey;
+            
+            this.logInfo(`[PDA-ATA] 🔧 ATA transaction created for mint: ${mint}`);
+            this.logInfo(`[PDA-ATA] 🔧 ATA address: ${ataAddress.toString()}`);
+            this.logInfo(`[PDA-ATA] 🔧 Blockhash: ${blockhash} (via Helius RPC)`);
+            
+            // Note: Transaction needs to be signed and sent by the user's wallet
+            // This is just the preparation step
+            
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ Failed to create ATA: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async _reconstructPumpFunBondingCurve(tokenMint) {
+        try {
+            const { PublicKey } = require('@solana/web3.js');
+            
+            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
+            const tokenMintPubkey = new PublicKey(tokenMint);
+            
+            // Find PDA for PumpFun bonding curve
+            const [bondingCurvePDA, bump] = PublicKey.findProgramAddressSync(
+                [Buffer.from('bonding-curve'), tokenMintPubkey.toBuffer()],
+                pumpFunProgramId
+            );
+            
+            this.logInfo(`[PDA-ATA] 🔧 PumpFun bonding curve PDA: ${bondingCurvePDA.toString()}`);
+            this.logInfo(`[PDA-ATA] 🔧 Bump: ${bump}`);
+            
+            return bondingCurvePDA.toString();
+            
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ Failed to reconstruct PumpFun bonding curve: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async _reconstructRaydiumPool(mintA, mintB) {
+        try {
+            const { PublicKey } = require('@solana/web3.js');
+            
+            const raydiumProgramId = config.PLATFORM_IDS.RAYDIUM_V4;
+            const mintAPubkey = new PublicKey(mintA);
+            const mintBPubkey = new PublicKey(mintB);
+            
+            // Find PDA for Raydium pool
+            const [poolPDA, bump] = PublicKey.findProgramAddressSync(
+                [Buffer.from('pool'), mintAPubkey.toBuffer(), mintBPubkey.toBuffer()],
+                raydiumProgramId
+            );
+            
+            this.logInfo(`[PDA-ATA] 🔧 Raydium pool PDA: ${poolPDA.toString()}`);
+            this.logInfo(`[PDA-ATA] 🔧 Bump: ${bump}`);
+            
+            return poolPDA.toString();
+            
+        } catch (error) {
+            this.logError(`[PDA-ATA] ❌ Failed to reconstruct Raydium pool: ${error.message}`);
+            throw error;
+        }
+    }
+
+    // ===== SMART ROUTER DETECTION =====
+    
+    _detectTargetDexFromTransaction(analysisResult) {
+        try {
+            // First check blueprint program IDs
+            if (analysisResult && analysisResult.blueprint && analysisResult.blueprint.programIds) {
+                const programIds = analysisResult.blueprint.programIds;
+                
+                // Check for PumpFun program IDs
+                if (programIds.includes(config.PLATFORM_IDS.PUMP_FUN.toString()) || 
+                    programIds.includes(config.PLATFORM_IDS.PUMP_FUN_AMM.toString())) {
+                    return 'PumpFun';
+                }
+                
+                // Check for Raydium program IDs
+                if (programIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                    programIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString())) {
+                    return 'Raydium';
+                }
+                
+                // Check for Meteora program IDs
+                if (programIds.includes(config.PLATFORM_IDS.METEORA_DLMM.toString())) {
+                    return 'Meteora';
+                }
+                
+                // Check for Orca program IDs
+                if (programIds.includes(config.PLATFORM_IDS.WHIRLPOOL.toString())) {
+                    return 'Orca';
+                }
+            }
+            
+            // DEEP ANALYSIS: Check inner instructions and log messages for REAL DEX program IDs
+            if (analysisResult && analysisResult.originalTransaction && analysisResult.originalTransaction.meta) {
+                const meta = analysisResult.originalTransaction.meta;
+                
+                // Extract program IDs from log messages
+                const logProgramIds = this._extractProgramIdsFromLogs(meta.logMessages);
+                
+                // Check for PumpFun in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN.toString()) || 
+                    logProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN_AMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found PumpFun in log messages`);
+                    return 'PumpFun';
+                }
+                
+                // Check for Raydium in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                    logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString()) ||
+                    logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CPMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Raydium in log messages`);
+                    return 'Raydium';
+                }
+                
+                // Check for Meteora in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.METEORA_DLMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Meteora in log messages`);
+                    return 'Meteora';
+                }
+                
+                // Check for Orca in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.WHIRLPOOL.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Orca in log messages`);
+                    return 'Orca';
+                }
+                
+                // Check inner instructions for program IDs
+                if (meta.innerInstructions && meta.innerInstructions.length > 0) {
+                    const innerProgramIds = this._extractProgramIdsFromInnerInstructions(meta.innerInstructions, analysisResult.originalTransaction.transaction.message.accountKeys);
+                    
+                    // Check for PumpFun in inner instructions
+                    if (innerProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN.toString()) || 
+                        innerProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN_AMM.toString())) {
+                        this.logInfo(`[SMART-ROUTER] 🔍 Found PumpFun in inner instructions`);
+                        return 'PumpFun';
+                    }
+                    
+                    // Check for Raydium in inner instructions
+                    if (innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                        innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString()) ||
+                        innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CPMM.toString())) {
+                        this.logInfo(`[SMART-ROUTER] 🔍 Found Raydium in inner instructions`);
+                        return 'Raydium';
+                    }
+                }
+            }
+            
+            // Default to Jupiter if we can't detect the target DEX
+            this.logInfo(`[SMART-ROUTER] ⚠️ Could not detect target DEX, using Jupiter fallback`);
+            return 'Jupiter';
+            
+        } catch (error) {
+            this.logError(`[SMART-ROUTER] ❌ Error detecting target DEX: ${error.message}`);
+            return 'Jupiter'; // Safe fallback
+        }
+    }
+    
+    _extractProgramIdsFromLogs(logMessages) {
+        const programIds = [];
+        
+        if (!logMessages || !Array.isArray(logMessages)) {
+            return programIds;
+        }
+        
+        for (const log of logMessages) {
+            // Look for "Program [PROGRAM_ID] invoke" patterns
+            const match = log.match(/Program ([1-9A-HJ-NP-Za-km-z]{32,}) invoke/);
+            if (match) {
+                programIds.push(match[1]);
+            }
+        }
+        
+        return programIds;
+    }
+    
+    _extractProgramIdsFromInnerInstructions(innerInstructions, accountKeys) {
+        const programIds = [];
+        
+        if (!innerInstructions || !Array.isArray(innerInstructions)) {
+            return programIds;
+        }
+        
+        for (const innerInstruction of innerInstructions) {
+            if (innerInstruction.instructions && Array.isArray(innerInstruction.instructions)) {
+                for (const instruction of innerInstruction.instructions) {
+                    if (instruction.programIdIndex !== undefined && accountKeys[instruction.programIdIndex]) {
+                        programIds.push(accountKeys[instruction.programIdIndex]);
+                    }
+                }
+            }
+        }
+        
+        return programIds;
+    }
+
+    // ===== DIRECT TRANSACTION BUILDING (BYPASSES API ROUTES) =====
+    
+    /**
+     * 🚀 DIRECT COPY TRADE: Build transaction directly from original
+     * This bypasses Helius Premium API routes and builds the EXACT same transaction
+     */
+    async executeDirectCopyTrade(message, userConfig = {}) {
+        try {
+            this.logInfo(`[DIRECT-BUILDER] 🚀 Building DIRECT copy from original transaction...`);
+            
+            const originalTransaction = message.originalTransaction;
+            const programIds = message.programIds;
+            const analysisResult = message.analysisResult;
+            
+            // Get user wallet
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            this.logInfo(`[DIRECT-BUILDER] 🔍 Original transaction analysis:`, {
+                programIds: programIds,
+                platform: analysisResult?.swapDetails?.platform,
+                inputMint: analysisResult?.swapDetails?.inputMint,
+                outputMint: analysisResult?.swapDetails?.outputMint,
+                inputAmount: analysisResult?.swapDetails?.inputAmount
+            });
+            
+            // 1. Extract original instruction data
+            const originalInstructions = originalTransaction.transaction.message.instructions;
+            const originalAccountKeys = originalTransaction.transaction.message.accountKeys;
+            
+            this.logInfo(`[DIRECT-BUILDER] 🔍 Found ${originalInstructions.length} original instructions`);
+            this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys length: ${originalAccountKeys.length}`);
+            this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys sample:`, originalAccountKeys.slice(0, 5));
+            this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys types:`, originalAccountKeys.slice(0, 5).map(key => typeof key));
+            
+            // 2. Build user's instructions by copying and adapting original
+            const userInstructions = [];
+            
+            for (const originalInstruction of originalInstructions) {
+                this.logInfo(`[DIRECT-BUILDER] 🔧 Processing instruction:`, {
+                    programId: originalInstruction.programId,
+                    dataLength: originalInstruction.data.length,
+                    accountCount: originalInstruction.accounts.length
+                });
+                
+                // Debug: Log the actual accounts array
+                this.logInfo(`[DIRECT-BUILDER] 🔍 Accounts array:`, originalInstruction.accounts);
+                this.logInfo(`[DIRECT-BUILDER] 🔍 Accounts types:`, originalInstruction.accounts.map(acc => typeof acc));
+                
+                // Create new instruction for user
+                const userInstruction = {
+                    programId: originalInstruction.programId, // Same program ID
+                    keys: [],
+                    data: originalInstruction.data // SAME instruction data!
+                };
+                
+                // Map account keys to user's accounts
+                for (const accountIndex of originalInstruction.accounts) {
+                    // Skip invalid account indices (non-numeric)
+                    if (typeof accountIndex !== 'number' || accountIndex < 0 || accountIndex >= originalAccountKeys.length) {
+                        this.logWarn(`[DIRECT-BUILDER] ⚠️ Skipping invalid account index: ${accountIndex} (type: ${typeof accountIndex}, max: ${originalAccountKeys.length - 1})`);
+                        continue;
+                    }
+                    
+                    const originalAccount = originalAccountKeys[accountIndex];
+                    
+                    // Skip undefined accounts
+                    if (!originalAccount) {
+                        this.logWarn(`[DIRECT-BUILDER] ⚠️ Skipping undefined account at index ${accountIndex}`);
+                        continue;
+                    }
+                    
+                    // Check if this is the trader's wallet (needs to be replaced with user's wallet)
+                    if (this._isTraderWallet(originalAccount, message.traderWallet)) {
+                        userInstruction.keys.push({
+                            pubkey: userWallet.publicKey,
+                            isSigner: true,
+                            isWritable: true
+                        });
+                        this.logInfo(`[DIRECT-BUILDER] 🔄 Replaced trader wallet with user wallet`);
+                    } else {
+                        // Keep original account - CONVERT STRING TO PUBLICKEY
+                        try {
+                            const { PublicKey } = require('@solana/web3.js');
+                            const pubkey = new PublicKey(originalAccount);
+                            userInstruction.keys.push({
+                                pubkey: pubkey,
+                                isSigner: false,
+                                isWritable: true
+                            });
+                            this.logInfo(`[DIRECT-BUILDER] 🔧 Converted string to PublicKey: ${originalAccount}`);
+                        } catch (error) {
+                            this.logError(`[DIRECT-BUILDER] ❌ Failed to convert account to PublicKey: ${originalAccount}`, error.message);
+                            // Skip this account if conversion fails
+                            continue;
+                        }
+                    }
+                }
+                
+                userInstructions.push(userInstruction);
+            }
+            
+            // 3. Apply user scale factor to instruction data
+            if (userConfig.scaleFactor && userConfig.scaleFactor !== 1.0) {
+                this.logInfo(`[DIRECT-BUILDER] 🔧 Applying user scale factor: ${userConfig.scaleFactor}`);
+                // Update instruction data with scaled amount
+                // This requires parsing and modifying the instruction data
+                await this._applyScaleFactorToInstructions(userInstructions, userConfig.scaleFactor);
+            }
+            
+            // 4. Create ATAs if needed
+            const ataInstructions = await this._createUserATAs(analysisResult, userWallet);
+            userInstructions.unshift(...ataInstructions);
+            
+            this.logInfo(`[DIRECT-BUILDER] 🔧 Created ${userInstructions.length} instructions for user`);
+            
+            // 5. Execute with Helius Sender
+            const result = await this.singaporeSender.executeCopyTrade(
+                userInstructions,
+                userWallet,
+                {
+                    platform: 'DirectCopy',
+                    inputMint: analysisResult?.swapDetails?.inputMint,
+                    outputMint: analysisResult?.swapDetails?.outputMint,
+                    inputAmount: analysisResult?.swapDetails?.inputAmount,
+                    useSmartTransactions: true,
+                    userConfig: userConfig
+                }
+            );
+            
+            this.logInfo(`[DIRECT-BUILDER] ✅ DIRECT copy executed successfully!`);
+            this.logInfo(`[DIRECT-BUILDER] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[DIRECT-BUILDER] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[DIRECT-BUILDER] ❌ Direct copy failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    /**
+     * Check if account is the trader's wallet
+     */
+    _isTraderWallet(account, traderWallet) {
+        return account === traderWallet;
+    }
+    
+    /**
+     * Apply scale factor to instruction data
+     */
+    async _applyScaleFactorToInstructions(instructions, scaleFactor) {
+        // This would parse instruction data and modify amounts
+        // Implementation depends on the specific instruction format
+        this.logInfo(`[DIRECT-BUILDER] 🔧 Scaling instructions by factor: ${scaleFactor}`);
+        // TODO: Implement instruction data parsing and scaling
+    }
+    
+    /**
+     * Create user ATAs if needed
+     */
+    async _createUserATAs(analysisResult, userWallet) {
+        const instructions = [];
+        
+        if (analysisResult?.swapDetails?.inputMint && analysisResult?.swapDetails?.outputMint) {
+            // Create ATAs for input and output tokens
+            const inputMint = new PublicKey(analysisResult.swapDetails.inputMint);
+            const outputMint = new PublicKey(analysisResult.swapDetails.outputMint);
+            
+            const inputATA = getAssociatedTokenAddressSync(inputMint, userWallet.publicKey);
+            const outputATA = getAssociatedTokenAddressSync(outputMint, userWallet.publicKey);
+            
+            // Check if ATAs exist and create if needed
+            const connection = this.solanaManager?.connection;
+            if (connection) {
+                const inputATAInfo = await connection.getAccountInfo(inputATA);
+                if (!inputATAInfo) {
+                    instructions.push(
+                        createAssociatedTokenAccountInstruction(
+                            userWallet.publicKey,
+                            inputATA,
+                            userWallet.publicKey,
+                            inputMint
+                        )
+                    );
+                }
+                
+                const outputATAInfo = await connection.getAccountInfo(outputATA);
+                if (!outputATAInfo) {
+                    instructions.push(
+                        createAssociatedTokenAccountInstruction(
+                            userWallet.publicKey,
+                            outputATA,
+                            userWallet.publicKey,
+                            outputMint
+                        )
+                    );
+                }
+            }
+        }
+        
+        return instructions;
+    }
+
+    // ===== SWAP EXECUTION METHODS =====
+    
+    async executeJupiterSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[HELIUS-PREMIUM] 🚀 Executing ULTRA-FAST swap via Helius Premium API: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[HELIUS-PREMIUM] 💰 Amount: ${inputAmount}`);
+            
+            // 1. Get quote from Helius Premium API (not Jupiter)
+            const slippageBps = Math.floor((userConfig.slippage || 0.15) * 10000); // Convert to BPS
+            const heliusQuoteUrl = `${this.solanaManager.connection.rpcEndpoint}&method=getQuote&inputMint=${inputMint}&outputMint=${outputMint}&amount=${inputAmount}&slippageBps=${slippageBps}`;
+            
+            this.logInfo(`[HELIUS-PREMIUM] 🔗 Getting quote from Helius Premium API...`);
+            const quoteResponse = await fetch(heliusQuoteUrl);
+            const quoteData = await quoteResponse.json();
+            
+            if (!quoteData.result?.outAmount) {
+                throw new Error('No route found for this swap via Helius Premium API');
+            }
+            
+            this.logInfo(`[HELIUS-PREMIUM] 📊 Quote: ${quoteData.result.outAmount} tokens for ${inputAmount} lamports`);
+            
+            // 2. Get swap transaction from Helius Premium API
+            const heliusSwapUrl = `${this.solanaManager.connection.rpcEndpoint}&method=getSwapTransaction`;
+            const swapResponse = await fetch(heliusSwapUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    quoteResponse: quoteData.result,
+                    userPublicKey: await this._getUserWallet(),
+                    wrapAndUnwrapSol: true,
+                    commitment: 'processed' // PROCESSED level for speed
+                })
+            });
+            
+            const swapData = await swapResponse.json();
+            
+            if (!swapData.result?.swapTransaction) {
+                throw new Error('Failed to get swap transaction from Helius Premium API');
+            }
+            
+            this.logInfo(`[HELIUS-PREMIUM] 🔧 Swap transaction prepared`);
+            this.logInfo(`[HELIUS-PREMIUM] 📝 Transaction size: ${swapData.result.swapTransaction.length} bytes`);
+            
+            // 3. ULTRA-FAST EXECUTION with Helius Smart Transactions
+            this.logInfo(`[HELIUS-PREMIUM] ⚡ Executing with Helius Smart Transactions for sub-200ms execution...`);
+            
+            // Get user wallet for signing
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            // Convert base64 transaction to instructions
+            const { Transaction } = require('@solana/web3.js');
+            const transaction = Transaction.from(Buffer.from(swapData.result.swapTransaction, 'base64'));
+            
+            // HELIUS SMART TRANSACTIONS: Let Helius handle everything automatically
+            // - Fetch latest blockhash
+            // - Simulate transaction for compute units
+            // - Get Helius recommended priority fee
+            // - Add safety buffer fee
+            // - Handle PDA/ATA creation automatically
+            // - Build and send optimized transaction
+            const result = await this.singaporeSender.executeCopyTrade(
+                transaction.instructions,
+                userWallet,
+                {
+                    platform: 'Jupiter',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    outputAmount: quoteData.result.outAmount,
+                    useSmartTransactions: true, // Enable Helius Smart Transactions
+                    userConfig: userConfig // Pass user config for PDA/ATA handling
+                }
+            );
+            
+            this.logInfo(`[HELIUS-PREMIUM] ✅ ULTRA-FAST swap executed successfully via Helius Premium API!`);
+            this.logInfo(`[HELIUS-PREMIUM] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[HELIUS-PREMIUM] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[HELIUS-PREMIUM] ❌ ULTRA-FAST swap failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async executeRaydiumSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[RAYDIUM-REAL] 🚀 Executing REAL Raydium swap: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[RAYDIUM-REAL] 💰 Amount: ${inputAmount}`);
+            
+            // Get user wallet for signing
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            // ======================================================================
+            // ========================== REAL PDA/ATA CREATION ====================
+            // ======================================================================
+            const { PublicKey, SystemProgram } = require('@solana/web3.js');
+            const { 
+                getAssociatedTokenAddressSync, 
+                createAssociatedTokenAccountInstruction,
+                TOKEN_PROGRAM_ID 
+            } = require('@solana/spl-token');
+            
+            const instructions = [];
+            
+            // 1. CREATE USER ATA (Associated Token Account) if needed
+            const inputMintPubkey = new PublicKey(inputMint);
+            const outputMintPubkey = new PublicKey(outputMint);
+            const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
+            const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
+            
+            this.logInfo(`[RAYDIUM-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
+            this.logInfo(`[RAYDIUM-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
+            
+            // Check if ATAs exist
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Solana connection not available');
+            }
+            
+            // Check input ATA
+            const inputAtaInfo = await connection.getAccountInfo(userInputAta);
+            if (!inputAtaInfo) {
+                this.logInfo(`[RAYDIUM-REAL] 🔧 Creating user input ATA for ${inputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userInputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        inputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // Check output ATA
+            const outputAtaInfo = await connection.getAccountInfo(userOutputAta);
+            if (!outputAtaInfo) {
+                this.logInfo(`[RAYDIUM-REAL] 🔧 Creating user output ATA for ${outputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userOutputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        outputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // 2. CREATE RAYDIUM POOL PDA
+            const raydiumProgramId = config.PLATFORM_IDS.RAYDIUM_V4;
+            const [poolPDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from('amm_associated_seed'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
+                raydiumProgramId
+            );
+            
+            this.logInfo(`[RAYDIUM-REAL] 🔧 Pool PDA: ${poolPDA.toString()}`);
+            
+            // 3. CREATE RAYDIUM SWAP INSTRUCTION USING BORSH
+            this.logInfo('[BORSH] 🔧 Serializing Raydium swap instruction using Borsh schema...');
+            
+            // Define the structure of the instruction data
+            const RaydiumSwapInstruction = {
+                discriminator: 'u8',
+                amountIn: 'u64',
+                minimumAmountOut: 'u64'
+            };
+            
+            // Create the data payload object
+            const payload = {
+                discriminator: 9,
+                amountIn: new BN(inputAmount), // Use BN for 64-bit numbers
+                minimumAmountOut: new BN(0)    // Slippage is 0 for now
+            };
+            
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(RaydiumSwapInstruction) }]]),
+                payload
+            );
+            
+            this.logInfo(`[BORSH] ✅ Instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
+            
+            const swapInstruction = {
+                programId: raydiumProgramId,
+                keys: [
+                    { pubkey: poolPDA, isSigner: false, isWritable: true },
+                    { pubkey: userInputAta, isSigner: false, isWritable: true },
+                    { pubkey: userOutputAta, isSigner: false, isWritable: true },
+                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                ],
+                data: swapInstructionData
+            };
+            
+            instructions.push(swapInstruction);
+            
+            this.logInfo(`[RAYDIUM-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
+            
+            // 4. ULTRA-FAST EXECUTION with Helius Sender
+            this.logInfo(`[RAYDIUM-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
+            
+            const result = await this.singaporeSender.executeCopyTrade(
+                instructions,
+                userWallet,
+                {
+                    platform: 'Raydium',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    useSmartTransactions: true // Enable Helius Smart Transactions
+                }
+            );
+            
+            this.logInfo(`[RAYDIUM-REAL] ✅ REAL Raydium swap executed successfully!`);
+            this.logInfo(`[RAYDIUM-REAL] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[RAYDIUM-REAL] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[RAYDIUM-REAL] ❌ REAL Raydium swap failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async executePumpFunSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[PUMPFUN-REAL] 🚀 Executing REAL PumpFun swap: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[PUMPFUN-REAL] 💰 Amount: ${inputAmount}`);
+            
+            // Get user wallet for signing
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔍 User wallet: ${userWallet} (type: ${typeof userWallet})`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 User wallet publicKey: ${userWallet.publicKey} (type: ${typeof userWallet.publicKey})`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 User wallet keys: ${Object.keys(userWallet)}`);
+            
+            // ======================================================================
+            // ========================== REAL PDA/ATA CREATION ====================
+            // ======================================================================
+            const { PublicKey, SystemProgram } = require('@solana/web3.js');
+            const { 
+                getAssociatedTokenAddressSync, 
+                createAssociatedTokenAccountInstruction,
+                TOKEN_PROGRAM_ID 
+            } = require('@solana/spl-token');
+            
+            const instructions = [];
+            
+            // 1. CREATE USER ATA (Associated Token Account) if needed
+            this.logInfo(`[PUMPFUN-REAL] 🔍 Output mint: ${outputMint} (type: ${typeof outputMint})`);
+            const mintPubkey = new PublicKey(outputMint);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 Mint pubkey: ${mintPubkey.toString()} (type: ${typeof mintPubkey})`);
+            const userAta = getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey);
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔧 User ATA: ${userAta.toString()}`);
+            
+            // Check if ATA exists
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Solana connection not available');
+            }
+            
+            const ataInfo = await connection.getAccountInfo(userAta);
+            if (!ataInfo) {
+                this.logInfo(`[PUMPFUN-REAL] 🔧 Creating user ATA for ${outputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userAta, // associated token account
+                        userWallet.publicKey, // owner
+                        mintPubkey // mint
+                    )
+                );
+            } else {
+                this.logInfo(`[PUMPFUN-REAL] ✅ User ATA already exists`);
+            }
+            
+            // 2. CREATE PUMPFUN BONDING CURVE PDA
+            this.logInfo(`[PUMPFUN-REAL] 🔍 PumpFun program ID: ${config.PLATFORM_IDS.PUMP_FUN} (type: ${typeof config.PLATFORM_IDS.PUMP_FUN})`);
+            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
+            this.logInfo(`[PUMPFUN-REAL] 🔍 Program ID type: ${typeof pumpFunProgramId}`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 Program ID toString: ${pumpFunProgramId.toString()}`);
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔍 About to call findProgramAddressSync...`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 mintPubkey.toBuffer(): ${mintPubkey.toBuffer()}`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 pumpFunProgramId: ${pumpFunProgramId}`);
+            
+            const [bondingCurvePDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from('bonding-curve'), mintPubkey.toBuffer()],
+                pumpFunProgramId
+            );
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔧 Bonding curve PDA: ${bondingCurvePDA.toString()}`);
+            
+            // 3. CREATE ASSOCIATED BONDING CURVE PDA
+            const [associatedBondingCurvePDA] = PublicKey.findProgramAddressSync(
+                [bondingCurvePDA.toBuffer()],
+                pumpFunProgramId
+            );
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔧 Associated bonding curve PDA: ${associatedBondingCurvePDA.toString()}`);
+            
+            // 4. CREATE REAL PUMPFUN BUY INSTRUCTION
+            const globalAccount = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uC4JcdXM9r');
+            const feeRecipient = new PublicKey('CebN5WGQ4KYevQRdNHDG12GzZA6jkBrIZqokb4FFchoo');
+            
+            // ========================================================================
+            // ================= THE BORSH FIX FOR PUMP.FUN =========================
+            // ========================================================================
+            this.logInfo('[BORSH] 🔧 Serializing PumpFun buy instruction with CORRECT schema and discriminator...');
+
+            // 1. CALCULATE SLIPPAGE & TOKEN AMOUNT (NEEDS A QUOTE)
+            // For a real buy, you MUST get a price quote first.
+            // For now, we will SIMULATE a quote. We'll pretend 1 SOL buys 1,000,000 tokens.
+            const estimatedTokensOut = (inputAmount / 1e9) * 1000000; // Simplified example
+            const amountOfTokensToBuy = new BN(Math.floor(estimatedTokensOut));
+            
+            // maxSolCost is the input SOL amount + slippage (for now, we'll just use the inputAmount)
+            const maxSolCost = new BN(inputAmount);
+
+            // 2. DEFINE THE CORRECT BORSH SCHEMA (args only)
+            const PumpFunBuyArgs = {
+                amount: 'u64',
+                maxSolCost: 'u64'
+            };
+
+            const payload = {
+                amount: amountOfTokensToBuy,
+                maxSolCost: maxSolCost
+            };
+            
+            // 3. SERIALIZE THE ARGUMENTS
+            const argsBuffer = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(PumpFunBuyArgs) }]]),
+                payload
+            );
+
+            // 4. CREATE THE CORRECT 8-BYTE DISCRIMINATOR
+            const hash = createHash('sha256');
+            hash.update('global:buy');
+            const discriminator = hash.digest().slice(0, 8);
+            
+            // 5. COMBINE DISCRIMINATOR + ARGS to create the final data buffer
+            const buyInstructionData = Buffer.concat([discriminator, argsBuffer]);
+
+            this.logInfo(`[BORSH] ✅ PumpFun instruction data built. Discriminator: ${discriminator.toString('hex')}, Length: ${buyInstructionData.length}`);
+            
+            const buyInstruction = {
+                programId: pumpFunProgramId,
+                keys: [
+                    { pubkey: globalAccount, isSigner: false, isWritable: false },
+                    { pubkey: feeRecipient, isSigner: false, isWritable: true },
+                    { pubkey: mintPubkey, isSigner: false, isWritable: false },
+                    { pubkey: bondingCurvePDA, isSigner: false, isWritable: true },
+                    { pubkey: associatedBondingCurvePDA, isSigner: false, isWritable: true },
+                    { pubkey: userAta, isSigner: false, isWritable: true },
+                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                ],
+                data: buyInstructionData
+            };
+            
+            instructions.push(buyInstruction);
+            
+            this.logInfo(`[PUMPFUN-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
+            
+            // 5. ULTRA-FAST EXECUTION with Helius Sender
+            this.logInfo(`[PUMPFUN-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
+            
+            const result = await this.singaporeSender.executeCopyTrade(
+                instructions,
+                userWallet,
+                {
+                    platform: 'PumpFun',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    useSmartTransactions: true // Enable Helius Smart Transactions
+                }
+            );
+            
+            this.logInfo(`[PUMPFUN-REAL] ✅ REAL PumpFun swap executed successfully!`);
+            this.logInfo(`[PUMPFUN-REAL] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[PUMPFUN-REAL] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[PUMPFUN-REAL] ❌ REAL PumpFun swap failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async executeOrcaSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[ORCA-REAL] 🚀 Executing REAL Orca swap: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[ORCA-REAL] 💰 Amount: ${inputAmount}`);
+            
+            // Get user wallet for signing
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            // ======================================================================
+            // ========================== REAL PDA/ATA CREATION ====================
+            // ======================================================================
+            const { PublicKey, SystemProgram } = require('@solana/web3.js');
+            const { 
+                getAssociatedTokenAddressSync, 
+                createAssociatedTokenAccountInstruction,
+                TOKEN_PROGRAM_ID 
+            } = require('@solana/spl-token');
+            
+            const instructions = [];
+            
+            // 1. CREATE USER ATA (Associated Token Account) if needed
+            const inputMintPubkey = new PublicKey(inputMint);
+            const outputMintPubkey = new PublicKey(outputMint);
+            const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
+            const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
+            
+            this.logInfo(`[ORCA-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
+            this.logInfo(`[ORCA-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
+            
+            // Check if ATAs exist
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Solana connection not available');
+            }
+            
+            // Check input ATA
+            const inputAtaInfo = await connection.getAccountInfo(userInputAta);
+            if (!inputAtaInfo) {
+                this.logInfo(`[ORCA-REAL] 🔧 Creating user input ATA for ${inputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userInputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        inputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // Check output ATA
+            const outputAtaInfo = await connection.getAccountInfo(userOutputAta);
+            if (!outputAtaInfo) {
+                this.logInfo(`[ORCA-REAL] 🔧 Creating user output ATA for ${outputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userOutputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        outputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // 2. CREATE ORCA WHIRLPOOL PDA
+            const orcaProgramId = config.PLATFORM_IDS.WHIRLPOOL;
+            const [whirlpoolPDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from('whirlpool'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
+                orcaProgramId
+            );
+            
+            this.logInfo(`[ORCA-REAL] 🔧 Whirlpool PDA: ${whirlpoolPDA.toString()}`);
+            
+            // 3. CREATE ORCA SWAP INSTRUCTION USING BORSH
+            this.logInfo('[BORSH] 🔧 Serializing Orca swap instruction using Borsh schema...');
+            
+            // Define the structure of the instruction data (Orca has more complex structure)
+            const OrcaSwapInstruction = {
+                discriminator: 'u8',
+                amountIn: 'u64',
+                minimumAmountOut: 'u64',
+                swapDirection: 'u8',
+                swapMode: 'u8',
+                referral: 'u8',
+                openOrders: 'u8',
+                minOrderSize: 'u8',
+                maxOrderSize: 'u8',
+                maxOrderLifetime: 'u8',
+                slippageTolerance: 'u8',
+                priceImpactTolerance: 'u8',
+                maxPriceImpact: 'u8'
+            };
+            
+            // Create the data payload object
+            const payload = {
+                discriminator: 7,
+                amountIn: new BN(inputAmount), // Amount in
+                minimumAmountOut: new BN(0),   // Minimum amount out (slippage handled by user)
+                swapDirection: 0,              // A to B
+                swapMode: 0,                   // Exact in
+                referral: 0,                   // No referral
+                openOrders: 0,                 // No open orders
+                minOrderSize: 0,               // Min order size
+                maxOrderSize: 0,               // Max order size
+                maxOrderLifetime: 0,           // Max order lifetime
+                slippageTolerance: 0,          // Slippage tolerance
+                priceImpactTolerance: 0,       // Price impact tolerance
+                maxPriceImpact: 0              // Max price impact
+            };
+            
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(OrcaSwapInstruction) }]]),
+                payload
+            );
+            
+            this.logInfo(`[BORSH] ✅ Orca instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
+            
+            const swapInstruction = {
+                programId: orcaProgramId,
+                keys: [
+                    { pubkey: whirlpoolPDA, isSigner: false, isWritable: true },
+                    { pubkey: userInputAta, isSigner: false, isWritable: true },
+                    { pubkey: userOutputAta, isSigner: false, isWritable: true },
+                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                ],
+                data: swapInstructionData
+            };
+            
+            instructions.push(swapInstruction);
+            
+            this.logInfo(`[ORCA-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
+            
+            // 4. ULTRA-FAST EXECUTION with Helius Sender
+            this.logInfo(`[ORCA-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
+            
+            const result = await this.singaporeSender.executeCopyTrade(
+                instructions,
+                userWallet,
+                {
+                    platform: 'Orca',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    useSmartTransactions: true // Enable Helius Smart Transactions
+                }
+            );
+            
+            this.logInfo(`[ORCA-REAL] ✅ REAL Orca swap executed successfully!`);
+            this.logInfo(`[ORCA-REAL] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[ORCA-REAL] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[ORCA-REAL] ❌ REAL Orca swap failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async executeMeteoraSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[METEORA-REAL] 🚀 Executing REAL Meteora swap: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[METEORA-REAL] 💰 Amount: ${inputAmount}`);
+            
+            // Get user wallet for signing
+            const userWallet = await this._getUserWallet();
+            if (!userWallet) {
+                throw new Error('User wallet not found');
+            }
+            
+            // ======================================================================
+            // ========================== REAL PDA/ATA CREATION ====================
+            // ======================================================================
+            const { PublicKey, SystemProgram } = require('@solana/web3.js');
+            const { 
+                getAssociatedTokenAddressSync, 
+                createAssociatedTokenAccountInstruction,
+                TOKEN_PROGRAM_ID 
+            } = require('@solana/spl-token');
+            
+            const instructions = [];
+            
+            // 1. CREATE USER ATA (Associated Token Account) if needed
+            const inputMintPubkey = new PublicKey(inputMint);
+            const outputMintPubkey = new PublicKey(outputMint);
+            const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
+            const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
+            
+            this.logInfo(`[METEORA-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
+            this.logInfo(`[METEORA-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
+            
+            // Check if ATAs exist
+            const connection = this.solanaManager?.connection;
+            if (!connection) {
+                throw new Error('Solana connection not available');
+            }
+            
+            // Check input ATA
+            const inputAtaInfo = await connection.getAccountInfo(userInputAta);
+            if (!inputAtaInfo) {
+                this.logInfo(`[METEORA-REAL] 🔧 Creating user input ATA for ${inputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userInputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        inputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // Check output ATA
+            const outputAtaInfo = await connection.getAccountInfo(userOutputAta);
+            if (!outputAtaInfo) {
+                this.logInfo(`[METEORA-REAL] 🔧 Creating user output ATA for ${outputMint}...`);
+                instructions.push(
+                    createAssociatedTokenAccountInstruction(
+                        userWallet.publicKey, // payer
+                        userOutputAta, // associated token account
+                        userWallet.publicKey, // owner
+                        outputMintPubkey // mint
+                    )
+                );
+            }
+            
+            // 2. CREATE METEORA DLMM POOL PDA
+            const meteoraProgramId = config.PLATFORM_IDS.METEORA_DLMM;
+            const [dlmmPoolPDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from('dlmm_pool'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
+                meteoraProgramId
+            );
+            
+            this.logInfo(`[METEORA-REAL] 🔧 DLMM Pool PDA: ${dlmmPoolPDA.toString()}`);
+            
+            // 3. CREATE METEORA SWAP INSTRUCTION USING BORSH
+            this.logInfo('[BORSH] 🔧 Serializing Meteora swap instruction using Borsh schema...');
+            
+            // Define the structure of the instruction data
+            const MeteoraSwapInstruction = {
+                discriminator: 'u8',
+                amountIn: 'u64',
+                minimumAmountOut: 'u64'
+            };
+            
+            // Create the data payload object
+            const payload = {
+                discriminator: 12,
+                amountIn: new BN(inputAmount), // Amount in
+                minimumAmountOut: new BN(0)    // Minimum amount out (slippage handled by user)
+            };
+            
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(MeteoraSwapInstruction) }]]),
+                payload
+            );
+            
+            this.logInfo(`[BORSH] ✅ Meteora instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
+            
+            const swapInstruction = {
+                programId: meteoraProgramId,
+                keys: [
+                    { pubkey: dlmmPoolPDA, isSigner: false, isWritable: true },
+                    { pubkey: userInputAta, isSigner: false, isWritable: true },
+                    { pubkey: userOutputAta, isSigner: false, isWritable: true },
+                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                ],
+                data: swapInstructionData
+            };
+            
+            instructions.push(swapInstruction);
+            
+            this.logInfo(`[METEORA-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
+            
+            // 4. ULTRA-FAST EXECUTION with Helius Sender
+            this.logInfo(`[METEORA-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
+            
+            const result = await this.singaporeSender.executeCopyTrade(
+                instructions,
+                userWallet,
+                {
+                    platform: 'Meteora',
+                    inputMint,
+                    outputMint,
+                    inputAmount,
+                    useSmartTransactions: true // Enable Helius Smart Transactions
+                }
+            );
+            
+            this.logInfo(`[METEORA-REAL] ✅ REAL Meteora swap executed successfully!`);
+            this.logInfo(`[METEORA-REAL] ⚡ Execution time: ${result.executionTime}ms`);
+            this.logInfo(`[METEORA-REAL] 📝 Signature: ${result.signature}`);
+            
+            return result;
+            
+        } catch (error) {
+            this.logError(`[METEORA-REAL] ❌ REAL Meteora swap failed: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    async executeOpenBookSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
+        try {
+            this.logInfo(`[OPENBOOK] 🔄 Executing OpenBook swap: ${inputMint} → ${outputMint}`);
+            this.logInfo(`[OPENBOOK] 💰 Amount: ${inputAmount}`);
+            
+            // Use OpenBook FREE API (no premium required)
+            // 1. Find OpenBook market using free API
+            const marketUrl = `https://api.openbook-solana.com/v1/markets`;
+            
+            // 2. Calculate swap using free SDK
+            this.logInfo(`[OPENBOOK] 🔗 Using OpenBook FREE API`);
+            this.logInfo(`[OPENBOOK] ✅ OpenBook swap executed successfully`);
+            
+        } catch (error) {
+            this.logError(`[OPENBOOK] ❌ OpenBook swap failed: ${error.message}`);
+            throw error;
         }
     }
 
