@@ -89,9 +89,6 @@ class TraderMonitorWorker extends BaseWorker {
             // Load bot configuration and set it in LaserStreamManager
             await this.loadBotConfiguration();
             
-            // Set the transaction notification callback
-            this.laserstreamManager.transactionNotificationCallback = this.handleTraderActivity.bind(this);
-
             // Initialize SolanaManager
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
@@ -99,8 +96,8 @@ class TraderMonitorWorker extends BaseWorker {
             // Initialize Transaction Logger only
             this.transactionLogger = new TransactionLogger();
             
-            // Listen for raw transaction events for cloning
-            this.laserstreamManager.on('transaction', this.handleRawTransaction.bind(this));
+            // Set up the unified transaction handler (combines debugging + analysis)
+            this.laserstreamManager.transactionNotificationCallback = this.handleUnifiedTransaction.bind(this);
 
             this.logInfo('✅ Initialized LaserStreamManager, Universal Analyzer, and Cloning Logger. Ready to start monitoring.');
            
@@ -495,28 +492,34 @@ class TraderMonitorWorker extends BaseWorker {
      */
     _isPotentiallyATrade(normalizedTx, sourceWallet, knownDexPrograms) {
         try {
-            this.logInfo(`[DNA-ANALYSIS] 🔬 Starting 4-layer DNA analysis for ${shortenAddress(sourceWallet)}`);
+            this.logInfo(`[DNA-ANALYSIS] 🔬 Starting analysis for ${shortenAddress(sourceWallet)}`);
             
-            // =======================================================================
-            // SKIP L1 & L2 - We go even if we don't have them
-            // =======================================================================
-            // Layer 1 & 2 are optional - we proceed regardless
-            const layer1Result = { platform: 'Generic' }; // No need for specific platform
-            const layer2Result = { isValid: true }; // Skip Layer 2
+            // =========================================================================
+            // ======================== THE UPGRADE ====================================
+            // =========================================================================
+            // We replace the old Layer 1 analysis with our new, smart classifier.
+            const classification = this._classifyTransactionPrograms(normalizedTx);
             
-            // =======================================================================
-            // LAYER 3: INSTRUCTION DATA PATTERN - Check discriminators
-            // =======================================================================
-            const layer3Result = this._analyzeLayer3_InstructionData(normalizedTx, layer1Result.platform);
+            const finalDex = classification.dex;
+            const finalRouter = classification.router || 'Direct'; // If no router found, it's a direct call.
+
+            this.logInfo(`[DNA-ANALYSIS] ✅ Program Analysis Complete: 🛣️ Router: ${finalRouter}, 🏢 DEX: ${finalDex || 'Unknown'}`);
+            
+            // If we couldn't find a real DEX, the trade is not copyable. This is a powerful filter.
+            if (!finalDex) {
+                this.logInfo(`[DNA-ANALYSIS] ❌ FAILED: Could not identify a known DEX destination. Ignoring transaction.`);
+                return false;
+            }
+            // =========================================================================
+            
+            // The rest of the DNA analysis continues as before...
+            const layer3Result = this._analyzeLayer3_InstructionData(normalizedTx, finalDex);
             if (!layer3Result.isValid) {
                 this.logInfo(`[DNA-ANALYSIS] ❌ Layer 3 FAILED: ${layer3Result.reason}`);
                 return false;
             }
             this.logInfo(`[DNA-ANALYSIS] ✅ Layer 3 PASSED: Valid instruction pattern (${layer3Result.tradeType})`);
-            
-            // =======================================================================
-            // LAYER 4: ECONOMIC SIGNATURE - SOL/Token balance changes
-            // =======================================================================
+
             const layer4Result = this._analyzeLayer4_EconomicSignature(normalizedTx, sourceWallet);
             if (!layer4Result.isValid) {
                 this.logInfo(`[DNA-ANALYSIS] ❌ Layer 4 FAILED: ${layer4Result.reason}`);
@@ -524,65 +527,35 @@ class TraderMonitorWorker extends BaseWorker {
             }
             this.logInfo(`[DNA-ANALYSIS] ✅ Layer 4 PASSED: Economic activity confirmed`);
             
+            // Extract mints using the helper function
+            const { inputMint, outputMint } = this._extractMintsFromAnalysis(layer4Result, normalizedTx);
+
             // =======================================================================
-            // EXTRACT TOKEN MINT FOR ATA CREATION
+            // ==================== SLIPPAGE DETECTION ==============================
             // =======================================================================
-            let inputMint = config.NATIVE_SOL_MINT;
-            let outputMint = config.NATIVE_SOL_MINT;
+            // Extract the master trader's slippage from their original instruction
+            const masterTraderSlippageBps = this._extractMasterTraderSlippage(normalizedTx, finalDex, layer4Result);
             
-            // Find token mint from postTokenBalances (most reliable method)
-            const postTokenBalances = normalizedTx.postTokenBalances || [];
-            this.logInfo(`[DNA-ANALYSIS] 🔍 Analyzing ${postTokenBalances.length} postTokenBalances for token mint...`);
-            
-            if (postTokenBalances.length > 0) {
-                // Get the first token mint from postTokenBalances
-                const firstTokenBalance = postTokenBalances[0];
-                if (firstTokenBalance && firstTokenBalance.mint) {
-                    outputMint = firstTokenBalance.mint;
-                    this.logInfo(`[DNA-ANALYSIS] 🎯 Found token mint from postTokenBalances: ${shortenAddress(firstTokenBalance.mint)}`);
-                }
-            }
-            
-            // Fallback: Find token mint in account keys if not found in postTokenBalances
-            if (outputMint === config.NATIVE_SOL_MINT) {
-                const accountKeys = normalizedTx.accountKeys || [];
-                this.logInfo(`[DNA-ANALYSIS] 🔍 Fallback: Analyzing ${accountKeys.length} account keys for token mint...`);
-                
-                for (const accountKey of accountKeys) {
-                    if (accountKey && 
-                        accountKey !== config.NATIVE_SOL_MINT &&
-                        accountKey.length === 44 &&
-                        !accountKey.includes('11111111111111111111111111111111') &&
-                        !accountKey.includes('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') &&
-                        !accountKey.includes('ComputeBudget111111111111111111111111111111') &&
-                        !accountKey.includes('ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL') &&
-                        accountKey !== sourceWallet) { // EXCLUDE TRADER'S WALLET
-                        outputMint = accountKey;
-                        this.logInfo(`[DNA-ANALYSIS] 🎯 Found token mint from account keys: ${shortenAddress(accountKey)}`);
-                        break;
-                    }
-                }
-            }
-            
-            if (outputMint === config.NATIVE_SOL_MINT) {
-                this.logInfo(`[DNA-ANALYSIS] ⚠️ No token mint found in postTokenBalances or account keys`);
-            }
-            
-            // =======================================================================
-            // FINAL VERDICT: All 4 layers passed
-            // =======================================================================
-            this.logInfo(`[DNA-ANALYSIS] 🎯 ALL 4 LAYERS PASSED: ${layer1Result.platform} ${layer3Result.tradeType} trade confirmed`);
+            this.logInfo(`[DNA-ANALYSIS] 🎯 All layers PASSED. Final Verdict: ${finalDex} trade via ${finalRouter}.`);
+
+            // Finally, we build the NEW, smarter analysis result
             return {
                 isCopyable: true,
-                details: {
-                    dexPlatform: layer1Result.platform,
+                swapDetails: {
+                    platform: finalDex, // The REAL DEX
+                    router: finalRouter, // The router used (or 'Direct')
                     tradeType: layer3Result.tradeType,
                     inputMint: inputMint,
                     outputMint: outputMint,
-                    traderPubkey: sourceWallet // 🔥 CRITICAL: Add traderPubkey
+                    traderPubkey: sourceWallet,
+                    originalAmount: Math.abs(layer4Result.solChange || 0) / 1e9, // Amount in SOL for logging
+                    inputAmount: Math.abs(layer4Result.solChange || 0), // Raw amount in lamports for executor
+                    requiresATACreation: outputMint !== config.NATIVE_SOL_MINT,
+                    requiresPDARecovery: ['PumpFun', 'Raydium', 'Meteora', 'Orca', 'Jupiter'].includes(finalDex),
+                    masterTraderSlippageBps: masterTraderSlippageBps // 🎯 THE ALPHA: Master's slippage tolerance
                 },
-                summary: `${layer3Result.tradeType} on ${layer1Result.platform}`,
-                reason: 'All 4 layers passed'
+                summary: `${layer3Result.tradeType} on ${finalDex} via ${finalRouter}`,
+                reason: 'All layers passed with smart classification.'
             };
 
         } catch (e) {
@@ -592,51 +565,119 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     /**
-     * LAYER 1: Program ID Analysis
-     * Check if transaction involves known DEX/Router programs
+     * THE NEW, SMARTER "BOUNCER" - Router vs DEX Classification
+     * Uses the new config structure to intelligently identify routers and DEXs
+     */
+    _classifyTransactionPrograms(normalizedTx) {
+        const topLevelInstructions = normalizedTx.instructions;
+        const accountKeys = normalizedTx.accountKeys;
+        const logMessages = normalizedTx.logMessages.join(' '); // Join for easy searching
+
+        let detectedRouter = null;
+        let detectedDex = null;
+
+        // Helper function to check a list of program IDs
+        const findProgram = (programList, searchTarget, targetName) => {
+            for (const [key, id] of Object.entries(programList)) {
+                const idsToCheck = Array.isArray(id) ? id.map(pk => pk.toBase58()) : [id.toBase58()];
+                if (idsToCheck.includes(searchTarget)) {
+                    return { name: targetName || key.replace(/_/g, ''), id: searchTarget };
+                }
+            }
+            return null;
+        };
+
+        // --- STEP 1: CHECK THE FRONT DOOR (Top-Level Instructions for Routers) ---
+        // The highest priority is to identify the router being directly called.
+        for (const instruction of topLevelInstructions) {
+            const programId = accountKeys[instruction.programIdIndex];
+            const router = findProgram(config.ROUTER_PROGRAM_IDS, programId, null);
+            if (router) {
+                detectedRouter = router.name;
+                this.logInfo(`[BOUNCER] 🛣️  Router detected at front door: ${detectedRouter}`);
+                break; // Found the primary router, stop searching.
+            }
+        }
+        
+        // --- STEP 2: LOOK INSIDE THE CAR (Inner Instructions & Logs for the DEX) ---
+        // We search the entire context of the transaction for the real DEX.
+        // Priority: Check logs first (most reliable), then account keys
+        
+        // First, check logs for DEX indicators (most reliable)
+        if (!detectedDex) {
+            // Special case: Check for Pump.fun specific log patterns first
+            if (logMessages.includes('pump.fun') || logMessages.includes('Pump.fun') || 
+                logMessages.includes('Program log: Instruction: Buy') || 
+                logMessages.includes('Program log: Instruction: Sell')) {
+                detectedDex = 'PUMPFUN';
+                this.logInfo(`[BOUNCER] 🏢 DEX found in logs (Pump.fun specific): ${detectedDex}`);
+            } else {
+                // General DEX detection in logs
+                for (const [key, id] of Object.entries(config.DEX_PROGRAM_IDS)) {
+                    const idsToCheck = Array.isArray(id) ? id.map(pk => pk.toBase58()) : [id.toBase58()];
+                    for(const dexId of idsToCheck){
+                        if (logMessages.includes(dexId)){
+                             detectedDex = key.replace(/_/g, '');
+                             this.logInfo(`[BOUNCER] 🏢 DEX found in logs: ${detectedDex}`);
+                             break;
+                        }
+                    }
+                    if(detectedDex) break;
+                }
+            }
+        }
+        
+        // If no DEX found in logs, check account keys
+        if (!detectedDex) {
+            for (const programId of accountKeys) {
+                const dex = findProgram(config.DEX_PROGRAM_IDS, programId, null);
+                if (dex) {
+                    detectedDex = dex.name;
+                    this.logInfo(`[BOUNCER] 🏢 DEX found in account keys: ${detectedDex}`);
+                    break; // Found the first (and likely primary) DEX, stop searching.
+                }
+            }
+        }
+
+        this.logInfo(`[BOUNCER] 🎯 Final Classification: Router=${detectedRouter || 'None'}, DEX=${detectedDex || 'None'}`);
+
+        return {
+            router: detectedRouter,
+            dex: detectedDex
+        };
+    }
+
+    /**
+     * LAYER 1: Program ID Analysis with Smart Bouncer
+     * Uses the new classification system
      */
     _analyzeLayer1_ProgramID(normalizedTx, knownDexPrograms) {
         try {
-            // PRIORITY 1: Check main instructions for known DEX programs (direct calls)
-            const mainDexPrograms = [];
-            for (const instruction of normalizedTx.instructions) {
-                const programId = normalizedTx.accountKeys[instruction.programIdIndex];
-                if (knownDexPrograms.has(programId)) {
-                    mainDexPrograms.push(programId);
-                    this.logInfo(`[DEBUG] Found DEX in main instruction: ${programId}`);
-                }
-            }
+            // =========================================================================
+            // ======================== THE UPGRADE ====================================
+            // =========================================================================
+            // We replace the old Layer 1 analysis with our new, smart classifier.
+            const classification = this._classifyTransactionPrograms(normalizedTx);
             
-            if (mainDexPrograms.length > 0) {
-                const platform = this._identifyPlatform(mainDexPrograms[0]);
+            const finalDex = classification.dex;
+            const finalRouter = classification.router || 'Direct'; // If no router found, it's a direct call.
+
+            this.logInfo(`[LAYER-1] ✅ Program Analysis Complete: 🛣️ Router: ${finalRouter}, 🏢 DEX: ${finalDex || 'Unknown'}`);
+            
+            // If we couldn't find a real DEX, the trade is not copyable. This is a powerful filter.
+            if (!finalDex) {
+                this.logInfo(`[LAYER-1] ❌ FAILED: Could not identify a known DEX destination. Ignoring transaction.`);
                 return {
-                    isValid: true,
-                    platform: platform,
-                    reason: `Direct DEX call detected: ${shortenAddress(mainDexPrograms[0])} -> ${platform}`
-                };
-            }
-            
-            // PRIORITY 2: Check account keys for known DEX programs (CPI calls)
-            const accountDexPrograms = [];
-            for (const accountKey of normalizedTx.accountKeys) {
-                if (knownDexPrograms.has(accountKey)) {
-                    accountDexPrograms.push(accountKey);
-                    this.logInfo(`[DEBUG] Found DEX in account keys (CPI): ${accountKey}`);
-                }
-            }
-            
-            if (accountDexPrograms.length > 0) {
-                const platform = this._identifyPlatform(accountDexPrograms[0]);
-                return {
-                    isValid: true,
-                    platform: platform,
-                    reason: `DEX program found in accounts (CPI chain): ${shortenAddress(accountDexPrograms[0])} -> ${platform}`
+                    isValid: false,
+                    reason: 'No known DEX destination found'
                 };
             }
             
             return {
-                isValid: false,
-                reason: 'No known DEX programs found in transaction'
+                isValid: true,
+                platform: finalDex, // The REAL DEX
+                router: finalRouter, // The router used (or 'Direct')
+                reason: `Router ${finalRouter} → DEX ${finalDex}`
             };
             
         } catch (error) {
@@ -644,6 +685,405 @@ class TraderMonitorWorker extends BaseWorker {
                 isValid: false,
                 reason: `Layer 1 analysis error: ${error.message}`
             };
+        }
+    }
+
+    /**
+     * Helper function to extract token mints from analysis
+     */
+    _extractMintsFromAnalysis(layer4Result, normalizedTx) {
+        let inputMint = config.NATIVE_SOL_MINT;
+        let outputMint = config.NATIVE_SOL_MINT;
+        
+        // Use the mints from Layer 4 analysis if available
+        if (layer4Result.inputMint) {
+            inputMint = layer4Result.inputMint;
+        }
+        if (layer4Result.outputMint) {
+            outputMint = layer4Result.outputMint;
+        }
+        
+        // Fallback: Find token mint from postTokenBalances
+        if (outputMint === config.NATIVE_SOL_MINT) {
+            const postTokenBalances = normalizedTx.postTokenBalances || [];
+            if (postTokenBalances.length > 0) {
+                const firstTokenBalance = postTokenBalances[0];
+                if (firstTokenBalance && firstTokenBalance.mint) {
+                    outputMint = firstTokenBalance.mint;
+                    this.logInfo(`[MINT-EXTRACTION] 🎯 Found token mint from postTokenBalances: ${shortenAddress(firstTokenBalance.mint)}`);
+                }
+            }
+        }
+        
+        return { inputMint, outputMint };
+    }
+
+    /**
+     * 🎯 THE ALPHA: Extract Master Trader's Slippage from their original instruction
+     * This is the professional way to copy their exact risk tolerance
+     */
+    _extractMasterTraderSlippage(normalizedTx, dexPlatform, layer4Result) {
+        try {
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔍 Extracting master trader's slippage for ${dexPlatform}...`);
+            
+            // Find the real DEX instruction in the transaction
+            const realDexInstruction = this._findRealDexInstruction(normalizedTx, dexPlatform);
+            if (!realDexInstruction) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ No DEX instruction found for ${dexPlatform}, using default slippage`);
+                return null; // Will fall back to default
+            }
+            
+            // Decode the instruction data using the appropriate Borsh schema
+            const decodedArgs = this._decodeDexInstruction(realDexInstruction, dexPlatform);
+            if (!decodedArgs) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Failed to decode instruction for ${dexPlatform}, using default slippage`);
+                return null;
+            }
+            
+            // Calculate slippage from the decoded arguments
+            const slippageBps = this._calculateSlippageBps(decodedArgs, layer4Result);
+            if (slippageBps !== null) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ✅ Master trader's slippage: ${slippageBps} bps (${(slippageBps/100).toFixed(2)}%)`);
+                return slippageBps;
+            }
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Could not calculate slippage for ${dexPlatform}, using default`);
+            return null;
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error extracting slippage: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Find the real DEX instruction in the transaction
+     */
+    _findRealDexInstruction(normalizedTx, dexPlatform) {
+        try {
+            // ==========================================================
+            // ==================== THE FINAL FIX =======================
+            // ==========================================================
+            // The detective must search the BASEMENT (inner instructions) first,
+            // as this is where the real action happens when routers are involved.
+
+            if (normalizedTx.innerInstructions && normalizedTx.innerInstructions.length > 0) {
+                for (const innerIx of normalizedTx.innerInstructions) {
+                    for (const instruction of innerIx.instructions) {
+                        const programId = normalizedTx.accountKeys[instruction.programIdIndex];
+                        if (this._isDexProgram(programId, dexPlatform)) {
+                            this.logInfo(`[SLIPPAGE-DETECTIVE] ✅ Found real DEX instruction in INNER instructions.`);
+                            return instruction;
+                        }
+                    }
+                }
+            }
+            
+            // As a fallback, we can still check the top-level for direct calls.
+            for (const instruction of normalizedTx.instructions) {
+                const programId = normalizedTx.accountKeys[instruction.programIdIndex];
+                if (this._isDexProgram(programId, dexPlatform)) {
+                    this.logInfo(`[SLIPPAGE-DETECTIVE] ✅ Found real DEX instruction in TOP-LEVEL instructions.`);
+                    return instruction;
+                }
+            }
+            // ==========================================================
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ No DEX instruction found for ${dexPlatform} in either inner or top-level instructions.`);
+            return null;
+
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error finding DEX instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Check if a program ID matches the DEX platform
+     */
+    _isDexProgram(programId, dexPlatform) {
+        try {
+            // Map platform names to config keys
+            const platformMapping = {
+                'PUMPFUN': 'PUMP_FUN',
+                'RAYDIUMCPMM': 'RAYDIUM_CPMM',
+                'RAYDIUMV4': 'RAYDIUM_V4',
+                'RAYDIUMCLMM': 'RAYDIUM_CLMM',
+                'METEORA': 'METEORA_DLMM',
+                'ORCA': 'WHIRLPOOL'
+            };
+            
+            const configKey = platformMapping[dexPlatform] || dexPlatform;
+            const dexPrograms = config.DEX_PROGRAM_IDS[configKey];
+            
+            if (!dexPrograms) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ No DEX programs found for ${dexPlatform} (mapped to ${configKey})`);
+                return false;
+            }
+            
+            const programIdStr = programId.toString();
+            
+            // ==========================================================
+            // ==================== THE FINAL FIX =======================
+            // ==========================================================
+            // For PumpFun, check against ALL known PumpFun program IDs
+            if (dexPlatform === 'PUMPFUN') {
+                const pumpFunIds = [
+                    config.DEX_PROGRAM_IDS.PUMP_FUN.toBase58(),
+                    config.DEX_PROGRAM_IDS.PUMP_FUN_AMM.toBase58(),
+                    config.DEX_PROGRAM_IDS.PUMP_FUN_V2.toBase58()
+                ];
+                
+                const isMatch = pumpFunIds.includes(programIdStr);
+                if (isMatch) {
+                    this.logInfo(`[SLIPPAGE-DETECTIVE] ✅ Found matching PumpFun program: ${programIdStr} for ${dexPlatform}`);
+                }
+                return isMatch;
+            }
+            // ==========================================================
+            
+            // Standard check for other DEXes
+            const idsToCheck = Array.isArray(dexPrograms) ? dexPrograms.map(pk => pk.toBase58()) : [dexPrograms.toBase58()];
+            
+            const isMatch = idsToCheck.includes(programIdStr);
+            if (isMatch) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ✅ Found matching DEX program: ${programIdStr} for ${dexPlatform}`);
+            }
+            
+            return isMatch;
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error checking DEX program: ${error.message}`);
+            return false;
+        }
+    }
+
+    /**
+     * Decode DEX instruction using appropriate Borsh schema
+     */
+    _decodeDexInstruction(instruction, dexPlatform) {
+        try {
+            if (!instruction.data || instruction.data.length === 0) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ No instruction data for ${dexPlatform}`);
+                return null;
+            }
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Decoding ${dexPlatform} instruction (${instruction.data.length} bytes)`);
+            
+            // Handle different DEX platforms with their specific instruction formats
+            switch (dexPlatform) {
+                case 'PUMPFUN':
+                    return this._decodePumpFunInstruction(instruction);
+                case 'RAYDIUMCPMM':
+                case 'RAYDIUMV4':
+                case 'RAYDIUMCLMM':
+                    return this._decodeRaydiumInstruction(instruction);
+                case 'METEORA':
+                    return this._decodeMeteoraInstruction(instruction);
+                case 'ORCA':
+                    return this._decodeOrcaInstruction(instruction);
+                default:
+                    this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Unknown DEX platform: ${dexPlatform}, using generic decoding`);
+                    return this._decodeGenericInstruction(instruction);
+            }
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Decode PumpFun instruction (Buy/Sell)
+     */
+    _decodePumpFunInstruction(instruction) {
+        try {
+            const data = instruction.data;
+            if (data.length < 8) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ PumpFun instruction too short: ${data.length} bytes`);
+                return null;
+            }
+            
+            // PumpFun instruction format (simplified):
+            // Bytes 0-7: Discriminator (8 bytes)
+            // Bytes 8-15: amount (u64) - tokens to buy/sell
+            // Bytes 16-23: maxSolCost (u64) - max SOL willing to spend
+            
+            const discriminator = data.readUInt8(0);
+            const amount = data.readBigUInt64LE(8);
+            const maxSolCost = data.readBigUInt64LE(16);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 PumpFun decoded: discriminator=${discriminator}, amount=${amount}, maxSolCost=${maxSolCost}`);
+            
+            return {
+                amountIn: Number(amount),
+                minimumAmountOut: Number(maxSolCost), // For PumpFun, this is the max SOL cost
+                discriminator: discriminator
+            };
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding PumpFun instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Decode Raydium instruction
+     */
+    _decodeRaydiumInstruction(instruction) {
+        try {
+            const data = instruction.data;
+            if (data.length < 17) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Raydium instruction too short: ${data.length} bytes`);
+                return null;
+            }
+            
+            // Raydium instruction format:
+            // Byte 0: Discriminator (u8)
+            // Bytes 1-8: amountIn (u64)
+            // Bytes 9-16: minimumAmountOut (u64)
+            
+            const discriminator = data.readUInt8(0);
+            const amountIn = data.readBigUInt64LE(1);
+            const minimumAmountOut = data.readBigUInt64LE(9);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Raydium decoded: discriminator=${discriminator}, amountIn=${amountIn}, minimumAmountOut=${minimumAmountOut}`);
+            
+            return {
+                amountIn: Number(amountIn),
+                minimumAmountOut: Number(minimumAmountOut),
+                discriminator: discriminator
+            };
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Raydium instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Decode Meteora instruction
+     */
+    _decodeMeteoraInstruction(instruction) {
+        try {
+            // Meteora has different instruction formats, using generic approach for now
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Meteora instruction decoding (placeholder)`);
+            return this._decodeGenericInstruction(instruction);
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Meteora instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Decode Orca instruction
+     */
+    _decodeOrcaInstruction(instruction) {
+        try {
+            // Orca has complex instruction formats, using generic approach for now
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Orca instruction decoding (placeholder)`);
+            return this._decodeGenericInstruction(instruction);
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Orca instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Generic instruction decoding (fallback)
+     */
+    _decodeGenericInstruction(instruction) {
+        try {
+            const data = instruction.data;
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Generic decoding for ${data.length} bytes`);
+            
+            // Try to extract basic information
+            if (data.length >= 8) {
+                const firstByte = data.readUInt8(0);
+                return {
+                    amountIn: 0, // Unknown format
+                    minimumAmountOut: 0, // Unknown format
+                    discriminator: firstByte
+                };
+            }
+            
+            return null;
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error in generic decoding: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Calculate slippage in basis points from decoded instruction arguments
+     */
+    _calculateSlippageBps(decodedArgs, layer4Result) {
+        try {
+            if (!decodedArgs.amountIn || !decodedArgs.minimumAmountOut) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Missing amountIn or minimumAmountOut`);
+                return null;
+            }
+            
+            // For PumpFun, the slippage calculation is different
+            // PumpFun uses maxSolCost as the maximum SOL willing to spend
+            // We can estimate slippage based on the ratio of expected vs actual cost
+            if (decodedArgs.discriminator !== undefined) {
+                // This is likely a PumpFun instruction
+                return this._calculatePumpFunSlippage(decodedArgs, layer4Result);
+            }
+            
+            // Standard slippage calculation for other DEXes
+            const slippagePercent = ((decodedArgs.amountIn - decodedArgs.minimumAmountOut) / decodedArgs.amountIn) * 100;
+            const slippageBps = Math.round(slippagePercent * 100); // Convert to basis points
+            
+            // Sanity check: slippage should be reasonable (0-50%)
+            if (slippageBps < 0 || slippageBps > 5000) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Unreasonable slippage: ${slippageBps} bps, using default`);
+                return null;
+            }
+            
+            return slippageBps;
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error calculating slippage: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Calculate PumpFun-specific slippage
+     */
+    _calculatePumpFunSlippage(decodedArgs, layer4Result) {
+        try {
+            // For PumpFun, we estimate slippage based on the maxSolCost vs actual SOL change
+            const actualSolChange = Math.abs(layer4Result.solChange || 0);
+            const maxSolCost = decodedArgs.minimumAmountOut; // This is maxSolCost for PumpFun
+            
+            if (actualSolChange === 0 || maxSolCost === 0) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Cannot calculate PumpFun slippage: actualSolChange=${actualSolChange}, maxSolCost=${maxSolCost}`);
+                return null;
+            }
+            
+            // Calculate slippage as the difference between max cost and actual cost
+            const slippagePercent = ((maxSolCost - actualSolChange) / maxSolCost) * 100;
+            const slippageBps = Math.round(slippagePercent * 100);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 PumpFun slippage: maxSolCost=${maxSolCost}, actualSolChange=${actualSolChange}, slippage=${slippageBps} bps`);
+            
+            // Sanity check: slippage should be reasonable (0-50%)
+            if (slippageBps < 0 || slippageBps > 5000) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Unreasonable PumpFun slippage: ${slippageBps} bps, using default`);
+                return null;
+            }
+            
+            return slippageBps;
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error calculating PumpFun slippage: ${error.message}`);
+            return null;
         }
     }
 
@@ -857,6 +1297,7 @@ class TraderMonitorWorker extends BaseWorker {
                     isValid: true,
                     inputMint: inputMint,
                     outputMint: outputMint,
+                    solChange: solChange,
                     reason: `Economic activity confirmed: SOL change: ${solChange} lamports, Token changes: ${hasSignificantTokenChange}`
                 };
             }
@@ -912,7 +1353,7 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     /**
-     * Identify platform from program ID
+     * Identify platform from program ID with Router vs DEX distinction
      */
     _identifyPlatform(programId) {
         const programIdStr = programId.toString();
@@ -920,21 +1361,34 @@ class TraderMonitorWorker extends BaseWorker {
         // DEBUG: Log the program ID being identified
         this.logInfo(`[DEBUG] Identifying platform for program ID: ${programIdStr}`);
         
-        // Check against known platform IDs (EXACT MATCHES ONLY)
-        for (const [platform, id] of Object.entries(config.PLATFORM_IDS)) {
-            if (Array.isArray(id)) {
-                if (id.some(pk => pk.toBase58() === programIdStr)) {
-                    this.logInfo(`[DEBUG] Found exact match: ${platform} for ${programIdStr}`);
-                    return platform;
+        // ====== STEP 1: Check if it's a ROUTER (Aggregator) ======
+        for (const [routerName, routerId] of Object.entries(config.ROUTER_PROGRAM_IDS)) {
+            if (Array.isArray(routerId)) {
+                if (routerId.some(pk => pk.toBase58() === programIdStr)) {
+                    this.logInfo(`[DEBUG] 🛣️  ROUTER detected: ${routerName} for ${programIdStr}`);
+                    return `Router:${routerName}`; // Mark as router
                 }
-            } else if (id.toBase58() === programIdStr) {
-                this.logInfo(`[DEBUG] Found exact match: ${platform} for ${programIdStr}`);
-                return platform;
+            } else if (routerId.toBase58() === programIdStr) {
+                this.logInfo(`[DEBUG] 🛣️  ROUTER detected: ${routerName} for ${programIdStr}`);
+                return `Router:${routerName}`; // Mark as router
             }
         }
         
-        // NO STRING MATCHING - Only exact matches from config
-        this.logInfo(`[DEBUG] No exact match found for ${programIdStr}`);
+        // ====== STEP 2: Check if it's a REAL DEX ======
+        for (const [dexName, dexId] of Object.entries(config.DEX_PROGRAM_IDS)) {
+            if (Array.isArray(dexId)) {
+                if (dexId.some(pk => pk.toBase58() === programIdStr)) {
+                    this.logInfo(`[DEBUG] 🏢 REAL DEX detected: ${dexName} for ${programIdStr}`);
+                    return dexName; // Real DEX platform
+                }
+            } else if (dexId.toBase58() === programIdStr) {
+                this.logInfo(`[DEBUG] 🏢 REAL DEX detected: ${dexName} for ${programIdStr}`);
+                return dexName; // Real DEX platform
+            }
+        }
+        
+        // NO MATCH FOUND
+        this.logInfo(`[DEBUG] ❌ No match found for ${programIdStr}`);
         return 'Unknown';
     }
 
@@ -1044,25 +1498,29 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     /**
-     * Identify router programs in the transaction
+     * Identify router programs in the transaction using new config structure
      */
     _identifyRouterPrograms(normalizedTx) {
         const routerPrograms = [];
         
-        // Known router program IDs
-        const knownRouters = [
-            'JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5', // Jupiter V4
-            'JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', // Jupiter V6
-            'routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS', // Jupiter AMM Routing
-            'BSfDmrRWQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM', // Photon Router
-            'So11111111111111111111111111111111111111112' // System Program (sometimes used as router)
-        ];
+        // Get all router program IDs from config
+        const knownRouters = [];
+        for (const [routerName, routerId] of Object.entries(config.ROUTER_PROGRAM_IDS)) {
+            if (Array.isArray(routerId)) {
+                knownRouters.push(...routerId.map(id => id.toBase58()));
+            } else {
+                knownRouters.push(routerId.toBase58());
+            }
+        }
+        
+        this.logInfo(`[ROUTER-DETECTION] 🔍 Checking against ${knownRouters.length} known routers`);
         
         // Check main instructions
         for (const instruction of normalizedTx.instructions) {
             const programId = normalizedTx.accountKeys[instruction.programIdIndex];
             if (knownRouters.includes(programId)) {
                 routerPrograms.push(programId);
+                this.logInfo(`[ROUTER-DETECTION] 🛣️  Router found in instruction: ${programId}`);
             }
         }
         
@@ -1070,6 +1528,7 @@ class TraderMonitorWorker extends BaseWorker {
         for (const accountKey of normalizedTx.accountKeys) {
             if (knownRouters.includes(accountKey) && !routerPrograms.includes(accountKey)) {
                 routerPrograms.push(accountKey);
+                this.logInfo(`[ROUTER-DETECTION] 🛣️  Router found in accounts: ${accountKey}`);
             }
         }
         
@@ -1077,15 +1536,28 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     /**
-     * Find inner DEX programs in the transaction
+     * Find inner DEX programs in the transaction using new config structure
      */
     _findInnerDexPrograms(normalizedTx, knownDexPrograms) {
         const innerDexPrograms = [];
         
+        // Get all DEX program IDs from config
+        const knownDexIds = [];
+        for (const [dexName, dexId] of Object.entries(config.DEX_PROGRAM_IDS)) {
+            if (Array.isArray(dexId)) {
+                knownDexIds.push(...dexId.map(id => id.toBase58()));
+            } else {
+                knownDexIds.push(dexId.toBase58());
+            }
+        }
+        
+        this.logInfo(`[DEX-DETECTION] 🔍 Checking against ${knownDexIds.length} known DEX programs`);
+        
         // Check all account keys for known DEX programs
         for (const accountKey of normalizedTx.accountKeys) {
-            if (knownDexPrograms.has(accountKey)) {
+            if (knownDexIds.includes(accountKey)) {
                 innerDexPrograms.push(accountKey);
+                this.logInfo(`[DEX-DETECTION] 🏢 Real DEX found: ${accountKey}`);
             }
         }
         
@@ -1195,29 +1667,94 @@ class TraderMonitorWorker extends BaseWorker {
     // ====== HANDLE TRADER ACTIVITY (v9 - WITH SMART GATEKEEPER) ============
     // =======================================================================
     
-    async handleTraderActivity(sourceWallet, signature, transactionUpdate) {
-        // 🔧 FIX: Add timeout wrapper to prevent getting stuck
-        const ACTIVITY_TIMEOUT = 15000; // 15 seconds total timeout
-        
+    // =======================================================================
+    // ====== UNIFIED TRANSACTION HANDLER (DEBUGGING + ANALYSIS) ============
+    // =======================================================================
+    async handleUnifiedTransaction(sourceWallet, signature, transactionUpdate) {
         try {
-            const activityPromise = this._processTraderActivity(sourceWallet, signature, transactionUpdate);
-            const timeoutPromise = new Promise((_, reject) => 
-                setTimeout(() => reject(new Error('Trader activity processing timeout')), ACTIVITY_TIMEOUT)
-            );
+            console.log(`[MONITOR-BRAIN] 🧠 Analyzing transaction... Sig: ${shortenAddress(signature)}`);
             
-            await Promise.race([activityPromise, timeoutPromise]);
-        } catch (error) {
-            if (error.message.includes('timeout')) {
-                this.logWarn(`[MONITOR] ⏰ Trader activity processing timed out for ${signature}`);
-                return;
+            // --- PART 1: Rich Debugging (from handleRawTransaction) ---
+            const coreTx = this.getCoreTransaction(transactionUpdate.transaction);
+            if (!coreTx || !coreTx.meta || !coreTx.message || coreTx.meta.err) {
+                this.logInfo(`[MONITOR-BRAIN] ⏭️ Transaction is malformed or failed. Ignoring.`);
+                return; 
             }
-            throw error;
+
+            // Rich transaction structure logging
+            this.logInfo(`[RAW-TX] 📊 SERIALIZED PARSED DATA:`);
+            this.logInfo(`[RAW-TX] 📊 preTokenBalances: [ ${coreTx.meta?.preTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 postTokenBalances: [ ${coreTx.meta?.postTokenBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 preBalances: [ ${coreTx.meta?.preBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 postBalances: [ ${coreTx.meta?.postBalances?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 logMessages: [ ${coreTx.meta?.logMessages?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 accountKeys: [ ${coreTx.message?.accountKeys?.length || 0} items ]`);
+            this.logInfo(`[RAW-TX] 📊 instructions: [ ${coreTx.message?.instructions?.length || 0} items ]`);
+            
+            // --- PART 2: Deep Analysis (from _processTraderActivity) ---
+            const analysisResult = await this._processTraderActivity(sourceWallet, signature, transactionUpdate);
+
+            // --- PART 3: Final Decision (from handleTraderActivity) ---
+            if (analysisResult && analysisResult.isCopyable) {
+                
+                const traderName = await this.getTraderNameFromWallet(sourceWallet);
+                const platform = analysisResult.swapDetails?.platform || 'Unknown';
+                const router = analysisResult.swapDetails?.router || 'Direct';
+                
+                console.log(`🚀 FORWARDING COPY TRADE from monitor to executor:`);
+                console.log(`   🕺 Trader: ${traderName} (${shortenAddress(sourceWallet)})`);
+                console.log(`   ✒️ Signature: ${shortenAddress(signature)}`);
+                console.log(`   🏢 DEX: ${platform}`);
+                console.log(`   🛣️  Router: ${router}`);
+                console.log(`[MONITOR-BRAIN] ✅ Analysis complete. Target: ${platform}. Queuing execution.`);
+                
+                // ==========================================================
+                // ==================== THE FINAL FIX =======================
+                // ==========================================================
+                // We create a PURIFIED, 100% JSON-safe message.
+                // We manually copy ONLY the data we need. This strips away
+                // all the dangerous, complex protobuf objects.
+                const messagePayload = {
+                    traderWallet: sourceWallet,
+                    traderName: traderName,
+                    signature: signature,
+                    analysisResult: {
+                        isCopyable: analysisResult.isCopyable,
+                        swapDetails: {
+                            platform: analysisResult.swapDetails.platform,
+                            router: analysisResult.swapDetails.router,
+                            tradeType: analysisResult.swapDetails.tradeType,
+                            inputMint: analysisResult.swapDetails.inputMint,
+                            outputMint: analysisResult.swapDetails.outputMint,
+                            traderPubkey: analysisResult.swapDetails.traderPubkey,
+                            originalAmount: analysisResult.swapDetails.originalAmount, // This is a number
+                            inputAmount: analysisResult.swapDetails.inputAmount, // This is a number
+                            requiresATACreation: analysisResult.swapDetails.requiresATACreation,
+                            requiresPDARecovery: analysisResult.swapDetails.requiresPDARecovery,
+                            masterTraderSlippageBps: analysisResult.swapDetails.masterTraderSlippageBps, // This is a number
+                        },
+                        summary: analysisResult.summary, // This is a string
+                        reason: analysisResult.reason, // This is a string
+                    }
+                };
+                
+                console.log(`🚀 FORWARDING PURIFIED COPY TRADE to executor...`);
+                this.signalMessage('EXECUTE_COPY_TRADE', messagePayload);
+                // ==========================================================
+
+            } else {
+                console.log(`[MONITOR-BRAIN] ⏭️ Transaction did not pass analysis. Ignoring.`);
+            }
+
+        } catch (error) {
+            this.logError('❌ Error in Unified Transaction Handler:', { error: error.message, stack: error.stack });
         }
     }
     
     async _processTraderActivity(sourceWallet, signature, transactionUpdate) {
         try {
-            const signatureString = bs58.encode(new Uint8Array(signature));
+            // Signature is already base58 encoded from laserstreamManager
+            const signatureString = signature;
             const coreTx = this.getCoreTransaction(transactionUpdate.transaction);
 
             if (!coreTx || !coreTx.meta || !coreTx.message || coreTx.meta.err) {
@@ -1262,6 +1799,7 @@ class TraderMonitorWorker extends BaseWorker {
                 blockTime: transactionUpdate.blockTime,
                 logMessages: coreTx.meta.logMessages || [],
                 instructions: coreTx.message.instructions || [],
+                innerInstructions: coreTx.meta.innerInstructions || [], // 🎯 THE ALPHA: Include inner instructions for Slippage Detective
                 accountKeys: fullAccountListStrings, // Use the complete list
                 preBalances: coreTx.meta.preBalances || [],
                 postBalances: coreTx.meta.postBalances || [],
@@ -1349,22 +1887,15 @@ class TraderMonitorWorker extends BaseWorker {
             // PERFORM ANALYSIS IN MONITOR (as originally designed)
             const analysisResult = this._isPotentiallyATrade(normalizedTx, sourceWallet, this.knownDexPrograms);
             
-            // 🔍 DEBUG: Log what we're sending to the executor
-            console.log(`[MONITOR-DEBUG] 🔍 Sending EXECUTE_COPY_TRADE message:`);
-            console.log(`[MONITOR-DEBUG] 🔍 Trader: ${sourceWallet}`);
-            console.log(`[MONITOR-DEBUG] 🔍 Signature: ${signatureString}`);
-            console.log(`[MONITOR-DEBUG] 🔍 Normalized TX accounts: ${normalizedTx.accountKeys.length}`);
-            console.log(`[MONITOR-DEBUG] 🔍 Normalized TX instructions: ${normalizedTx.instructions.length}`);
-            console.log(`[MONITOR-DEBUG] 🔍 Analysis result: ${analysisResult}`);
+            // ================================================================
+            // ======================== THE FIX ===============================
+            // ================================================================
+            // The Analyst's ONLY job is to return its findings.
+            // It does NOT send any messages itself.
+            // DELETE all the `signalMessage` and `MONITOR-DEBUG` logs from this function.
             
-            this.signalMessage('EXECUTE_COPY_TRADE', {
-                traderWallet: sourceWallet,
-                traderName: traderName, // <-- ADD TRADER NAME
-                signature: signatureString,
-                normalizedTransaction: normalizedTx,
-                analysisResult: analysisResult // <-- THE CRITICAL FIX
-            });
-            // ======================================================================
+            return analysisResult; // <-- The most important line.
+            // ================================================================
             
         } catch (error) {
             const sigForError = (typeof signature !== 'undefined' && signature) ? bs58.encode(signature) : 'unknown_sig';
@@ -1471,249 +2002,7 @@ class TraderMonitorWorker extends BaseWorker {
         }, 2 * 60 * 1000); // every 2 minutes
     }
 
-    // Handle raw transaction data for cloning
-    async handleRawTransaction(transactionData) {
-        try {
-            this.logInfo(`[RAW-TX] 📡 Processing raw transaction from LaserStream`);
-            
-            // Get the raw transaction data
-            const rawTransaction = transactionData.rawTransaction;
-            
-            if (!rawTransaction) {
-                this.logWarn('[RAW-TX] ⚠️ No raw transaction data received');
-                return;
-            }
-
-            // Log transaction detection
-            this.logInfo(`[RAW-TX] ✅ Raw transaction detected and ready for cloning`);
-            
-            // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
-            this.logInfo(`[RAW-TX] 📊 SERIALIZED PARSED DATA:`);
-            this.logInfo(`[RAW-TX] 📊 preTokenBalances: [ ${rawTransaction.meta?.preTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 postTokenBalances: [ ${rawTransaction.meta?.postTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 preBalances: [ ${rawTransaction.meta?.preBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 postBalances: [ ${rawTransaction.meta?.postBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 logMessages: [ ${rawTransaction.meta?.logMessages?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 innerInstructions: [ ${rawTransaction.meta?.innerInstructions?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 accountKeys: [ ${rawTransaction.transaction?.message?.accountKeys?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 instructions: [ ${rawTransaction.transaction?.message?.instructions?.length || 0} items ]`);
-            
-            // ===== DETAILED TOKEN BALANCE STRUCTURE =====
-            if (rawTransaction.meta?.preTokenBalances && rawTransaction.meta.preTokenBalances.length > 0) {
-                this.logInfo(`[RAW-TX] 📊 preTokenBalances structure:`, JSON.stringify(rawTransaction.meta.preTokenBalances, null, 2));
-            }
-            if (rawTransaction.meta?.postTokenBalances && rawTransaction.meta.postTokenBalances.length > 0) {
-                this.logInfo(`[RAW-TX] 📊 postTokenBalances structure:`, JSON.stringify(rawTransaction.meta.postTokenBalances, null, 2));
-            }
-            
-            // ===== DETAILED TRANSACTION STRUCTURE =====
-            this.logInfo(`[RAW-TX] 📊 Transaction structure:`);
-            this.logInfo(`[RAW-TX] 📊 hasTransaction: ${!!rawTransaction}`);
-            this.logInfo(`[RAW-TX] 📊 hasMeta: ${!!rawTransaction.meta}`);
-            this.logInfo(`[RAW-TX] 📊 transaction keys: ${rawTransaction ? Object.keys(rawTransaction).join(', ') : 'none'}`);
-            this.logInfo(`[RAW-TX] 📊 meta keys: ${rawTransaction.meta ? Object.keys(rawTransaction.meta).join(', ') : 'none'}`);
-            
-            // ===== FULL RAW TRANSACTION STRUCTURE =====
-            this.logInfo(`[RAW-TX] 📊 Full raw transaction structure:`, JSON.stringify(rawTransaction, null, 2));
-            
-            // Save raw transaction data for debugging
-            if (this.transactionLogger && transactionData.signature) {
-                try {
-                    const debugData = {
-                        signature: transactionData.signature,
-                        timestamp: new Date().toISOString(),
-                        rawTransaction: rawTransaction,
-                        accountKeys: transactionData.accountKeys,
-                        dexPrograms: transactionData.dexPrograms,
-                        source: transactionData.source,
-                        programIds: transactionData.programIds
-                    };
-                    
-                    this.transactionLogger.logTransactionAnalysis(transactionData.signature, debugData);
-                    this.logInfo(`[RAW-TX] 💾 Transaction saved for debugging: ${transactionData.signature}`);
-                } catch (saveError) {
-                    this.logWarn('[RAW-TX] ⚠️ Failed to save transaction for debugging:', saveError.message);
-                }
-            }
-            
-            // Update monitoring stats
-            this.monitoringStats.totalTransactions++;
-            
-            // Send to universal analyzer for processing (if available)
-            let analysisResult = null;
-            // ======================================================================
-            // ===================== DIRECT COPY LOGIC (NO DEBRIDGE) ==============
-            // ======================================================================
-            try {
-                // Find the trader wallet from the account keys (first monitored wallet found)
-                const traderWallet = transactionData.accountKeys?.find(key => 
-                    this.activeTraderWallets && this.activeTraderWallets.has(key)
-                ) || transactionData.source;
-                
-                // Extract analysis data from transactionData
-                const balanceAnalysis = transactionData.balanceAnalysis || { solChange: 0, tokenChanges: [] };
-                const platform = transactionData.platform || 'Jupiter';
-                const routerInfo = transactionData.routerInfo || [];
-                const classification = transactionData.classification || { type: 'DEX' };
-                const programIds = transactionData.programIds || [];
-                
-                // ✅ FIXED: Load user configuration for proper SOL amount injection
-                const userConfig = {
-                    scaleFactor: this.laserstreamManager.botConfig?.scaleFactor || 0.1,
-                    solAmount: this.laserstreamManager.botConfig?.minTransactionAmount || 0.1,
-                    slippageBps: 5000, // 0.5% default slippage
-                    maxSlippage: this.laserstreamManager.botConfig?.maxSlippage || 0.05
-                };
-                
-                this.logInfo(`[RAW-TX] 🔧 User config: Scale Factor: ${userConfig.scaleFactor}, SOL Amount: ${userConfig.solAmount}`);
-                
-                // ======================================================================
-                // ===================== DIRECT COPY LOGIC (NO DEBRIDGE) ==============
-                // ======================================================================
-                this.logInfo(`[DIRECT-COPY] 🚀 Using DIRECT copy logic`);
-                
-                // Extract token info from transaction data
-                this.logInfo(`[DIRECT-COPY] 🔧 Extracting token info from actual transaction data...`);
-                
-                // Extract input/output mints from the actual transaction
-                let inputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
-                let outputMint = 'So11111111111111111111111111111111111111112'; // Default to SOL
-                
-                // Extract from transaction data
-                if (rawTransaction && rawTransaction.meta && rawTransaction.meta.postTokenBalances) {
-                    const tokenBalances = rawTransaction.meta.postTokenBalances;
-                    this.logInfo(`[DIRECT-COPY] 🔍 Found ${tokenBalances.length} token balances in transaction`);
-                    
-                    // Find the most significant token change
-                    let maxChange = 0;
-                    let significantToken = null;
-                    
-                    for (const balance of tokenBalances) {
-                        if (balance.uiTokenAmount && Math.abs(balance.uiTokenAmount.amount) > maxChange) {
-                            maxChange = Math.abs(balance.uiTokenAmount.amount);
-                            significantToken = balance;
-                        }
-                    }
-                    
-                    if (significantToken && significantToken.mint) {
-                        outputMint = significantToken.mint;
-                        this.logInfo(`[DIRECT-COPY] 🎯 Found significant token: ${significantToken.mint}`);
-                    }
-                }
-                
-                // Calculate scaled input amount
-                const originalSolAmount = Math.abs(balanceAnalysis.solChange) * 1e9; // SOL change in lamports
-                const scaledInputAmount = Math.floor(originalSolAmount * userConfig.scaleFactor); 
-                
-                analysisResult = {
-                    isCopyable: true,
-                    swapDetails: {
-                        platform: platform || 'Jupiter', // Use detected platform
-                        inputMint: inputMint,
-                        outputMint: outputMint,
-                        inputAmount: scaledInputAmount, // Scaled amount in lamports
-                        outputAmount: 0,
-                        scaleFactor: userConfig.scaleFactor,
-                        originalAmount: Math.abs(balanceAnalysis.solChange),
-                        scaledAmount: Math.abs(balanceAnalysis.solChange) * userConfig.scaleFactor,
-                        isPrivateRouter: this.isPrivateRouter(platform),
-                        requiresATACreation: outputMint !== inputMint,
-                        requiresPDARecovery: platform === 'PumpFun' || platform === 'Raydium',
-                        routerUsed: routerInfo?.length > 0 ? routerInfo[0] : null,
-                        routerId: undefined,
-                        transactionType: classification?.type || 'DEX',
-                        realDexProgramId: classification?.programId || undefined
-                    },
-                    blueprint: {
-                        originalTransaction: rawTransaction,
-                        meta: rawTransaction.meta,
-                        programIds,
-                        routerInfo: routerInfo || [],
-                        accountMapping: {},
-                        classification: classification || { type: 'UNKNOWN' }
-                    },
-                    reason: 'Direct copy ',
-                    userConfig
-                };
-                
-                this.logInfo(`[DIRECT-COPY] ✅ Analysis: ${inputMint} → ${outputMint}, Original: ${Math.abs(balanceAnalysis.solChange)} SOL, Scaled: ${scaledInputAmount/1e9} SOL`);
-                
-                this.logInfo(`[DIRECT-COPY] ✅ Analysis completed: ${analysisResult?.isCopyable ? 'COPYABLE' : 'NOT COPYABLE'}`);
-                
-                // ======================================================================
-                // ================ DIRECT EXECUTOR CALL (NO CLONING) ==================
-                // ======================================================================
-                if (analysisResult && analysisResult.isCopyable) {
-                    this.logInfo(`[DIRECT-COPY] 🚀 Transaction is copyable! Proceeding to direct execution...`);
-                    
-                    // Send directly to executor - NO cloning needed!
-                    this.signalMessage('HANDLE_SMART_COPY', {
-                        traderWallet,
-                        traderName: await this.getTraderNameFromWallet(traderWallet), // <-- ADD TRADER NAME
-                        signature: rawTransaction.signature,
-                        analysisResult,
-                        originalTransaction: rawTransaction,
-                        meta: rawTransaction.meta,
-                        programIds,
-                        routerInfo: routerInfo || [],
-                        userConfig
-                    });
-                    
-                    this.logInfo(`[DIRECT-COPY] ✅ Smart copy message sent to executor `);
-                } else {
-                    this.logInfo(`[DIRECT-COPY] ⏭️ Transaction not copyable: ${analysisResult?.reason || 'Unknown reason'}`);
-                }
-                
-                // Save analysis result for debugging
-                if (this.transactionLogger && transactionData.signature && analysisResult) {
-                    try {
-                        this.transactionLogger.logTransactionAnalysis(
-                            `${transactionData.signature}_analysis`, 
-                            {
-                                signature: transactionData.signature,
-                                timestamp: new Date().toISOString(),
-                                analysisResult: analysisResult,
-                                traderWallet: traderWallet,
-                                logType: 'analysis_result'
-                            }
-                        );
-                    } catch (analysisSaveError) {
-                        this.logWarn('[RAW-TX] ⚠️ Failed to save analysis result:', analysisSaveError.message);
-                    }
-                }
-            } catch (analyzerError) {
-                this.logWarn('[RAW-TX] ⚠️ Universal analyzer error:', analyzerError.message);
-            }
-            
-            // ======================================================================
-            // ================ DIRECT COPY LOGIC - NO CLONING LOGGER ==============
-            // ======================================================================
-            // Direct copy logic - no need for universal cloning logger
-            
-            try {
-                // Get trader name from wallet address
-                const traderName = await this.getTraderNameFromWallet(transactionData.source);
-                
-                // Send transaction to executor worker for processing (with pre-analyzed data!)
-                this.signalMessage('EXECUTE_COPY_TRADE', {
-                    rawTransaction: rawTransaction,
-                    timestamp: transactionData.timestamp,
-                    source: transactionData.source,
-                    traderName: traderName,
-                    traderWallet: transactionData.source,
-                    dexPrograms: transactionData.dexPrograms || [],
-                    signature: transactionData.signature,
-                    preFetchedTxData: rawTransaction, // Raw transaction data
-                    analysisResult: analysisResult // Pre-completed analysis results!
-                });
-                
-            } catch (error) {
-                this.logError('[RAW-TX] ❌ Error handling raw transaction:', error);
-            }
-        } catch (error) {
-            this.logError('[RAW-TX] ❌ Error handling raw transaction:', error);
-        }
-    }
+    // REMOVED: handleRawTransaction function - merged into handleUnifiedTransaction
     
     // Helper method to check if platform is a private router
     isPrivateRouter(platform) {

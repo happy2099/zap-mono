@@ -146,6 +146,7 @@ class LaserStreamManager extends EventEmitter {
         this.stream = null;
         this.activeTraderWallets = new Set();
         this.streamStatus = 'idle';
+        this.transactionNotificationCallback = null; // Callback for raw transaction notifications
         
         // 🔧 DUPLICATE DETECTION: Track processed signatures
         this.processedSignatures = new Set();
@@ -1120,268 +1121,65 @@ class LaserStreamManager extends EventEmitter {
 
             console.log("[LASERSTREAM-PRO] ✅ Using transaction subscription filtering. Connecting...");
 
-            // ✅ TRANSACTION SUBSCRIPTION CALLBACK
+            // ✅ TRANSACTION SUBSCRIPTION CALLBACK - DUMB PIPE ONLY
             const streamCallback = async (update) => {
                 try {
-                    console.log(`[LASERSTREAM-PRO] 📡 Received transaction update from LaserStream`);
+                    console.log(`[LASERSTREAM-PIPE] 📡 Received raw data packet from Helius.`);
                     
-                    // 1. Safety check: Ensure the update has transaction data
-                    if (typeof update !== 'object' || update === null) {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ Invalid update object - ignoring`);
-                        return;
+                    // 1. Basic validation: Does the update contain a transaction?
+                    if (!update || !update.transaction) {
+                        return; // Not a transaction update, ignore.
                     }
-                    
-                    // Check if it's a transaction update (more flexible)
-                    if (!update.transaction) {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ No transaction data in update - ignoring`);
-                        return;
-                    }
-                    
+
                     const transactionUpdate = update.transaction;
-                    const transaction = transactionUpdate.transaction;
-                    const meta = transaction.meta; // Meta is inside transaction.transaction.meta
+                    const signature = bs58.encode(transactionUpdate.transaction.signature);
                     
-                    console.log(`[LASERSTREAM-PRO] 🔍 Transaction structure:`, {
-                        hasTransaction: !!transaction,
-                        hasMeta: !!meta,
-                        transactionKeys: transaction ? Object.keys(transaction) : [],
-                        metaKeys: meta ? Object.keys(meta) : [],
-                        fullUpdateStructure: JSON.stringify(update, null, 2)
-                    });
+                    // FIX: Proper wallet extraction from account keys (they are bytes in protobuf)
+                    const accountKeys = transactionUpdate.transaction.transaction.message.accountKeys;
+                    let sourceWallet = null;
                     
-                    // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
-                    console.log(`[LASERSTREAM-PRO] 📊 SERIALIZED PARSED DATA:`);
-                    console.log(`[LASERSTREAM-PRO] 📊 preTokenBalances:`, meta.preTokenBalances ? `[ ${meta.preTokenBalances.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 postTokenBalances:`, meta.postTokenBalances ? `[ ${meta.postTokenBalances.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 preBalances:`, meta.preBalances ? `[ ${meta.preBalances.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 postBalances:`, meta.postBalances ? `[ ${meta.postBalances.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 logMessages:`, meta.logMessages ? `[ ${meta.logMessages.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 innerInstructions:`, meta.innerInstructions ? `[ ${meta.innerInstructions.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 loadedWritableAddresses:`, meta.loadedWritableAddresses ? `[ ${meta.loadedWritableAddresses.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 loadedReadonlyAddresses:`, meta.loadedReadonlyAddresses ? `[ ${meta.loadedReadonlyAddresses.length} items ]` : 'null');
-                    console.log(`[LASERSTREAM-PRO] 📊 err:`, meta.err);
-                    console.log(`[LASERSTREAM-PRO] 📊 fee:`, meta.fee);
-                    console.log(`[LASERSTREAM-PRO] 📊 computeUnitsConsumed:`, meta.computeUnitsConsumed);
-                    console.log(`[LASERSTREAM-PRO] 📊 returnData:`, meta.returnData);
-                    console.log(`[LASERSTREAM-PRO] 📊 returnDataNone:`, meta.returnDataNone);
-                    console.log(`[LASERSTREAM-PRO] 📊 innerInstructionsNone:`, meta.innerInstructionsNone);
-                    console.log(`[LASERSTREAM-PRO] 📊 logMessagesNone:`, meta.logMessagesNone);
-                    
-                    // ===== DETAILED TOKEN BALANCE STRUCTURE =====
-                    if (meta.preTokenBalances && meta.preTokenBalances.length > 0) {
-                        console.log(`[LASERSTREAM-PRO] 📊 preTokenBalances structure:`, JSON.stringify(meta.preTokenBalances, null, 2));
-                    }
-                    if (meta.postTokenBalances && meta.postTokenBalances.length > 0) {
-                        console.log(`[LASERSTREAM-PRO] 📊 postTokenBalances structure:`, JSON.stringify(meta.postTokenBalances, null, 2));
+                    // Account keys are stored as bytes in the protobuf, need to convert to base58
+                    if (accountKeys && accountKeys.length > 0) {
+                        const firstKey = accountKeys[0];
+                        if (Buffer.isBuffer(firstKey)) {
+                            // Convert buffer to base58 string
+                            sourceWallet = bs58.encode(firstKey);
+                        } else if (firstKey && firstKey.pubkey) {
+                            sourceWallet = firstKey.pubkey.toString();
+                        } else if (typeof firstKey === 'string') {
+                            sourceWallet = firstKey;
+                        } else if (firstKey && typeof firstKey === 'object') {
+                            sourceWallet = firstKey.toString();
+                        }
                     }
                     
-                    // ===== DETAILED TRANSACTION STRUCTURE =====
-                    console.log(`[LASERSTREAM-PRO] 📊 Transaction structure:`);
-                    console.log(`[LASERSTREAM-PRO] 📊 hasTransaction: ${!!transaction}`);
-                    console.log(`[LASERSTREAM-PRO] 📊 hasMeta: ${!!meta}`);
-                    console.log(`[LASERSTREAM-PRO] 📊 transaction keys: ${transaction ? Object.keys(transaction).join(', ') : 'none'}`);
-                    console.log(`[LASERSTREAM-PRO] 📊 meta keys: ${meta ? Object.keys(meta).join(', ') : 'none'}`);
-                    
-                    // ===== FULL UPDATE STRUCTURE =====
-                    console.log(`[LASERSTREAM-PRO] 📊 Full update structure:`, JSON.stringify(update, null, 2));
-                    
-                    if (!transaction || !meta) {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ No transaction or meta data - ignoring`);
-                        return;
-                    }
-                    
-                    // 2. Decode transaction data
-                    const decodedTransaction = this.convertBuffers(transaction);
-                    const signature = decodedTransaction.signature;
-                    console.log(`[LASERSTREAM-PRO] 🔍 Processing transaction: ${shortenAddress(signature)}`);
-                    
-                    // 3. Get account keys from decoded transaction
-                    const accountKeys = decodedTransaction.transaction.message.accountKeys;
-                    console.log(`[LASERSTREAM-PRO] 🔍 Account keys: ${accountKeys.slice(0, 3).map(k => shortenAddress(k)).join(', ')}...`);
-                    
-                    // 4. Find which trader wallet is involved
-                    console.log(`[LASERSTREAM-PRO] 🔍 Active trader wallets: ${Array.from(this.activeTraderWallets).join(', ')}`);
-                    console.log(`[LASERSTREAM-PRO] 🔍 Account keys: ${accountKeys.join(', ')}`);
-                    const sourceWallet = accountKeys.find(key => this.activeTraderWallets.has(key));
-                    console.log(`[LASERSTREAM-PRO] 🔍 Found source wallet: ${sourceWallet}`);
                     if (!sourceWallet) {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ No trader wallet found in transaction - ignoring`);
+                        console.log(`[LASERSTREAM-PIPE] ⚠️ Could not extract source wallet from transaction`);
                         return;
                     }
 
-                    console.log(`[LASERSTREAM-PRO] ✅ Trader transaction detected: ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signature)}`);
-                    
-                    // 5. Analyze token balance changes
-                    const balanceAnalysis = this.analyzeTokenBalanceChanges(meta, accountKeys);
-                    console.log(`[LASERSTREAM-PRO] 🔍 Balance analysis:`, balanceAnalysis);
-                    
-                    // 6. Detect program IDs
-                    const programIds = this.detectProgramIds(decodedTransaction.transaction, accountKeys);
-                    console.log(`[LASERSTREAM-PRO] 🔍 Program IDs: ${programIds.map(id => shortenAddress(id)).join(', ')}`);
-                    console.log(`[LASERSTREAM-PRO] 🔍 Full Program IDs: ${programIds.join(', ')}`);
-                    
-                    // 7. Detect routers
-                    const routerInfo = this.detectRouterTransactions(programIds);
-                    console.log(`[LASERSTREAM-PRO] 🔍 Router detection:`, routerInfo);
-                    
-                    // 8. SMART CLASSIFICATION: Distinguish between routers and DEXes
-                    const classification = this._classifyTransactionStructure(
-                        programIds, 
-                        meta.logMessages || [], 
-                        meta.innerInstructions || []
-                    );
-                    
-                    console.log(`[LASERSTREAM-PRO] 🧠 Smart Classification:`, {
-                        type: classification.type,
-                        platform: classification.platform,
-                        programId: classification.programId,
-                        router: classification.router
-                    });
-                    
-                    let detectedPlatform = classification.platform;
-                    let routerName = classification.router;
-                    
-                    // 8.5. Handle different classification types
-                    if (classification.type === 'ROUTER_TO_DEX') {
-                        console.log(`[LASERSTREAM-PRO] 🔀 Router → DEX: ${classification.router} → ${classification.platform}`);
-                        console.log(`[LASERSTREAM-PRO] 🎯 Using DEX as platform: ${classification.platform}`);
-                    } else if (classification.type === 'DEX') {
-                        console.log(`[LASERSTREAM-PRO] ✅ Direct DEX transaction: ${classification.platform}`);
-                    } else if (classification.type === 'ROUTER_ONLY') {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ Router only: ${classification.router} (unknown target)`);
-                        detectedPlatform = 'Jupiter'; // Fallback to Jupiter
-                    } else {
-                        console.log(`[LASERSTREAM-PRO] ❓ Unknown transaction type, using fallback`);
-                        detectedPlatform = 'Jupiter'; // Fallback to Jupiter
+                    // DEBUG: Log wallet detection
+                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Source wallet: ${shortenAddress(sourceWallet)}`);
+                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Active wallets: ${Array.from(this.activeTraderWallets).map(w => shortenAddress(w)).join(', ')}`);
+                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Is monitored? ${this.activeTraderWallets.has(sourceWallet)}`);
+
+                    // Check if the source wallet is one we are monitoring.
+                    if (!this.activeTraderWallets.has(sourceWallet)) {
+                        console.log(`[LASERSTREAM-PIPE] ⏭️ Not from monitored trader: ${shortenAddress(sourceWallet)}`);
+                        return; // Not from a monitored trader, ignore.
                     }
+
+                    // 2. Its ONLY job is to emit the RAW, unprocessed transaction.
+                    // It does NOT do any analysis itself.
+                    console.log(`[LASERSTREAM-PIPE] ✅ Detected activity from monitored trader: ${shortenAddress(sourceWallet)}`);
                     
-                    // 9. SIMPLE COPY BOT: Just check if it's a significant trade
-                    console.log(`[LASERSTREAM-PRO] 🔍 Transaction detected: ${balanceAnalysis.solChange.toFixed(9)} SOL change`);
-                    
-                    // SMART FILTERING: Only process significant trading transactions
-                    const minSolChange = 0.1; // Minimum 0.1 SOL change (eliminates noise)
-                    const hasTokenChanges = balanceAnalysis.tokenChanges && balanceAnalysis.tokenChanges.length > 0;
-                    const isSignificantChange = Math.abs(balanceAnalysis.solChange) >= minSolChange;
-                    
-                    if (!isSignificantChange && !hasTokenChanges) {
-                        console.log(`[LASERSTREAM-PRO] ⏭️ Skipping insignificant transaction: ${balanceAnalysis.solChange.toFixed(9)} SOL, ${balanceAnalysis.tokenChanges.length} token changes`);
-                        return;
-                    }
-                    
-                    // Additional noise filtering: Skip if only system programs
-                    const systemPrograms = ['11111111111111111111111111111111', 'ComputeBudget111111111111111111111111111111'];
-                    const hasOnlySystemPrograms = programIds.every(id => systemPrograms.includes(id));
-                    if (hasOnlySystemPrograms) {
-                        console.log(`[LASERSTREAM-PRO] ⏭️ Skipping system-only transaction: ${programIds.join(', ')}`);
-                        return;
-                    }
-                    
-                    // NOISE FILTERING: Skip common non-trading activities
-                    const logMessages = meta.logMessages || [];
-                    const hasNonTradingLogs = logMessages.some(log => 
-                        log.includes('Vote') || 
-                        log.includes('Claim') || 
-                        log.includes('Stake') || 
-                        log.includes('Unstake') ||
-                        log.includes('Delegate') ||
-                        log.includes('Undelegate') ||
-                        log.includes('Withdraw') ||
-                        log.includes('Deposit') ||
-                        log.includes('Transfer') && !log.includes('Swap')
-                    );
-                    
-                    if (hasNonTradingLogs && !hasTokenChanges && Math.abs(balanceAnalysis.solChange) < 0.5) {
-                        console.log(`[LASERSTREAM-PRO] ⏭️ Skipping non-trading activity: ${logMessages.slice(0, 2).join(', ')}`);
-                        return;
-                    }
-                    
-                    console.log(`[LASERSTREAM-PRO] 🚀 Significant trade detected! Proceeding to copy...`);
-                    
-                    // 10. SMART COPY: Handle PDA/ATA reconstruction and private routers
-                    if (this.parentWorker && this.parentWorker.handleTraderActivity) {
-                        console.log(`[LASERSTREAM-PRO] 🔧 Smart copy mode for ${detectedPlatform}`);
-                        
-                        // Check for private router usage
-                        const isPrivateRouter = this._isPrivateRouter(programIds, routerInfo);
-                        if (isPrivateRouter) {
-                            console.log(`[LASERSTREAM-PRO] ⚠️ Private router detected, will use public alternative`);
-                        }
-                        
-                        // Create comprehensive analysis result for proper cloning
-                        const analysisResult = {
-                            isCopyable: true,
-                            swapDetails: {
-                                platform: detectedPlatform,
-                                inputMint: 'So11111111111111111111111111111111111111112', // SOL (will be detected properly)
-                                outputMint: this._extractOutputMint(balanceAnalysis, meta), // Extract from token changes
-                                inputAmount: Math.floor(Math.abs(balanceAnalysis.solChange) * (this.botConfig?.scaleFactor || 0.1) * 1e9),
-                                outputAmount: 0, // Will be calculated during cloning
-                                scaleFactor: this.botConfig?.scaleFactor || 0.1,
-                                originalAmount: balanceAnalysis.solChange,
-                                scaledAmount: balanceAnalysis.solChange * (this.botConfig?.scaleFactor || 0.1),
-                                isPrivateRouter: isPrivateRouter,
-                                requiresATACreation: this._requiresATACreation(balanceAnalysis),
-                                requiresPDARecovery: this._requiresPDARecovery(programIds),
-                                // NEW: Router information
-                                routerUsed: classification.router,
-                                routerId: classification.routerId,
-                                transactionType: classification.type,
-                                realDexProgramId: classification.programId
-                            },
-                            blueprint: {
-                                originalTransaction: decodedTransaction,
-                                meta: this.convertBuffers(meta),
-                                programIds: programIds,
-                                routerInfo: routerInfo,
-                                accountMapping: this._createAccountMapping(decodedTransaction, sourceWallet),
-                                // NEW: Classification details
-                                classification: classification
-                            },
-                            reason: 'Smart copy - PDA/ATA reconstruction with user configs'
-                        };
-                        
-                        // Get trader name for the wallet
-                        console.log(`[LASERSTREAM-PRO] 🔍 Source wallet before conversion: ${sourceWallet}`);
-                        // sourceWallet is already a string, no need to convert
-                        const traderWalletString = sourceWallet;
-                        console.log(`[LASERSTREAM-PRO] 🔍 Source wallet after conversion: ${traderWalletString}`);
-                        const traderName = await this.getTraderNameFromWallet(traderWalletString);
-                        
-                        // Send to Monitor Worker for proper handling
-                        console.log(`[LASERSTREAM-PRO] 🔍 Signature before encoding: ${signature} (type: ${typeof signature})`);
-                        console.log(`[LASERSTREAM-PRO] 🔍 Signature length: ${signature ? signature.length : 'undefined'}`);
-                        // Signature is already base58 encoded, don't encode it again!
-                        const encodedSignature = signature || 'Unknown';
-                        console.log(`[LASERSTREAM-PRO] 🔍 Using signature as-is: ${encodedSignature}`);
-                        console.log(`[LASERSTREAM-PRO] 🔍 Signature length: ${encodedSignature.length}`);
-                        console.log(`[LASERSTREAM-PRO] 🔍 Signature type: ${typeof encodedSignature}`);
-                        
-                        this.parentWorker.signalMessage('HANDLE_SMART_COPY', {
-                            traderWallet: traderWalletString,
-                            traderName: traderName, // <-- ADD TRADER NAME
-                            signature: encodedSignature,
-                            analysisResult: analysisResult,
-                            originalTransaction: decodedTransaction,
-                            meta: this.convertBuffers(meta),
-                            programIds: programIds,
-                            routerInfo: routerInfo,
-                            userConfig: {
-                                scaleFactor: this.botConfig?.scaleFactor || 0.1,
-                                slippage: this.botConfig?.maxSlippage || 0.05,
-                                platformPreferences: this.botConfig?.supportedPlatforms || ['PumpFun', 'Raydium', 'Jupiter']
-                            }
-                        });
-                        
-                        console.log(`[LASERSTREAM-PRO] ✅ Smart copy trade queued with PDA/ATA reconstruction`);
-                    } else {
-                        console.log(`[LASERSTREAM-PRO] ⚠️ No parent worker available for DeBridge analysis`);
+                    // Use the explicit callback set by the monitor.
+                    if (typeof this.transactionNotificationCallback === 'function') {
+                        this.transactionNotificationCallback(sourceWallet, signature, transactionUpdate);
                     }
 
                 } catch (handlerError) {
-                    console.error('❌❌ FATAL ERROR in LaserStream transaction callback ❌❌', {
-                        errorMessage: handlerError?.message || 'Unknown Error',
-                        errorStack: handlerError?.stack || 'No Stack'
-                    });
+                    console.error('❌ FATAL ERROR in LaserStream DATA PIPE', { errorMessage: handlerError.message });
                 }
             };
 

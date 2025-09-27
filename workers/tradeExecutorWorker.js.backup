@@ -5,7 +5,6 @@
 // Description: Executes trades in a separate thread
 
 const { workerData, parentPort } = require('worker_threads');
-const { PublicKey } = require('@solana/web3.js');
 const BaseWorker = require('./templates/baseWorker');
 const { DataManager } = require('../dataManager');
 const { SolanaManager } = require('../solanaManager');
@@ -15,9 +14,9 @@ const WalletManager = require('../walletManager');
 const { ApiManager } = require('../apiManager');
 const TradeNotificationManager = require('../tradeNotifications');
 const config = require('../config');
-const { shortenAddress } = require('../utils');
 
 // Direct transaction building imports
+const { PublicKey } = require('@solana/web3.js');
 const { 
     getAssociatedTokenAddressSync, 
     createAssociatedTokenAccountInstruction,
@@ -28,89 +27,6 @@ const {
 const borsh = require('borsh');
 const BN = require('bn.js');
 const { createHash } = require('crypto');
-
-// ======================================================================
-// ======================== ALL DEX SCHEMAS ============================
-// ======================================================================
-
-// Raydium Swap Instruction Payload Class
-class RaydiumSwapPayload {
-    constructor(properties) {
-        this.discriminator = 9; // Raydium swap discriminator
-        this.amountIn = properties.amountIn;
-        this.minimumAmountOut = properties.minimumAmountOut;
-    }
-}
-
-// PumpFun Buy Instruction Payload Class
-class PumpFunBuyPayload {
-    constructor(properties) {
-        this.amount = properties.amount;
-        this.maxSolCost = properties.maxSolCost;
-    }
-}
-
-// Meteora Swap Instruction Payload Class
-class MeteoraSwapPayload {
-    constructor(properties) {
-        this.discriminator = 0; // Meteora swap discriminator
-        this.amountIn = properties.amountIn;
-        this.minimumAmountOut = properties.minimumAmountOut;
-    }
-}
-
-// Orca Swap Instruction Payload Class
-class OrcaSwapPayload {
-    constructor(properties) {
-        this.discriminator = 0; // Orca swap discriminator
-        this.amountIn = properties.amountIn;
-        this.minimumAmountOut = properties.minimumAmountOut;
-    }
-}
-
-// Define the Borsh schema maps for all DEXes
-const RAYDIUM_SWAP_SCHEMA = new Map([
-    [RaydiumSwapPayload, { 
-        kind: 'struct', 
-        fields: [
-            ['discriminator', 'u8'],
-            ['amountIn', 'u64'],
-            ['minimumAmountOut', 'u64']
-        ] 
-    }]
-]);
-
-const PUMPFUN_BUY_SCHEMA = new Map([
-    [PumpFunBuyPayload, { 
-        kind: 'struct', 
-        fields: [
-            ['amount', 'u64'],
-            ['maxSolCost', 'u64']
-        ] 
-    }]
-]);
-
-const METEORA_SWAP_SCHEMA = new Map([
-    [MeteoraSwapPayload, { 
-        kind: 'struct', 
-        fields: [
-            ['discriminator', 'u8'],
-            ['amountIn', 'u64'],
-            ['minimumAmountOut', 'u64']
-        ] 
-    }]
-]);
-
-const ORCA_SWAP_SCHEMA = new Map([
-    [OrcaSwapPayload, { 
-        kind: 'struct', 
-        fields: [
-            ['discriminator', 'u8'],
-            ['amountIn', 'u64'],
-            ['minimumAmountOut', 'u64']
-        ] 
-    }]
-]);
 
 // Worker Manager Interface for communicating with main thread
 class WorkerManagerInterface {
@@ -217,410 +133,114 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-
-    // ===== JUPITER V6 API QUOTE =====
-    async _getJupiterQuote(inputMint, outputMint, inputAmountInLamports, masterTraderSlippageBps = null) {
-        try {
-            const heliusApiKey = process.env.HELIUS_API_KEY;
-            if (!heliusApiKey) {
-                throw new Error('HELIUS_API_KEY not found in environment variables');
-            }
-
-            // ==========================================================
-            // ==================== THE FINAL FIX =======================
-            // ==========================================================
-            // This is the correct, official, documented endpoint for the Helius Jupiter V6 API.
-            const quoteUrl = `https://api.helius.xyz/v0/quote?api-key=${heliusApiKey}`;
-            // ==========================================================
-            
-            // 🎯 THE ALPHA: Use master trader's slippage if available, otherwise fallback
-            const slippageBps = masterTraderSlippageBps || this.botConfig?.slippageBps || 50;
-            
-            const quoteRequest = {
-                inputMint: inputMint,
-                outputMint: outputMint,
-                amount: inputAmountInLamports.toString(), // Amount MUST be a string of lamports
-                slippageBps: slippageBps, // 🎯 Use master trader's slippage tolerance
-                swapMode: 'ExactIn',
-                asLegacyTransaction: false // Important: We want modern V0 transactions
-            };
-
-            this.logInfo(`[JUPITER-QUOTE] 🔍 Requesting quote from OFFICIAL endpoint: ${inputMint} → ${outputMint}, Amount: ${inputAmountInLamports/1e9} SOL, Slippage: ${slippageBps} bps (${masterTraderSlippageBps ? 'Master Trader' : 'Default'})`);
-
-            const response = await fetch(quoteUrl, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(quoteRequest)
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.text();
-                throw new Error(`Helius Quote API error: ${response.status} ${response.statusText} - ${errorBody}`);
-            }
-
-            const quoteData = await response.json();
-            
-            if (!quoteData.outAmount) {
-                throw new Error('No outAmount in quote response');
-            }
-
-            this.logInfo(`[JUPITER-QUOTE] ✅ Quote successful: ${quoteData.outAmount} tokens`);
-            
-            return {
-                outAmount: quoteData.outAmount,
-                priceImpact: quoteData.priceImpactPct || 0,
-                route: quoteData.routePlan || []
-            };
-
-        } catch (error) {
-            this.logError(`[JUPITER-QUOTE] ❌ Error getting quote: ${error.message}`);
-            return null;
-        }
-    }
-
-    // ===== PORTFOLIO POSITION CHECK (WITH REDIS SYNC) =====
-    async _checkTokenPosition(tokenMint) {
-        try {
-            this.logInfo(`[PORTFOLIO-CHECK] 🔍 Checking position for token: ${tokenMint}`);
-            
-            // 1. FAST REDIS CHECK FIRST (using RedisManager)
-            if (this.dataManager.redisManager) {
-                try {
-                    const hasPosition = await this.dataManager.redisManager.checkPortfolioPosition(tokenMint);
-                    if (hasPosition) {
-                        return true;
-                    }
-                } catch (redisError) {
-                    this.logWarn(`[PORTFOLIO-CHECK] ⚠️ Redis check failed: ${redisError.message}`);
-                }
-            }
-            
-            // 2. FALLBACK TO FILE CHECK
-            const portfolio = await this.dataManager.readJsonFile('portfolio.json') || { positions: {} };
-            
-            if (portfolio.positions[tokenMint]) {
-                const position = portfolio.positions[tokenMint];
-                this.logInfo(`[PORTFOLIO-CHECK] ✅ Found position: ${position.amount} tokens (${position.symbol || 'Unknown'})`);
-                
-                // 3. SYNC TO REDIS FOR NEXT TIME
-                if (this.dataManager.redisManager) {
-                    try {
-                        await this.dataManager.redisManager.syncPortfolioFromFile(portfolio);
-                    } catch (redisError) {
-                        this.logWarn(`[PORTFOLIO-CHECK] ⚠️ Redis sync failed: ${redisError.message}`);
-                    }
-                }
-                
-                return position.amount > 0;
-            }
-            
-            this.logInfo(`[PORTFOLIO-CHECK] ❌ No position found for token: ${tokenMint}`);
-            return false;
-            
-        } catch (error) {
-            this.logError(`[PORTFOLIO-CHECK] ❌ Error checking token position: ${error.message}`);
-            return false;
-        }
-    }
-
-    // ===== UPDATE PORTFOLIO POSITION =====
-    async _updatePortfolioPosition(tokenMint, amount, action, price = null) {
-        try {
-            this.logInfo(`[PORTFOLIO-UPDATE] 🔄 Updating position: ${action} ${amount} ${tokenMint}`);
-            
-            // 1. UPDATE REDIS FIRST (using RedisManager)
-            if (this.dataManager.redisManager) {
-                try {
-                    await this.dataManager.redisManager.updatePortfolioPosition(tokenMint, amount, action, price);
-                } catch (redisError) {
-                    this.logWarn(`[PORTFOLIO-UPDATE] ⚠️ Redis update failed: ${redisError.message}`);
-                }
-            }
-            
-            // 2. UPDATE FILE FOR PERSISTENCE
-            const portfolio = await this.dataManager.readJsonFile('portfolio.json') || { positions: {} };
-            
-            if (!portfolio.positions[tokenMint]) {
-                portfolio.positions[tokenMint] = {
-                    amount: 0,
-                    symbol: 'Unknown',
-                    firstBought: new Date().toISOString(),
-                    lastUpdated: new Date().toISOString()
-                };
-            }
-            
-            const position = portfolio.positions[tokenMint];
-            
-            if (action === 'buy') {
-                position.amount += amount;
-                position.lastBought = new Date().toISOString();
-                if (price) position.lastBuyPrice = price;
-            } else if (action === 'sell') {
-                position.amount -= amount;
-                position.lastSold = new Date().toISOString();
-                if (price) position.lastSellPrice = price;
-            }
-            
-            position.lastUpdated = new Date().toISOString();
-            
-            // Remove position if amount is 0 or negative
-            if (position.amount <= 0) {
-                delete portfolio.positions[tokenMint];
-                this.logInfo(`[PORTFOLIO-UPDATE] 🗑️ Removed position for ${tokenMint} (amount: ${position.amount})`);
-            }
-            
-            // Save updated portfolio to file
-            await this.dataManager.writeJsonFile('portfolio.json', portfolio);
-            
-            this.logInfo(`[PORTFOLIO-UPDATE] ✅ Position updated: ${position.amount} ${tokenMint}`);
-            
-        } catch (error) {
-            this.logError(`[PORTFOLIO-UPDATE] ❌ Error updating portfolio: ${error.message}`);
-        }
-    }
-
-    // ===== SELL EXECUTION FUNCTIONS =====
-    async executePumpFunSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
-        try {
-            this.logInfo('[PUMPFUN-SELL] 🚀 Executing PumpFun sell transaction...');
-            
-            // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
-            if (!quote) {
-                throw new Error('Failed to get price quote for sell');
-            }
-            
-            this.logInfo(`[PUMPFUN-SELL] ✅ Sell quote: ${quote.outAmount} SOL for ${inputAmount} tokens`);
-            
-            // TODO: Implement PumpFun sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-            
-            return {
-                success: true,
-                signature: 'PLACEHOLDER_SIGNATURE',
-                amountSold: inputAmount,
-                price: quote.outAmount / inputAmount,
-                executionTime: Date.now()
-            };
-            
-        } catch (error) {
-            this.logError(`[PUMPFUN-SELL] ❌ PumpFun sell failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    async executeRaydiumSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
-        try {
-            this.logInfo('[RAYDIUM-SELL] 🚀 Executing Raydium sell transaction...');
-            
-            // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
-            if (!quote) {
-                throw new Error('Failed to get price quote for sell');
-            }
-            
-            this.logInfo(`[RAYDIUM-SELL] ✅ Sell quote: ${quote.outAmount} SOL for ${inputAmount} tokens`);
-            
-            // TODO: Implement Raydium sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-
-            return {
-                success: true,
-                signature: 'PLACEHOLDER_SIGNATURE',
-                amountSold: inputAmount,
-                price: quote.outAmount / inputAmount,
-                executionTime: Date.now()
-            };
-
-        } catch (error) {
-            this.logError(`[RAYDIUM-SELL] ❌ Raydium sell failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    async executeMeteoraSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
-        try {
-            this.logInfo('[METEORA-SELL] 🚀 Executing Meteora sell transaction...');
-            
-            // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
-            if (!quote) {
-                throw new Error('Failed to get price quote for sell');
-            }
-            
-            this.logInfo(`[METEORA-SELL] ✅ Sell quote: ${quote.outAmount} SOL for ${inputAmount} tokens`);
-            
-            // TODO: Implement Meteora sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-            
-            return {
-                success: true,
-                signature: 'PLACEHOLDER_SIGNATURE',
-                amountSold: inputAmount,
-                price: quote.outAmount / inputAmount,
-                executionTime: Date.now()
-            };
-            
-        } catch (error) {
-            this.logError(`[METEORA-SELL] ❌ Meteora sell failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    // ====================================================================
-    // ====== MASTER EXECUTION FUNCTION (v3 - Final Version) ==============
-    // ====================================================================
+    // ===== SINGLE EXECUTION FUNCTION =====
+    // HANDLES BOTH: EXECUTE_COPY_TRADE AND HANDLE_SMART_COPY
     async executeCopyTrade(message) {
-        // We use the signature for unique logging throughout the process
-        const signature = message.signature || 'unknown_signature';
-        
         try {
-            this.logInfo(`[EXEC-MAIN] 🚀 Processing job for sig: ${shortenAddress(signature)}`);
-
-            // --- 1. VALIDATE THE JOB ---
-            const analysisResult = message.analysisResult;
-            if (!analysisResult || !analysisResult.isCopyable || !analysisResult.swapDetails) {
-                this.logError(`[EXEC-MAIN] ❌ Job REJECTED: Monitor did not provide a valid analysis result.`, { signature });
-                return;
-            }
-
-            const swapDetails = analysisResult.swapDetails;
-            const platform = swapDetails.platform;
-            const tradeType = swapDetails.tradeType;
-            const userConfig = message.userConfig || {
-                scaleFactor: this.dataManager?.getUserConfig?.()?.scaleFactor || 0.1,
-                slippage: this.dataManager?.getUserConfig?.()?.maxSlippage || 0.15,
-                platformPreferences: this.dataManager?.getUserConfig?.()?.supportedPlatforms || ['PumpFun', 'Raydium', 'Jupiter']
-            };
-
-            this.logInfo(`[EXEC-MAIN] 📋 Trusting Monitor's Report:`, {
-                platform: platform,
-                tradeType: tradeType,
-                outputMint: shortenAddress(swapDetails.outputMint),
-                signature
+            this.logInfo('[SINGLE-EXECUTOR] 🚀 Processing copy trade', { 
+                type: message.type,
+                hasAnalysisResult: !!message.analysisResult,
+                hasOriginalTransaction: !!message.originalTransaction
             });
 
-            // --- 2. HANDLE SELLS (Portfolio Check) ---
-            if (tradeType === 'sell') {
-                const tokenMintToSell = swapDetails.inputMint;
-                
-                // Get our primary wallet for checking the balance
-                const userWallet = await this._getUserWallet();
-                if (!userWallet) throw new Error("Could not load primary trading wallet for sell check.");
-                
-                // Check if we actually own this token
-                const hasPosition = await this._checkTokenPosition(tokenMintToSell);
-                
-                if (!hasPosition) {
-                    this.logInfo(`[EXEC-MAIN] ⏭️ SELL detected, but we have NO position in ${shortenAddress(tokenMintToSell)}. Skipping.`, { signature });
-                    return; // Gracefully exit
-                } else {
-                    this.logInfo(`[EXEC-MAIN] 🎯 SELL detected and position CONFIRMED. Proceeding with sell logic.`);
-                    // The code will continue to the switch statement to execute the sell.
-                }
-            } else if (tradeType !== 'buy') {
-                // For now, we only support 'buy' and 'sell'.
-                this.logWarn(`[EXEC-MAIN] ⚠️ Unsupported trade type "${tradeType}". Ignoring.`, { signature });
+            // Check if we have analysis result
+            if (!message.analysisResult) {
+                this.logError('[SINGLE-EXECUTOR] ❌ No analysis result from monitor - aborting execution');
                 return;
             }
-            // --- 3. EXECUTE THE TRADE (Routing) ---
+
+            const analysisResult = message.analysisResult;
+            let swapDetails = analysisResult.swapDetails;
+            
+            // ========================= THE SMART ROUTER FIX =========================
+            // STEP 1: Perform DEEP analysis inside the executor to determine the TRUE platform.
+            // This makes the executor self-reliant and corrects any bad data from the monitor.
+            this.logInfo(`[SMART-ROUTER] 🕵️‍♂️ Performing deep analysis to find the REAL DEX...`);
+            const realPlatform = this._detectTargetDexFromTransaction(message); // Pass the ENTIRE message
+            this.logInfo(`[SMART-ROUTER] ✅ Real target DEX identified: ${realPlatform}`);
+            
+            // Override the platform in swapDetails to ensure we use the correct one.
+            swapDetails.platform = realPlatform;
+            // =========================================================
+            
+            this.logInfo('[SINGLE-EXECUTOR] 🎯 Copy trade details', {
+                platform: swapDetails.platform,
+                inputMint: swapDetails.inputMint,
+                outputMint: swapDetails.outputMint,
+                inputAmount: swapDetails.inputAmount,
+                requiresATACreation: swapDetails.requiresATACreation,
+                requiresPDARecovery: swapDetails.requiresPDARecovery
+            });
+
+            // Execute PDA/ATA reconstruction if needed
+            if (swapDetails.requiresATACreation || swapDetails.requiresPDARecovery) {
+                this.logInfo(`[SINGLE-EXECUTOR] 🔧 Starting PDA/ATA reconstruction...`);
+                await this._reconstructPDAAndATA(analysisResult, swapDetails);
+                this.logInfo(`[SINGLE-EXECUTOR] ✅ PDA/ATA reconstruction completed`);
+            }
+
+            // Get user config from message or use defaults
+            const userConfig = message.userConfig || {
+                scaleFactor: 0.1,
+                slippage: 0.05,
+                platformPreferences: ['PumpFun', 'Raydium', 'Jupiter']
+            };
+            
+            this.logInfo(`[SINGLE-EXECUTOR] 🔧 User config loaded:`, userConfig);
+            
+            // Route to platform-specific execution
+            this.logInfo(`[SINGLE-EXECUTOR] 🎯 Routing to platform: ${swapDetails.platform}`);
+            
             let result;
             
-            // The switch statement now routes to the specific buy/sell function.
-            // Make it case-insensitive to handle platform name variations
-            switch (platform.toLowerCase()) {
-                case 'jupiter':
-                    if (tradeType === 'buy') {
-                        result = await this.executeJupiterBuy(swapDetails, userConfig);
-                    } else {
-                        // Implement executeJupiterSell in the future
-                        throw new Error("Sell logic for Jupiter is not yet implemented.");
-                    }
+            // 🚀 NEW: Try DIRECT transaction building first (bypasses API routes)
+            // NOTE: LaserStream provides non-standard transaction format, so we skip direct copy for now
+            if (false && message.originalTransaction && message.programIds) {
+                this.logInfo(`[DIRECT-BUILDER] 🔧 Attempting DIRECT transaction building from original...`);
+                try {
+                    result = await this.executeDirectCopyTrade(message, userConfig);
+                    this.logInfo(`[DIRECT-BUILDER] ✅ Direct copy successful!`);
+                    return result;
+                } catch (directError) {
+                    this.logWarn(`[DIRECT-BUILDER] ⚠️ Direct copy failed: ${directError.message}, falling back to platform-specific...`);
+                }
+            }
+            
+            switch (swapDetails.platform) {
+                case 'Jupiter':
+                    result = await this.executeJupiterSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'pumpfun':
-                    if (tradeType === 'buy') {
-                        result = await this.executePumpFunBuy(swapDetails, userConfig);
-                    } else {
-                        result = await this.executePumpFunSell(swapDetails, userConfig);
-                    }
+                case 'PumpFun':
+                    result = await this.executePumpFunSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'raydium':
-                     if (tradeType === 'buy') {
-                        result = await this.executeRaydiumBuy(swapDetails, userConfig);
-                    } else {
-                        result = await this.executeRaydiumSell(swapDetails, userConfig);
-                    }
+                case 'Raydium':
+                    result = await this.executeRaydiumSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'meteora':
-                    if (tradeType === 'buy') {
-                        result = await this.executeMeteoraBuy(swapDetails, userConfig);
-                    } else {
-                        result = await this.executeMeteoraSell(swapDetails, userConfig);
-                    }
+                case 'Orca':
+                    result = await this.executeOrcaSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'photon':
-                case 'router:photon':
-                    // Photon is a router - route to underlying DEX
-                    this.logInfo(`[EXEC-MAIN] 🔄 Photon router detected - routing to underlying DEX`);
-                    // For now, treat Photon as Jupiter (most common underlying DEX)
-                    if (tradeType === 'buy') {
-                        result = await this.executeJupiterBuy(swapDetails, userConfig);
-                    } else {
-                        throw new Error("Sell logic for Photon router is not yet implemented.");
-                    }
+                case 'Meteora':
+                    result = await this.executeMeteoraSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'router:jupiter':
-                case 'router:jupiter_v4':
-                case 'router:jupiter_v6':
-                    // Jupiter routers - use Jupiter execution
-                    this.logInfo(`[EXEC-MAIN] 🔄 Jupiter router detected - using Jupiter execution`);
-                    if (tradeType === 'buy') {
-                        result = await this.executeJupiterBuy(swapDetails, userConfig);
-                    } else {
-                        throw new Error("Sell logic for Jupiter router is not yet implemented.");
-                    }
+                case 'OpenBook':
+                    result = await this.executeOpenBookSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
                     break;
-
-                case 'router:axiom':
-                    // Axiom router - route to underlying DEX
-                    this.logInfo(`[EXEC-MAIN] 🔄 Axiom router detected - routing to underlying DEX`);
-                    if (tradeType === 'buy') {
-                        result = await this.executeJupiterBuy(swapDetails, userConfig);
-                    } else {
-                        throw new Error("Sell logic for Axiom router is not yet implemented.");
-                    }
-                    break;
-
                 default:
-                    this.logError(`[EXEC-MAIN] ❌ CRITICAL: Unsupported platform "${platform}" received from monitor.`, { signature });
-                    throw new Error(`Unsupported platform: ${platform}`);
+                    this.logWarn(`[SINGLE-EXECUTOR] ⚠️ Unknown platform: ${swapDetails.platform}, defaulting to Jupiter`);
+                    result = await this.executeJupiterSwap(swapDetails.inputMint, swapDetails.outputMint, swapDetails.inputAmount, userConfig);
             }
 
-            this.logInfo(`[EXEC-MAIN] ✅✅ SUCCESS! Copy trade executed.`, {
-                platform: platform,
+            this.logInfo(`[SINGLE-EXECUTOR] ✅ Copy trade executed successfully!`, {
+                platform: swapDetails.platform,
                 signature: result?.signature,
                 executionTime: result?.executionTime
             });
-            
+
             return result;
 
         } catch (error) {
-            this.logError(`[EXEC-MAIN] ❌ FATAL ERROR in trade execution pipeline`, { 
-                signature,
-                error: error.message,
-                stack: error.stack // Always log the stack for deep debugging
-            });
-            throw error; // Rethrow to ensure the worker catches it
+            this.logError('[SINGLE-EXECUTOR] ❌ Copy trade execution failed', { error: error.message });
+            throw error;
         }
     }
     
@@ -721,11 +341,11 @@ class TradeExecutorWorker extends BaseWorker {
                 throw new Error('User wallet not found');
             }
             
-            // Get user configs for scale factor and slippage from dataManager
+            // Get user configs for scale factor and slippage
             const userConfig = analysisResult.userConfig || {
-                scaleFactor: this.dataManager?.getUserConfig?.()?.scaleFactor || 0.1,
-                slippage: this.dataManager?.getUserConfig?.()?.maxSlippage || 0.15,
-                platformPreferences: this.dataManager?.getUserConfig?.()?.supportedPlatforms || ['PumpFun', 'Raydium', 'Jupiter']
+                scaleFactor: 0.1,
+                slippage: 0.05,
+                platformPreferences: ['PumpFun', 'Raydium', 'Jupiter']
             };
             
             this.logInfo(`[PDA-ATA] 🔧 User configs:`, {
@@ -802,10 +422,9 @@ class TradeExecutorWorker extends BaseWorker {
             // Get user's wallet from wallet manager
             if (this.walletManager) {
                 const userWallet = await this.walletManager.getPrimaryTradingKeypair(user.chat_id);
-                if (userWallet && userWallet.keypair && userWallet.wallet) {
+                if (userWallet && userWallet.wallet && userWallet.wallet.publicKey) {
                     this.logInfo(`[PDA-ATA] ✅ Found wallet: ${userWallet.wallet.publicKey.toString()}`);
-                    // CRITICAL FIX: Return the actual Keypair instance, not the database object
-                    return userWallet.keypair; // Return the real Keypair for signing
+                    return userWallet.wallet; // Return the full wallet object, not just the public key string
                 }
             }
             
@@ -813,9 +432,9 @@ class TradeExecutorWorker extends BaseWorker {
             const walletFromEnv = process.env.WALLET_PUBLIC_KEY;
             if (walletFromEnv) {
                 this.logInfo(`[PDA-ATA] ✅ Using wallet from environment: ${walletFromEnv}`);
-                // CRITICAL FIX: For fallback, we need a real Keypair, not just a PublicKey
-                // This is a limitation - we can't sign without the private key
-                throw new Error('Environment wallet fallback not supported - private key required for signing');
+                // Convert string to PublicKey object for consistency
+                const { PublicKey } = require('@solana/web3.js');
+                return { publicKey: new PublicKey(walletFromEnv) };
             }
             
             throw new Error('No user wallet found');
@@ -955,293 +574,145 @@ class TradeExecutorWorker extends BaseWorker {
     
     _detectTargetDexFromTransaction(message) {
         try {
-            this.logInfo(`[SMART-ROUTER] 🔍 FALLBACK: Analyzing transaction for real DEX...`);
+            this.logInfo(`[SMART-ROUTER] 🔍 Analyzing transaction for real DEX...`);
             this.logInfo(`[SMART-ROUTER] 🔍 Message structure:`, {
                 hasAnalysisResult: !!message?.analysisResult,
                 hasOriginalTransaction: !!message?.originalTransaction,
                 hasLogMessages: !!message?.originalTransaction?.meta?.logMessages
             });
             
-            // ========================= ROUTER PEELING LOGIC =========================
-            // Apply the same logic as monitor and laserstream to distinguish routers from DEXes
-            const routerPeelingResult = this._performRouterPeeling(message);
-            if (routerPeelingResult.realDexProgram) {
-                this.logInfo(`[SMART-ROUTER] ✅ Router peeling found real DEX: ${routerPeelingResult.platform}`);
-                return routerPeelingResult.platform;
+            // PRIORITY CHECK: If monitor already detected PumpFun, use it immediately
+            if (message?.analysisResult?.swapDetails?.platform === 'PumpFun') {
+                this.logInfo(`[SMART-ROUTER] ✅ Monitor detected PumpFun, using directly`);
+                return 'PumpFun';
             }
             
-            // ========================= FALLBACK: LOG MESSAGE ANALYSIS =========================
+            // ========================= THE MAILBOX FIX =========================
+            // Look for log messages in the CORRECT path: message.originalTransaction.meta.logMessages
             const logMessages = message?.originalTransaction?.meta?.logMessages;
             
             if (logMessages && Array.isArray(logMessages)) {
+                // Join all logs into one big string for easy searching
                 const logs = logMessages.join(' ');
                 this.logInfo(`[SMART-ROUTER] 🔍 Log messages (first 200 chars): ${logs.substring(0, 200)}...`);
                 
-                // ========================= PROFESSIONAL CONFIG.JS APPROACH =========================
-                // Loop through all known platforms from our single source of truth (config.js)
-                for (const [platformKey, platformId] of Object.entries(config.PLATFORM_IDS)) {
-                    
-                    // Handle both single IDs and arrays of IDs (like METEORA_DBC)
-                    const idsToCheck = Array.isArray(platformId) ? platformId : [platformId];
-                    
-                    for (const id of idsToCheck) {
-                        // Convert PublicKey to string for comparison
-                        const idString = id instanceof PublicKey ? id.toBase58() : id.toString();
-                        
-                        if (logs.includes(idString)) {
-                            this.logInfo(`[SMART-ROUTER] ✅ Found ${platformKey} in log messages`);
-                            
-                            // Map config keys to our simple platform names
-                            if (platformKey.startsWith('RAYDIUM')) return 'Raydium';
-                            if (platformKey.startsWith('PUMP_FUN')) return 'PumpFun';
-                            if (platformKey.startsWith('METEORA')) return 'Meteora';
-                            if (platformKey.startsWith('JUPITER')) return 'Jupiter';
-                            if (platformKey.startsWith('WHIRLPOOL')) return 'Orca';
-                            if (platformKey.startsWith('OPENBOOK')) return 'OpenBook';
-                            if (platformKey.startsWith('SERUM')) return 'Serum';
-                            if (platformKey.startsWith('BLOOM_ROUTER') || platformKey.startsWith('PRIVATE_ROUTER')) return 'BloomRouter';
-                        }
-                    }
+                // This is the "ground truth" check for PumpFun
+                if (logs.includes('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA') || // PumpFun AMM
+                    logs.includes('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P') || // PumpFun Main
+                    logs.includes('F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq') || // PumpFun Router
+                    logs.includes('pump.fun')) {
+                    this.logInfo(`[SMART-ROUTER] ✅ Found PumpFun in log messages`);
+                    return 'PumpFun';
                 }
                 
-                // Special case: Check for "pump.fun" text in logs
-                if (logs.includes('pump.fun')) {
-                    this.logInfo(`[SMART-ROUTER] ✅ Found pump.fun text in log messages`);
-                    return 'PumpFun';
+                // Check for Raydium in logs
+                if (logs.includes('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8') || // Raydium V4
+                    logs.includes('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK')) { // Raydium CLMM
+                    this.logInfo(`[SMART-ROUTER] ✅ Found Raydium in log messages`);
+                    return 'Raydium';
+                }
+                
+                // Check for Meteora in logs
+                if (logs.includes('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo')) {
+                    this.logInfo(`[SMART-ROUTER] ✅ Found Meteora in log messages`);
+                    return 'Meteora';
+                }
+                
+                // Check for Orca in logs
+                if (logs.includes('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc')) {
+                    this.logInfo(`[SMART-ROUTER] ✅ Found Orca in log messages`);
+                    return 'Orca';
                 }
             }
             // =========================================================
+                
+                // Check for Raydium program IDs
+                if (programIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                    programIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString())) {
+                    return 'Raydium';
+                }
+                
+                // Check for Meteora program IDs
+                if (programIds.includes(config.PLATFORM_IDS.METEORA_DLMM.toString())) {
+                    return 'Meteora';
+                }
+                
+                // Check for Orca program IDs
+                if (programIds.includes(config.PLATFORM_IDS.WHIRLPOOL.toString())) {
+                    return 'Orca';
+                }
+            }
             
-            // Fallback to the original, less reliable analysis if logs are not conclusive
-            this.logWarn('[SMART-ROUTER] ⚠️ Could not find a definitive DEX in logs, using initial platform guess.');
-            return message?.analysisResult?.swapDetails?.platform || 'Jupiter';
+            // DEEP ANALYSIS: Check inner instructions and log messages for REAL DEX program IDs
+            if (analysisResult && analysisResult.originalTransaction && analysisResult.originalTransaction.meta) {
+                const meta = analysisResult.originalTransaction.meta;
+                
+                // Extract program IDs from log messages
+                const logProgramIds = this._extractProgramIdsFromLogs(meta.logMessages);
+                
+                // Check for PumpFun in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN.toString()) || 
+                    logProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN_AMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found PumpFun in log messages`);
+                    return 'PumpFun';
+                }
+                
+                // Check for Raydium in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                    logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString()) ||
+                    logProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CPMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Raydium in log messages`);
+                    return 'Raydium';
+                }
+                
+                // Check for Meteora in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.METEORA_DLMM.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Meteora in log messages`);
+                    return 'Meteora';
+                }
+                
+                // Check for Orca in logs
+                if (logProgramIds.includes(config.PLATFORM_IDS.WHIRLPOOL.toString())) {
+                    this.logInfo(`[SMART-ROUTER] 🔍 Found Orca in log messages`);
+                    return 'Orca';
+                }
+                
+                // Check inner instructions for program IDs
+                if (meta.innerInstructions && meta.innerInstructions.length > 0) {
+                    const innerProgramIds = this._extractProgramIdsFromInnerInstructions(meta.innerInstructions, analysisResult.originalTransaction.transaction.message.accountKeys);
+                    
+                    // Check for PumpFun in inner instructions
+                    if (innerProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN.toString()) || 
+                        innerProgramIds.includes(config.PLATFORM_IDS.PUMP_FUN_AMM.toString())) {
+                        this.logInfo(`[SMART-ROUTER] 🔍 Found PumpFun in inner instructions`);
+                        return 'PumpFun';
+                    }
+                    
+                    // Check for Raydium in inner instructions
+                    if (innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_V4.toString()) ||
+                        innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CLMM.toString()) ||
+                        innerProgramIds.includes(config.PLATFORM_IDS.RAYDIUM_CPMM.toString())) {
+                        this.logInfo(`[SMART-ROUTER] 🔍 Found Raydium in inner instructions`);
+                        return 'Raydium';
+                    }
+                }
+            }
+            
+            // Default to Jupiter if we can't detect the target DEX
+            // Final fallback: Check if the monitor already detected the platform
+            if (analysisResult && analysisResult.swapDetails && analysisResult.swapDetails.platform) {
+                const monitorPlatform = analysisResult.swapDetails.platform;
+                this.logInfo(`[SMART-ROUTER] 🔍 Using monitor-detected platform: ${monitorPlatform}`);
+                return monitorPlatform;
+            }
+            
+            this.logInfo(`[SMART-ROUTER] ⚠️ Could not detect target DEX, using Jupiter fallback`);
+            return 'Jupiter';
             
         } catch (error) {
             this.logError(`[SMART-ROUTER] ❌ Error detecting target DEX: ${error.message}`);
             return 'Jupiter'; // Safe fallback
         }
-    }
-    
-    // ===== ROUTER PEELING LOGIC =====
-    // Based on monitor and laserstream logic to distinguish routers from real DEXes
-    
-    _performRouterPeeling(message) {
-        try {
-            this.logInfo(`[ROUTER-PEELING] 🔍 Starting router peeling analysis...`);
-            
-            // Extract transaction data
-            const originalTx = message?.originalTransaction;
-            if (!originalTx) {
-                this.logWarn(`[ROUTER-PEELING] ⚠️ No original transaction found`);
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            // Get program IDs from the transaction
-            const programIds = this._extractProgramIdsFromTransaction(originalTx);
-            if (programIds.length === 0) {
-                this.logWarn(`[ROUTER-PEELING] ⚠️ No program IDs found in transaction`);
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            this.logInfo(`[ROUTER-PEELING] 🔍 Found ${programIds.length} program IDs: ${programIds.slice(0, 3).join(', ')}...`);
-            
-            // Step 1: Identify router programs
-            const routerPrograms = this._identifyRouterPrograms(programIds);
-            if (routerPrograms.length === 0) {
-                this.logInfo(`[ROUTER-PEELING] 🔍 No routers detected, checking for direct DEX calls...`);
-                
-                // No router detected, check if any program IDs are direct DEX calls
-                const directDexProgram = this._findDirectDexProgram(programIds);
-                if (directDexProgram) {
-                    const platform = this._identifyPlatform(directDexProgram);
-                    this.logInfo(`[ROUTER-PEELING] ✅ Direct DEX call detected: ${platform} (${directDexProgram})`);
-                    return { realDexProgram: directDexProgram, platform, routerPrograms: [] };
-                }
-                
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            this.logInfo(`[ROUTER-PEELING] 🔍 Router detected: ${routerPrograms.join(', ')}`);
-            
-            // Step 2: Look for inner DEX programs in account keys
-            const innerDexPrograms = this._findInnerDexPrograms(programIds);
-            if (innerDexPrograms.length > 0) {
-                const realDexProgram = innerDexPrograms[0];
-                const platform = this._identifyPlatform(realDexProgram);
-                this.logInfo(`[ROUTER-PEELING] ✅ Found inner DEX: ${platform} (${realDexProgram})`);
-                return { realDexProgram, platform, routerPrograms };
-            }
-            
-            // Step 3: Check log messages for DEX programs
-            const logDexPrograms = this._findDexInLogs(originalTx);
-            if (logDexPrograms.length > 0) {
-                const realDexProgram = logDexPrograms[0];
-                const platform = this._identifyPlatform(realDexProgram);
-                this.logInfo(`[ROUTER-PEELING] ✅ Found DEX in logs: ${platform} (${realDexProgram})`);
-                return { realDexProgram, platform, routerPrograms };
-            }
-            
-            this.logWarn(`[ROUTER-PEELING] ⚠️ Router detected but no inner DEX found`);
-            return { realDexProgram: null, platform: null, routerPrograms };
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error in router peeling: ${error.message}`);
-            return { realDexProgram: null, platform: null, routerPrograms: [] };
-        }
-    }
-    
-    _extractProgramIdsFromTransaction(originalTx) {
-        const programIds = [];
-        
-        try {
-            // Extract from account keys (most reliable)
-            if (originalTx.transaction && originalTx.transaction.message && originalTx.transaction.message.accountKeys) {
-                programIds.push(...originalTx.transaction.message.accountKeys);
-            }
-            
-            // Extract from instructions
-            if (originalTx.transaction && originalTx.transaction.message && originalTx.transaction.message.instructions) {
-                const accountKeys = originalTx.transaction.message.accountKeys || [];
-                for (const instruction of originalTx.transaction.message.instructions) {
-                    if (instruction.programIdIndex !== undefined && accountKeys[instruction.programIdIndex]) {
-                        programIds.push(accountKeys[instruction.programIdIndex]);
-                    }
-                }
-            }
-            
-            // Remove duplicates
-            return [...new Set(programIds)];
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error extracting program IDs: ${error.message}`);
-            return [];
-        }
-    }
-    
-    _identifyRouterPrograms(programIds) {
-        const routerPrograms = [];
-        
-        // Known router program IDs (from config.js)
-        const knownRouters = [
-            config.PLATFORM_IDS.JUPITER.toBase58(),
-            config.PLATFORM_IDS.JUPITER_V6.toBase58(),
-            config.PLATFORM_IDS.JUPITER_AMM_ROUTING.toBase58(),
-            config.PLATFORM_IDS.BLOOM_ROUTER.toBase58(),
-            config.PLATFORM_IDS.PRIVATE_ROUTER.toBase58(),
-            'So11111111111111111111111111111111111111112' // System Program (sometimes used as router)
-        ];
-        
-        for (const programId of programIds) {
-            if (knownRouters.includes(programId)) {
-                routerPrograms.push(programId);
-            }
-        }
-        
-        return routerPrograms;
-    }
-    
-    _findDirectDexProgram(programIds) {
-        // Check for direct DEX program calls (not through routers)
-        const dexPrograms = [
-            config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58(),
-            config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-            config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-            config.PLATFORM_IDS.OPENBOOK.toBase58(),
-            config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-        ];
-        
-        for (const programId of programIds) {
-            if (dexPrograms.includes(programId)) {
-                return programId;
-            }
-        }
-        
-        return null;
-    }
-    
-    _findInnerDexPrograms(programIds) {
-        const innerDexPrograms = [];
-        
-        // Known DEX program IDs (excluding routers)
-        const knownDexPrograms = [
-            config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58(),
-            config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-            config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-            config.PLATFORM_IDS.OPENBOOK.toBase58(),
-            config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-        ];
-        
-        for (const programId of programIds) {
-            if (knownDexPrograms.includes(programId)) {
-                innerDexPrograms.push(programId);
-            }
-        }
-        
-        return innerDexPrograms;
-    }
-    
-    _findDexInLogs(originalTx) {
-        const logDexPrograms = [];
-        
-        try {
-            const logMessages = originalTx.meta?.logMessages;
-            if (!logMessages || !Array.isArray(logMessages)) {
-                return logDexPrograms;
-            }
-            
-            const logs = logMessages.join(' ');
-            
-            // Check for DEX program IDs in logs
-            const knownDexPrograms = [
-                config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-                config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-                config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-                config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-                config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-                config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-                config.PLATFORM_IDS.OPENBOOK.toBase58(),
-                config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-            ];
-            
-            for (const programId of knownDexPrograms) {
-                if (logs.includes(programId)) {
-                    logDexPrograms.push(programId);
-                }
-            }
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error finding DEX in logs: ${error.message}`);
-        }
-        
-        return logDexPrograms;
-    }
-    
-    _identifyPlatform(programId) {
-        // Map program IDs to platform names
-        const platformMap = {
-            [config.PLATFORM_IDS.PUMP_FUN.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.RAYDIUM_V4.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.METEORA_DLMM.toBase58()]: 'Meteora',
-            [config.PLATFORM_IDS.WHIRLPOOL.toBase58()]: 'Orca',
-            [config.PLATFORM_IDS.OPENBOOK.toBase58()]: 'OpenBook',
-            [config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()]: 'Serum'
-        };
-        
-        return platformMap[programId] || 'Unknown';
     }
     
     _extractProgramIdsFromLogs(logMessages) {
@@ -1491,15 +962,13 @@ class TradeExecutorWorker extends BaseWorker {
 
     // ===== SWAP EXECUTION METHODS =====
     
-    async executeJupiterBuy(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
+    async executeJupiterSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
         try {
             this.logInfo(`[HELIUS-PREMIUM] 🚀 Executing ULTRA-FAST swap via Helius Premium API: ${inputMint} → ${outputMint}`);
             this.logInfo(`[HELIUS-PREMIUM] 💰 Amount: ${inputAmount}`);
             
             // 1. Get quote from Helius Premium API (not Jupiter)
             const slippageBps = Math.floor((userConfig.slippage || 0.15) * 10000); // Convert to BPS
-            this.logInfo(`[HELIUS-PREMIUM] 🔧 Using slippage: ${userConfig.slippage} (${slippageBps} BPS)`);
             const heliusQuoteUrl = `${this.solanaManager.connection.rpcEndpoint}&method=getQuote&inputMint=${inputMint}&outputMint=${outputMint}&amount=${inputAmount}&slippageBps=${slippageBps}`;
             
             this.logInfo(`[HELIUS-PREMIUM] 🔗 Getting quote from Helius Premium API...`);
@@ -1580,8 +1049,7 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    async executeRaydiumBuy(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
+    async executeRaydiumSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
         try {
             this.logInfo(`[RAYDIUM-REAL] 🚀 Executing REAL Raydium swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[RAYDIUM-REAL] 💰 Amount: ${inputAmount}`);
@@ -1657,24 +1125,27 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[RAYDIUM-REAL] 🔧 Pool PDA: ${poolPDA.toString()}`);
             
             // 3. CREATE RAYDIUM SWAP INSTRUCTION USING BORSH
-            this.logInfo('[BORSH] 🔧 Serializing Raydium swap with ROBUST class pattern...');
+            this.logInfo('[BORSH] 🔧 Serializing Raydium swap instruction using Borsh schema...');
             
-            // Let SingaporeSenderManager handle slippage calculation dynamically
-            const amountInBN = new BN(inputAmount);
+            // Define the structure of the instruction data
+            const RaydiumSwapInstruction = {
+                discriminator: 'u8',
+                amountIn: 'u64',
+                minimumAmountOut: 'u64'
+            };
             
-            // For now, use 0 as minimum amount out - SingaporeSenderManager will calculate proper slippage
-            const minAmountOutBN = new BN(0);
+            // Create the data payload object
+            const payload = {
+                discriminator: 9,
+                amountIn: new BN(inputAmount), // Use BN for 64-bit numbers
+                minimumAmountOut: new BN(0)    // Slippage is 0 for now
+            };
             
-            this.logInfo(`[RAYDIUM-REAL] 💰 Amount: ${inputAmount} | Min Out: ${minAmountOutBN.toString()} (SingaporeSender will handle slippage)`);
-            
-            // Create a new instance of the payload class
-            const payload = new RaydiumSwapPayload({
-                amountIn: amountInBN,
-                minimumAmountOut: minAmountOutBN
-            });
-            
-            // Serialize using the schema map and the class instance
-            const swapInstructionData = borsh.serialize(RAYDIUM_SWAP_SCHEMA, payload);
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(RaydiumSwapInstruction) }]]),
+                payload
+            );
             
             this.logInfo(`[BORSH] ✅ Instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
             
@@ -1722,8 +1193,7 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    async executePumpFunBuy(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
+    async executePumpFunSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
         try {
             this.logInfo(`[PUMPFUN-REAL] 🚀 Executing REAL PumpFun swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[PUMPFUN-REAL] 💰 Amount: ${inputAmount}`);
@@ -1785,20 +1255,9 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[PUMPFUN-REAL] 🔍 Program ID type: ${typeof pumpFunProgramId}`);
             this.logInfo(`[PUMPFUN-REAL] 🔍 Program ID toString: ${pumpFunProgramId.toString()}`);
             
-            // CRITICAL FIX: Validate both mintPubkey and programId
-            if (!(mintPubkey instanceof PublicKey)) {
-                this.logError(`[PUMPFUN-REAL] ❌ CRITICAL: mintPubkey is NOT a PublicKey! Type: ${typeof mintPubkey}, Value: ${mintPubkey}`);
-                throw new Error(`Invalid mintPubkey: expected PublicKey, got ${typeof mintPubkey}`);
-            }
-            
-            if (!(pumpFunProgramId instanceof PublicKey)) {
-                this.logError(`[PUMPFUN-REAL] ❌ CRITICAL: pumpFunProgramId is NOT a PublicKey! Type: ${typeof pumpFunProgramId}, Value: ${pumpFunProgramId}`);
-                throw new Error(`Invalid pumpFunProgramId: expected PublicKey, got ${typeof pumpFunProgramId}`);
-            }
-            
-            this.logInfo(`[PUMPFUN-REAL] ✅ mintPubkey validation passed: ${mintPubkey.toString()}`);
-            this.logInfo(`[PUMPFUN-REAL] ✅ pumpFunProgramId validation passed: ${pumpFunProgramId.toString()}`);
             this.logInfo(`[PUMPFUN-REAL] 🔍 About to call findProgramAddressSync...`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 mintPubkey.toBuffer(): ${mintPubkey.toBuffer()}`);
+            this.logInfo(`[PUMPFUN-REAL] 🔍 pumpFunProgramId: ${pumpFunProgramId}`);
             
             const [bondingCurvePDA] = PublicKey.findProgramAddressSync(
                 [Buffer.from('bonding-curve'), mintPubkey.toBuffer()],
@@ -1816,35 +1275,39 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[PUMPFUN-REAL] 🔧 Associated bonding curve PDA: ${associatedBondingCurvePDA.toString()}`);
             
             // 4. CREATE REAL PUMPFUN BUY INSTRUCTION
-            const globalAccount = config.PUMP_FUN_CONSTANTS.GLOBAL;
-            const feeRecipient = config.PUMP_FUN_CONSTANTS.FEE_RECIPIENT;
+            const globalAccount = new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uC4JcdXM9r');
+            const feeRecipient = new PublicKey('CebN5WGQ4KYevQRdNHDG12GzZA6jkBrIZqokb4FFchoo');
             
             // ========================================================================
             // ================= THE BORSH FIX FOR PUMP.FUN =========================
             // ========================================================================
-            this.logInfo('[BORSH] 🔧 Serializing PumpFun buy instruction with ROBUST class pattern...');
+            this.logInfo('[BORSH] 🔧 Serializing PumpFun buy instruction with CORRECT schema and discriminator...');
 
-            // 1. GET REAL-TIME PRICE QUOTE FROM HELIUS JUPITER V6 API
-            this.logInfo('[PUMPFUN-REAL] 🔍 Getting real-time price quote from Helius Jupiter V6 API...');
+            // 1. CALCULATE SLIPPAGE & TOKEN AMOUNT (NEEDS A QUOTE)
+            // For a real buy, you MUST get a price quote first.
+            // For now, we will SIMULATE a quote. We'll pretend 1 SOL buys 1,000,000 tokens.
+            const estimatedTokensOut = (inputAmount / 1e9) * 1000000; // Simplified example
+            const amountOfTokensToBuy = new BN(Math.floor(estimatedTokensOut));
             
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount, swapDetails.masterTraderSlippageBps);
-            if (!quote) {
-                throw new Error('Failed to get price quote from Jupiter API');
-            }
-            
-            this.logInfo(`[PUMPFUN-REAL] ✅ Quote received: ${quote.outAmount} tokens for ${inputAmount/1e9} SOL`);
-            
-            const amountOfTokensToBuy = new BN(quote.outAmount);
+            // maxSolCost is the input SOL amount + slippage (for now, we'll just use the inputAmount)
             const maxSolCost = new BN(inputAmount);
 
-            // 2. CREATE PUMPFUN PAYLOAD USING CLASS PATTERN
-            const payload = new PumpFunBuyPayload({
+            // 2. DEFINE THE CORRECT BORSH SCHEMA (args only)
+            const PumpFunBuyArgs = {
+                amount: 'u64',
+                maxSolCost: 'u64'
+            };
+
+            const payload = {
                 amount: amountOfTokensToBuy,
                 maxSolCost: maxSolCost
-            });
+            };
             
-            // 3. SERIALIZE THE ARGUMENTS USING CLASS SCHEMA
-            const argsBuffer = borsh.serialize(PUMPFUN_BUY_SCHEMA, payload);
+            // 3. SERIALIZE THE ARGUMENTS
+            const argsBuffer = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(PumpFunBuyArgs) }]]),
+                payload
+            );
 
             // 4. CREATE THE CORRECT 8-BYTE DISCRIMINATOR
             const hash = createHash('sha256');
@@ -2015,14 +1478,11 @@ class TradeExecutorWorker extends BaseWorker {
                 maxPriceImpact: 0              // Max price impact
             };
             
-            // Create Orca payload using class pattern
-            const orcaPayload = new OrcaSwapPayload({
-                amountIn: new BN(inputAmount),
-                minimumAmountOut: new BN(0)
-            });
-            
-            // Serialize using class schema
-            const swapInstructionData = borsh.serialize(ORCA_SWAP_SCHEMA, orcaPayload);
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(OrcaSwapInstruction) }]]),
+                payload
+            );
             
             this.logInfo(`[BORSH] ✅ Orca instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
             
@@ -2070,8 +1530,7 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    async executeMeteoraBuy(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
+    async executeMeteoraSwap(inputMint, outputMint, inputAmount, userConfig = {}) {
         try {
             this.logInfo(`[METEORA-REAL] 🚀 Executing REAL Meteora swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[METEORA-REAL] 💰 Amount: ${inputAmount}`);
@@ -2163,14 +1622,11 @@ class TradeExecutorWorker extends BaseWorker {
                 minimumAmountOut: new BN(0)    // Minimum amount out (slippage handled by user)
             };
             
-            // Create Meteora payload using class pattern
-            const meteoraPayload = new MeteoraSwapPayload({
-                amountIn: new BN(inputAmount),
-                minimumAmountOut: new BN(0)
-            });
-            
-            // Serialize using class schema
-            const swapInstructionData = borsh.serialize(METEORA_SWAP_SCHEMA, meteoraPayload);
+            // Serialize it. Borsh does all the hard work automatically.
+            const swapInstructionData = borsh.serialize(
+                new Map([[{ kind: 'struct', fields: Object.entries(MeteoraSwapInstruction) }]]),
+                payload
+            );
             
             this.logInfo(`[BORSH] ✅ Meteora instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
             

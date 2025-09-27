@@ -117,6 +117,121 @@ class RedisManager {
         return positions;
     }
 
+    // ===== PORTFOLIO SYNC METHODS (NEW INTEGRATION) =====
+    
+    // Fast portfolio position check with Redis-first approach
+    async checkPortfolioPosition(tokenMint, userId = 'default') {
+        try {
+            const key = `portfolio:${tokenMint}`;
+            const position = await this.get(key);
+            
+            if (position) {
+                const positionData = JSON.parse(position);
+                console.log(`[REDIS-PORTFOLIO] ⚡ Redis hit: ${positionData.amount} tokens (${positionData.symbol || 'Unknown'})`);
+                return positionData.amount > 0;
+            }
+            
+            console.log(`[REDIS-PORTFOLIO] ❌ No position found for token: ${tokenMint}`);
+            return false;
+            
+        } catch (error) {
+            console.error(`[REDIS-PORTFOLIO] ❌ Error checking portfolio position: ${error.message}`);
+            return false;
+        }
+    }
+
+    // Update portfolio position with Redis sync
+    async updatePortfolioPosition(tokenMint, amount, action, price = null, userId = 'default') {
+        try {
+            console.log(`[REDIS-PORTFOLIO] 🔄 Updating position: ${action} ${amount} ${tokenMint}`);
+            
+            const key = `portfolio:${tokenMint}`;
+            let position = await this.get(key);
+            
+            if (position) {
+                position = JSON.parse(position);
+            } else {
+                position = {
+                    amount: 0,
+                    symbol: 'Unknown',
+                    firstBought: new Date().toISOString(),
+                    lastUpdated: new Date().toISOString()
+                };
+            }
+            
+            if (action === 'buy') {
+                position.amount += amount;
+                position.lastBought = new Date().toISOString();
+                if (price) position.lastBuyPrice = price;
+            } else if (action === 'sell') {
+                position.amount -= amount;
+                position.lastSold = new Date().toISOString();
+                if (price) position.lastSellPrice = price;
+            }
+            
+            position.lastUpdated = new Date().toISOString();
+            
+            if (position.amount > 0) {
+                // Set position in Redis with 1 hour TTL
+                await this.set(key, JSON.stringify(position), 'EX', 3600);
+                console.log(`[REDIS-PORTFOLIO] ✅ Position updated: ${position.amount} ${tokenMint}`);
+            } else {
+                // Remove position if amount is 0 or negative
+                await this.del(key);
+                console.log(`[REDIS-PORTFOLIO] 🗑️ Removed position for ${tokenMint} (amount: ${position.amount})`);
+            }
+            
+            return position;
+            
+        } catch (error) {
+            console.error(`[REDIS-PORTFOLIO] ❌ Error updating portfolio: ${error.message}`);
+            return null;
+        }
+    }
+
+    // Get all portfolio positions
+    async getAllPortfolioPositions() {
+        try {
+            const pattern = `portfolio:*`;
+            const keys = await this.client.keys(pattern);
+            const positions = {};
+            
+            for (const key of keys) {
+                const tokenMint = key.split(':')[1];
+                const data = await this.get(key);
+                if (data) {
+                    positions[tokenMint] = JSON.parse(data);
+                }
+            }
+            
+            return positions;
+        } catch (error) {
+            console.error(`[REDIS-PORTFOLIO] ❌ Error getting all portfolio positions: ${error.message}`);
+            return {};
+        }
+    }
+
+    // Sync portfolio from file to Redis
+    async syncPortfolioFromFile(portfolioData) {
+        try {
+            console.log(`[REDIS-PORTFOLIO] 🔄 Syncing portfolio from file to Redis...`);
+            
+            for (const [tokenMint, position] of Object.entries(portfolioData.positions || {})) {
+                const key = `portfolio:${tokenMint}`;
+                if (position.amount > 0) {
+                    await this.set(key, JSON.stringify(position), 'EX', 3600);
+                } else {
+                    await this.del(key);
+                }
+            }
+            
+            console.log(`[REDIS-PORTFOLIO] ✅ Portfolio synced to Redis`);
+            
+        } catch (error) {
+            console.error(`[REDIS-PORTFOLIO] ❌ Error syncing portfolio: ${error.message}`);
+        }
+    }
+
     // --- Trade Data Cache (Replaces old CacheManager) ---
  async setTradeData(tokenMint, tradeData) {
     const key = `trade_data:${tokenMint}`;

@@ -107,32 +107,59 @@ const config = {
     // ==============================================================
     // ====== THE BRAIN of the GOLDEN FILTER ========================
     // ==============================================================
-    PLATFORM_IDS: {
+    
+    // ====== ACTUAL DEX PROGRAM IDs (The Real Platforms) ===========
+    DEX_PROGRAM_IDS: {
+        // Raydium DEX Programs
         RAYDIUM_V4: new PublicKey('675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8'),
-        RAYDIUM_LAUNCHPAD: new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj'),
         RAYDIUM_CPMM: new PublicKey('CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C'),
         RAYDIUM_CLMM: new PublicKey('CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK'),
-        PUMP_FUN: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'), // Actual Pump.fun BC Program ID
+        RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'),
+        RAYDIUM_STABLE_SWAP: new PublicKey('5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h'),
+        
+        // Pump.fun DEX Programs
+        PUMP_FUN: new PublicKey('6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P'),
         PUMP_FUN_AMM: new PublicKey('pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA'),
-        PUMP_FUN_V2: new PublicKey('6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC'), // Newer Pump.fun Program ID
+        PUMP_FUN_V2: new PublicKey('6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC'),
+        
+        // Meteora DEX Programs
         METEORA_DLMM: new PublicKey('LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'),
         METEORA_DBC: [
-            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'), // REAL Meteora DBC program ID from log messages
+            new PublicKey('dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN'),
             new PublicKey('DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d'),
         ],
         METEORA_CP_AMM: new PublicKey('CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG'),
-        JUPITER: new PublicKey('JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5'),
-        JUPITER_V6: new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'), // Jupiter Aggregator v6
-        JUPITER_AMM_ROUTING: new PublicKey('routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS'), // Jupiter AMM Routing
-        RAYDIUM_AMM: new PublicKey('675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv'),
-        RAYDIUM_STABLE_SWAP: new PublicKey('5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h'), // Raydium Stable Swap AMM
+        
+        // Orca DEX Programs
         WHIRLPOOL: new PublicKey('whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'),
-        SERUM_DEX_V3: new PublicKey('9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin'), // Serum DEX v3
-        BLOOM_ROUTER: new PublicKey('b1oomGGqPKGD6errbyfbVMBuzSC8WtAAYo8MwNafWW1'),
-    PRIVATE_ROUTER: new PublicKey('AzcZqCRUQgKEg5FTAgY7JacATABEYCEfMbjXEzspLYFB'), // Bloom Router
-        OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'), // OpenBook DEX
-        OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'), // OpenBook V3
+        
+        // Serum/OpenBook DEX Programs
+        SERUM_DEX_V3: new PublicKey('9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin'),
+        OPENBOOK: new PublicKey('srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX'),
+        OPENBOOK_V3: new PublicKey('srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d'),
+        
+        // Raydium Launchpad
+        RAYDIUM_LAUNCHPAD: new PublicKey('LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj'),
     },
+    
+    // ====== ROUTER PROGRAM IDs (Aggregators, Not Real DEXs) =======
+    ROUTER_PROGRAM_IDS: {
+        // Jupiter Routers (Aggregators)
+        JUPITER_V4: new PublicKey('JUP6LwwmjhEGGjp4tfXXFW2uJTkV5WkxSfCSsFUxXH5'),
+        JUPITER_V6: new PublicKey('JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4'),
+        JUPITER_AMM_ROUTING: new PublicKey('routeUGWgWzqBWFcrCfv8tritsqukccJPu3q5GPP3xS'),
+        
+        // Third-Party Routers
+        PHOTON: new PublicKey('BSfD6SHZigAfDWSjzD5Q41jw8LmKwtmjskPH9XW1mrRW'),
+        AXIOM: new PublicKey('AxiomfHaWDemCFBLBayqnEnNwE6b7B2Qz3UmzMpgbMG6'),
+        BLOOM_ROUTER: new PublicKey('b1oomGGqPKGD6errbyfbVMBuzSC8WtAAYo8MwNafWW1'),
+        PRIVATE_ROUTER: new PublicKey('AzcZqCRUQgKEg5FTAgY7JacATABEYCEfMbjXEzspLYFB'),
+        PUMP_FUN_ROUTER: new PublicKey('F5tfvbLog9VdGUPqBDTT8rgXvTTcq7e5UiGnupL1zvBq'),
+    },
+    
+    // ====== LEGACY SUPPORT (Backward Compatibility) ================
+    // Note: PLATFORM_IDS will be populated after the object is created
+    // to avoid circular reference issues
     
     // --- PUMP.FUN Specifics (Needed for Reconstruction Logic) ---
     PUMP_FUN_CONSTANTS: {
@@ -144,6 +171,17 @@ const config = {
     
     // Native SOL mint address
     NATIVE_SOL_MINT: NATIVE_SOL_MINT,
+};
+
+// ====== LEGACY SUPPORT (Backward Compatibility) ================
+// Combine both DEX and Router IDs for backward compatibility
+config.PLATFORM_IDS = {
+    ...Object.fromEntries(
+        Object.entries(config.DEX_PROGRAM_IDS).map(([key, value]) => [key, value])
+    ),
+    ...Object.fromEntries(
+        Object.entries(config.ROUTER_PROGRAM_IDS).map(([key, value]) => [key, value])
+    )
 };
 
 module.exports = config;
