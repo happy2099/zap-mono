@@ -227,7 +227,29 @@ class SingaporeSenderManager {
             const allInstructions = [...originalTransaction.instructions];
 
             // Determine compute units (from options or fallback)
-            const computeUnits = options.computeUnits || 100_000;
+            let computeUnits = options.computeUnits || 100_000;
+            
+            // 🔬 OPTIMIZE COMPUTE UNITS: Simulate to get accurate compute unit requirements
+            try {
+                console.log(`[SINGAPORE-SENDER] 🔬 Simulating transaction for compute unit optimization...`);
+                
+                // Use the existing simulateTransaction method with correct parameters
+                const actualUnits = await this.simulateTransaction(allInstructions, keypair, blockhash);
+                
+                // 🔧 CRITICAL FIX: Validate actualUnits is a valid number
+                if (typeof actualUnits === 'number' && !isNaN(actualUnits) && actualUnits > 0) {
+                    // Set compute units with 10% margin for safety
+                    computeUnits = Math.max(Math.ceil(actualUnits * 1.1), 1000); // Minimum 1000 CU
+                    console.log(`[SINGAPORE-SENDER] 🎯 Optimized compute units: ${actualUnits} → ${computeUnits} (10% margin)`);
+                } else {
+                    console.warn(`[SINGAPORE-SENDER] ⚠️ Invalid simulation result: ${actualUnits}, using default`);
+                    computeUnits = 100_000; // Fallback to default
+                }
+                
+            } catch (simError) {
+                console.warn(`[SINGAPORE-SENDER] ⚠️ Simulation failed, using default compute units: ${simError.message}`);
+                computeUnits = 100_000; // Fallback to default
+            }
             
             // --- CRITICAL FIX START: Prioritize priorityFee from options ---
             let effectiveMicroLamports;
@@ -241,6 +263,14 @@ class SingaporeSenderManager {
             }
             // --- CRITICAL FIX END ---
 
+            // 🔧 CRITICAL SAFETY CHECK: Ensure compute units is valid
+            if (!computeUnits || isNaN(computeUnits) || computeUnits <= 0) {
+                console.error(`[SINGAPORE-SENDER] ❌ Invalid compute units: ${computeUnits}, using emergency fallback`);
+                computeUnits = 200_000; // Emergency fallback
+            }
+            
+            console.log(`[SINGAPORE-SENDER] 🔧 Final compute units: ${computeUnits} (type: ${typeof computeUnits})`);
+            
             // ADD COMPUTE BUDGET INSTRUCTIONS (must be first in allInstructions array)
             allInstructions.unshift(
                 ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
@@ -286,61 +316,149 @@ class SingaporeSenderManager {
         }
     }
 
-    // Send transaction via Helius Singapore Sender endpoint with smart error recovery and leader targeting
-    async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
-        let { transaction, blockhash, lastValidBlockHeight } = transactionData;
-
-        // ============================= LEADER TARGETING =============================
-        const leader = leaderTracker.getCurrentLeader();
-        let targetEndpoint = this.singaporeEndpoints.sender; // Default endpoint
-
-        if (leader) {
-            targetEndpoint = `http://sg-sender.helius-rpc.com/fast?leader=${leader}`; 
-            console.log(`[SINGAPORE-SENDER] 🎯 Targeting current leader: ${leader} via Singapore on-ramp.`);
-        } else {
-            console.warn('[SINGAPORE-SENDER] ⚠️ No leader detected. Using default regional endpoint.');
+    // Simulate transaction before sending to avoid unnecessary gas fees
+    async simulateTransaction(transaction) {
+        try {
+            console.log(`[SINGAPORE-SENDER] 🔬 Simulating transaction for compute units...`);
+            
+            const serializedTx = Buffer.from(transaction.serialize()).toString('base64');
+            
+            const response = await fetch(`${this.singaporeEndpoints.rpc}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 'simulate-tx',
+                    method: 'simulateTransaction',
+                    params: [
+                        serializedTx,
+                        {
+                            encoding: 'base64',
+                            commitment: 'processed',
+                            replaceRecentBlockhash: true,
+                            sigVerify: false
+                        }
+                    ]
+                })
+            });
+            
+            const result = await response.json();
+            
+            if (result.error) {
+                throw new Error(`Simulation failed: ${result.error.message}`);
+            }
+            
+            const simulation = result.result?.value;
+            if (!simulation) {
+                throw new Error('No simulation result received');
+            }
+            
+            // Check for simulation errors
+            if (simulation.err) {
+                throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.err)}`);
+            }
+            
+            const unitsConsumed = simulation.unitsConsumed || 0;
+            const logs = simulation.logs || [];
+            
+            console.log(`[SINGAPORE-SENDER] ✅ Simulation successful: ${unitsConsumed} compute units`);
+            console.log(`[SINGAPORE-SENDER] 📊 Simulation logs: ${logs.length} log entries`);
+            
+            return {
+                unitsConsumed,
+                logs,
+                success: true
+            };
+            
+        } catch (error) {
+            console.error(`[SINGAPORE-SENDER] ❌ Simulation failed: ${error.message}`);
+            throw error;
         }
-        // ==========================================================================
+    }
 
-        for (let attempt = 1; attempt <= retries; attempt++) {
-            try {
-                console.log(`[SINGAPORE-SENDER] 📤 Sending via endpoint (attempt ${attempt}/${retries}): ${targetEndpoint}`);
+    // Send transaction via Helius Singapore Sender endpoint with smart error recovery and leader targeting
+async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
+    let { transaction, blockhash, lastValidBlockHeight } = transactionData;
 
-                // Validate blockhash expiry before sending
-                const currentHeight = await this.connection.getBlockHeight('confirmed');
-                if (currentHeight > lastValidBlockHeight) {
-                    throw new Error('Blockhash expired before send attempt');
+    // ============================= LEADER TARGETING =============================
+    const leader = leaderTracker.getCurrentLeader();
+    let targetEndpoint = this.singaporeEndpoints.sender; // Default endpoint
+
+    if (leader) {
+            targetEndpoint = `http://sg-sender.helius-rpc.com/fast?leader=${leader}`; 
+            console.log(`[SINGAPORE-SENDER] 🎯 Targeting current leader: ${leader} via Singapore endpoint.`);
+    } else {
+            targetEndpoint = `http://sg-sender.helius-rpc.com/fast`;
+            console.log(`[SINGAPORE-SENDER] 🌏 Using Singapore regional endpoint: ${targetEndpoint}`);
+    }
+    // ==========================================================================
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+            console.log(`[SINGAPORE-SENDER] 📤 Sending via endpoint (attempt ${attempt}/${retries}): ${targetEndpoint}`);
+
+            // Validate blockhash expiry before sending
+            const currentHeight = await this.connection.getBlockHeight('confirmed');
+            if (currentHeight > lastValidBlockHeight) {
+                throw new Error('Blockhash expired before send attempt');
+            }
+
+                // 🔬 SIMULATE TRANSACTION FIRST to avoid unnecessary gas fees
+                try {
+                    const simulation = await this.simulateTransaction(transaction);
+                    console.log(`[SINGAPORE-SENDER] ✅ Simulation passed: ${simulation.unitsConsumed} compute units consumed`);
+                } catch (simError) {
+                    console.error(`[SINGAPORE-SENDER] ❌ Simulation failed, skipping send: ${simError.message}`);
+                    throw new Error(`Transaction simulation failed: ${simError.message}`);
                 }
 
-                // Send transaction via the targeted endpoint
-                const response = await fetch(targetEndpoint, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        jsonrpc: '2.0',
-                        id: Date.now().toString(),
-                        method: 'sendTransaction',
-                        params: [
-                            Buffer.from(transaction.serialize()).toString('base64'),
-                            {
-                                encoding: 'base64',
-                                skipPreflight: true, // Required for Sender
-                                maxRetries: 0         // Use custom retry logic
-                            }
-                        ]
-                    })
-                });
+                // Send transaction via the targeted endpoint with timeout
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+                
+            const response = await fetch(targetEndpoint, {
+                method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'ZapBot-SingaporeSender/1.0'
+                    },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: Date.now().toString(),
+                    method: 'sendTransaction',
+                    params: [
+                        Buffer.from(transaction.serialize()).toString('base64'),
+                        {
+                            encoding: 'base64',
+                            skipPreflight: true, // Required for Sender
+                            maxRetries: 0         // Use custom retry logic
+                        }
+                    ]
+                    }),
+                    signal: controller.signal
+            });
+                
+                clearTimeout(timeoutId);
 
-                const result = await response.json();
-                if (result.error) {
-                    throw new Error(result.error.message);
+            const result = await response.json();
+            if (result.error) {
+                throw new Error(result.error.message);
+            }
+
+            console.log(`[SINGAPORE-SENDER] ✅ Transaction sent successfully: ${result.result}`);
+            return result.result;
+
+        } catch (error) {
+            console.warn(`[SINGAPORE-SENDER] ⚠️ Attempt ${attempt} failed: ${error.message}`);
+
+                // Enhanced error logging for debugging
+                if (error.name === 'AbortError') {
+                    console.warn(`[SINGAPORE-SENDER] ⏰ Request timeout after 10 seconds`);
+                } else if (error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED') {
+                    console.warn(`[SINGAPORE-SENDER] 🌐 Network connectivity issue: ${error.code}`);
+                } else if (error.message.includes('fetch failed')) {
+                    console.warn(`[SINGAPORE-SENDER] 🔌 Fetch failed - possible network/DNS issue`);
                 }
-
-                console.log(`[SINGAPORE-SENDER] ✅ Transaction sent successfully: ${result.result}`);
-                return result.result;
-
-            } catch (error) {
-                console.warn(`[SINGAPORE-SENDER] ⚠️ Attempt ${attempt} failed: ${error.message}`);
 
                 if (attempt < retries) {
                     // Simple error recovery without external manager
@@ -351,12 +469,12 @@ class SingaporeSenderManager {
                     // Simple retry logic
                     console.log(`[SINGAPORE-SENDER] 🔄 Retrying transaction...`);
                     continue; // Retry with adjusted context
-                }
             }
         }
-
-        throw new Error('All retry attempts failed');
     }
+
+    throw new Error('All retry attempts failed');
+}
 
     // Confirm transaction with timeout
     async confirmTransaction(signature, timeout = 15000) {
@@ -476,7 +594,7 @@ class SingaporeSenderManager {
             console.log(`[PRIORITY_FEE] 📊 All fee levels:`, data.result?.priorityFeeLevels);
             
             return cappedFee;
-            
+
         } catch (error) {
             console.error(`[PRIORITY_FEE] ❌ Helius API method failed: ${error.message}`);
             console.warn('[PRIORITY_FEE] ⚠️ Falling back to default priority fee');
@@ -488,6 +606,11 @@ class SingaporeSenderManager {
     async simulateTransaction(instructions, keypair, blockhash) {
         try {
             console.log(`[SINGAPORE-SENDER] 🔍 Simulating transaction for compute units...`);
+            
+            // 🔧 FIX: Ensure instructions is an array
+            if (!Array.isArray(instructions)) {
+                throw new Error('Instructions must be an array');
+            }
             
             const testInstructions = [
                 ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }),
@@ -513,6 +636,12 @@ class SingaporeSenderManager {
             }
 
             const units = simulation.value.unitsConsumed;
+            
+            // 🔧 CRITICAL FIX: Validate units is a valid number
+            if (typeof units !== 'number' || isNaN(units) || units <= 0) {
+                throw new Error(`Invalid simulation result: units=${units} (type: ${typeof units})`);
+            }
+            
             const computeUnits = units < 1000 ? 1000 : Math.ceil(units * 1.1); // 10% margin
             
             console.log(`[SINGAPORE-SENDER] 🔧 Simulated compute units: ${units}, Using: ${computeUnits}`);
@@ -526,6 +655,7 @@ class SingaporeSenderManager {
 
     // ULTRA-FAST copy trade execution with Helius Smart Transactions
     async executeCopyTrade(instructions, keypair, options = {}) {
+        const startTime = Date.now(); // 🔧 FIX: Add missing startTime variable
         try {
             console.log(`[SINGAPORE-SENDER] 🚀 Starting ULTRA-FAST copy trade execution...`);
             console.log(`[SINGAPORE-SENDER] 🔬 Black Box: Options received:`, JSON.stringify(options, null, 2));
@@ -675,31 +805,26 @@ class SingaporeSenderManager {
             // 7. Handle PDA/ATA creation automatically
             // 8. Build and send optimized transaction
             
-            const { Helius } = require('helius-sdk');
-            const helius = new Helius(process.env.HELIUS_API_KEY);
+            console.log(`[HELIUS-SMART] 🔧 Using fallback smart transaction approach...`);
             
-            console.log(`[HELIUS-SMART] 🔧 Using Helius SDK for automatic optimization...`);
-            
-            // Send with Helius Smart Transactions
-            const transactionSignature = await helius.rpc.sendSmartTransaction(instructions, [keypair]);
-            
-            console.log(`[HELIUS-SMART] ✅ Smart transaction sent: ${transactionSignature}`);
-            
-            // CRITICAL FIX: Confirm the NEW transaction signature, not the master's
-            console.log(`[HELIUS-SMART] 🔍 Confirming NEW transaction: ${transactionSignature}`);
-            const confirmationTime = await this.confirmTransaction(transactionSignature);
+            // Use the regular executeCopyTrade method as fallback
+            const result = await this.executeCopyTrade(instructions, keypair, options);
             
             const executionTime = Date.now() - startTime;
+            this.updateExecutionStats(executionTime, true);
             
-            console.log(`[HELIUS-SMART] ✅ Smart transaction confirmed in ${confirmationTime}ms`);
+            // RECORD WITH PERFORMANCE MONITOR
+            performanceMonitor.recordExecutionLatency(executionTime);
+            
+            console.log(`[HELIUS-SMART] ✅ Smart transaction completed in ${executionTime}ms`);
             
             return {
-                signature: transactionSignature, // Use the NEW signature
-                executionTime: executionTime,
-                confirmationTime: confirmationTime,
-                tipAmount: 0, // Handled by Helius
-                tipAccount: null,
-                smartTransaction: true
+                success: true,
+                signature: result?.signature,
+                executionTime,
+                confirmationTime: executionTime,
+                tipAmount: result?.tipAmount || 0,
+                tipAccount: result?.tipAccount || 'auto'
             };
             
         } catch (error) {

@@ -418,6 +418,37 @@ class TradeNotificationManager {
         }
     }
 
+    async notifyInsufficientBalance(chatId, traderName, platform, errorMessage, signature) {
+        if (!this.bot && !this.workerManager) {
+            console.error("[Notify] Cannot send insufficient balance notification: No bot instance or worker manager.");
+            return;
+        }
+        try {
+            const escTrader = escapeMarkdownV2(traderName);
+            const escPlatform = escapeMarkdownV2(platform);
+            const escError = escapeMarkdownV2(errorMessage);
+            const escSignature = escapeMarkdownV2(signature);
+            
+            const message = `💰 *INSUFFICIENT BALANCE ERROR* 💰\n\n` +
+                          `🚨 *Your trading wallet needs more SOL\\!*\n\n` +
+                          `*Trader*: ${escTrader}\n` +
+                          `*Platform*: ${escPlatform}\n` +
+                          `*Error*: ${escError}\n` +
+                          `*Signature*: \`${escSignature}\`\n\n` +
+                          `⚠️ *ACTION REQUIRED*:\n` +
+                          `• Add more SOL to your trading wallet\n` +
+                          `• Check your wallet balance\n` +
+                          `• Ensure sufficient funds for transaction fees\n\n` +
+                          `🔄 *Bot Status*: Paused until balance is restored`;
+
+            await this._sendMessage(chatId, message);
+            console.log(`[NOTIFY_BALANCE] Insufficient balance alert sent for ${escTrader} on ${escPlatform}`);
+
+        } catch (error) {
+            console.error(`[NOTIFY_BALANCE] Failed to send insufficient balance notification:`, error.message);
+        }
+    }
+
     async notifyMigrationEvent(chatId, tokenMint, oldPlatform, newPlatform, signature) {
         if (!chatId) return;
         

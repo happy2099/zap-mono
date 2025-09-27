@@ -42,7 +42,7 @@ const config = {
     SINGAPORE_ENDPOINTS: {
         rpc: process.env.HELIUS_RPC_URL || `https://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
         websocket: process.env.HELIUS_WS_URL || `wss://mainnet.helius-rpc.com/?api-key=${HELIUS_API_KEY}`,
-        sender: process.env.SENDER_ENDPOINT || 'https://mainnet.helius-rpc.com/fast',
+        sender: process.env.SENDER_ENDPOINT || 'http://sg-sender.helius-rpc.com/fast',
         laserstream: process.env.LASERSTREAM_GRPC_URL,
     },
 

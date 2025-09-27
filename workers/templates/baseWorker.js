@@ -45,7 +45,13 @@ class BaseWorker {
             } catch (error) {
                 this.errorCount++;
                 console.error(`[${this.workerName}] Error handling message:`, error);
-                this.signalError(error);
+                // 🚨 CRITICAL FIX: Don't signal error for recoverable issues
+                // Just log and continue - let the worker stay ready for next message
+                console.error(`[${this.workerName}] ❌ Message processing failed, but worker remains ready for next message`);
+                // Only signal error for truly fatal issues (not message processing errors)
+                if (error.message.includes('FATAL') || error.message.includes('CRITICAL')) {
+                    this.signalError(error);
+                }
             }
         });
     }

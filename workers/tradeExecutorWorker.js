@@ -16,6 +16,7 @@ const { ApiManager } = require('../apiManager');
 const TradeNotificationManager = require('../tradeNotifications');
 const config = require('../config');
 const { shortenAddress } = require('../utils');
+const performanceMonitor = require('../performanceMonitor.js');
 
 // Direct transaction building imports
 const { 
@@ -80,15 +81,7 @@ const RAYDIUM_SWAP_SCHEMA = new Map([
     }]
 ]);
 
-const PUMPFUN_BUY_SCHEMA = new Map([
-    [PumpFunBuyPayload, { 
-        kind: 'struct', 
-        fields: [
-            ['amount', 'u64'],
-            ['maxSolCost', 'u64']
-        ] 
-    }]
-]);
+// PUMPFUN SCHEMA REMOVED - Using in-line schema to prevent worker corruption
 
 const METEORA_SWAP_SCHEMA = new Map([
     [MeteoraSwapPayload, { 
@@ -218,56 +211,55 @@ class TradeExecutorWorker extends BaseWorker {
     }
 
 
-    // ===== JUPITER V6 API QUOTE =====
-    async _getJupiterQuote(inputMint, outputMint, inputAmountInLamports, masterTraderSlippageBps = null) {
+    // ===== SINGAPORE SENDER DIRECT EXECUTION =====
+    // No quotes needed - Singapore Sender handles everything!
+    async _getHeliusQuote(inputMint, outputMint, inputAmountInLamports, masterTraderSlippageBps = null) {
         try {
-            const heliusApiKey = process.env.HELIUS_API_KEY;
-            if (!heliusApiKey) {
-                throw new Error('HELIUS_API_KEY not found in environment variables');
-            }
+            const rpcUrl = "https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY;
 
-            // ==========================================================
-            // ==================== THE FINAL FIX =======================
-            // ==========================================================
-            // This is the correct, official, documented endpoint for the Helius Jupiter V6 API.
-            const quoteUrl = `https://api.helius.xyz/v0/quote?api-key=${heliusApiKey}`;
-            // ==========================================================
-            
-            // 🎯 THE ALPHA: Use master trader's slippage if available, otherwise fallback
-            const slippageBps = masterTraderSlippageBps || this.botConfig?.slippageBps || 50;
-            
+            const slippageBps = masterTraderSlippageBps || this.botConfig?.slippageBps || 150; // 1.5% default
+
             const quoteRequest = {
                 inputMint: inputMint,
                 outputMint: outputMint,
-                amount: inputAmountInLamports.toString(), // Amount MUST be a string of lamports
-                slippageBps: slippageBps, // 🎯 Use master trader's slippage tolerance
+                amount: inputAmountInLamports,
+                slippageBps: slippageBps,
                 swapMode: 'ExactIn',
-                asLegacyTransaction: false // Important: We want modern V0 transactions
+                asLegacyTransaction: false // Important for modern transactions
             };
 
-            this.logInfo(`[JUPITER-QUOTE] 🔍 Requesting quote from OFFICIAL endpoint: ${inputMint} → ${outputMint}, Amount: ${inputAmountInLamports/1e9} SOL, Slippage: ${slippageBps} bps (${masterTraderSlippageBps ? 'Master Trader' : 'Default'})`);
+            this.logInfo(`[Helius-QUOTE] 🔍 Requesting quote via JSON-RPC: ${shortenAddress(inputMint)} → ${shortenAddress(outputMint)}, Amount: ${inputAmountInLamports / 1e9} SOL, Slippage: ${slippageBps} bps`);
 
-            const response = await fetch(quoteUrl, {
+            const response = await fetch(rpcUrl, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(quoteRequest)
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: 'zapbot-helius-quote',
+                    method: 'getQuote',
+                    params: quoteRequest
+                })
             });
 
             if (!response.ok) {
                 const errorBody = await response.text();
-                throw new Error(`Helius Quote API error: ${response.status} ${response.statusText} - ${errorBody}`);
+                throw new Error(`Helius Quote API HTTP error: ${response.status} ${response.statusText} - ${errorBody}`);
             }
 
-            const quoteData = await response.json();
-            
-            if (!quoteData.outAmount) {
-                throw new Error('No outAmount in quote response');
+            const jsonResponse = await response.json();
+
+            if (jsonResponse.error) {
+                throw new Error(`Helius Quote API RPC error: ${jsonResponse.error.code} - ${jsonResponse.error.message}`);
             }
 
-            this.logInfo(`[JUPITER-QUOTE] ✅ Quote successful: ${quoteData.outAmount} tokens`);
-            
+            const quoteData = jsonResponse.result;
+
+            if (!quoteData || !quoteData.outAmount) {
+                throw new Error('No valid quote response or outAmount received from Helius API');
+            }
+
+            this.logInfo(`[Helius-QUOTE] ✅ Quote successful: Received ${quoteData.outAmount} tokens`);
+
             return {
                 outAmount: quoteData.outAmount,
                 priceImpact: quoteData.priceImpactPct || 0,
@@ -275,7 +267,7 @@ class TradeExecutorWorker extends BaseWorker {
             };
 
         } catch (error) {
-            this.logError(`[JUPITER-QUOTE] ❌ Error getting quote: ${error.message}`);
+            this.logError(`[Helius-QUOTE] ❌ Error getting quote: ${error.message}`);
             return null;
         }
     }
@@ -388,7 +380,7 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo('[PUMPFUN-SELL] 🚀 Executing PumpFun sell transaction...');
             
             // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
+            const quote = await this._getHeliusQuote(inputMint, outputMint, inputAmount);
             if (!quote) {
                 throw new Error('Failed to get price quote for sell');
             }
@@ -418,7 +410,7 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo('[RAYDIUM-SELL] 🚀 Executing Raydium sell transaction...');
             
             // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
+            const quote = await this._getHeliusQuote(inputMint, outputMint, inputAmount);
             if (!quote) {
                 throw new Error('Failed to get price quote for sell');
             }
@@ -448,7 +440,7 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo('[METEORA-SELL] 🚀 Executing Meteora sell transaction...');
             
             // Get real-time price quote for sell
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount);
+            const quote = await this._getHeliusQuote(inputMint, outputMint, inputAmount);
             if (!quote) {
                 throw new Error('Failed to get price quote for sell');
             }
@@ -478,6 +470,7 @@ class TradeExecutorWorker extends BaseWorker {
     async executeCopyTrade(message) {
         // We use the signature for unique logging throughout the process
         const signature = message.signature || 'unknown_signature';
+        const executionStartTime = Date.now(); // 🔧 PERFORMANCE: Start timing execution
         
         try {
             this.logInfo(`[EXEC-MAIN] 🚀 Processing job for sig: ${shortenAddress(signature)}`);
@@ -611,6 +604,42 @@ class TradeExecutorWorker extends BaseWorker {
                 signature: result?.signature,
                 executionTime: result?.executionTime
             });
+
+            // --- 4. SEND SUCCESS NOTIFICATION TO TELEGRAM ---
+            try {
+                if (this.notificationManager && result?.signature) {
+                    const chatId = config.ADMIN_CHAT_ID;
+                    const traderName = message.traderName || 'Unknown Trader';
+                    const tradeDetails = {
+                        signature: result.signature,
+                        tradeType: tradeType,
+                        outputMint: swapDetails.outputMint,
+                        inputMint: swapDetails.inputMint,
+                        inputAmountRaw: swapDetails.inputAmount,
+                        outputAmountRaw: result.outputAmount || 0,
+                        solSpent: result.solSpent || swapDetails.inputAmount,
+                        solReceived: result.solReceived || 0,
+                        executionTime: result.executionTime || 0,
+                        platform: platform
+                    };
+
+                    await this.notificationManager.notifySuccessfulCopy(
+                        chatId, 
+                        traderName, 
+                        'Trading Wallet', 
+                        tradeDetails
+                    );
+                    
+                    this.logInfo(`[EXEC-MAIN] 📱 Success notification sent to Telegram`);
+                }
+            } catch (notificationError) {
+                this.logError(`[EXEC-MAIN] ⚠️ Failed to send success notification: ${notificationError.message}`);
+            }
+            
+            // 🔧 PERFORMANCE: Record complete copy trade cycle
+            const executionLatency = Date.now() - executionStartTime;
+            const detectionLatency = message.detectionLatency || 0; // If available from monitor
+            performanceMonitor.recordCopyTradeCycle(detectionLatency, executionLatency);
             
             return result;
 
@@ -620,6 +649,64 @@ class TradeExecutorWorker extends BaseWorker {
                 error: error.message,
                 stack: error.stack // Always log the stack for deep debugging
             });
+
+            // --- SEND FAILURE NOTIFICATION TO TELEGRAM ---
+            try {
+                if (this.notificationManager) {
+                    const chatId = config.ADMIN_CHAT_ID;
+                    const traderName = message.traderName || 'Unknown Trader';
+                    const platform = message.analysisResult?.swapDetails?.platform || 'Unknown';
+                    
+                    // Check for specific error types and send appropriate notifications
+                    let errorTitle = 'Trade Execution Failed';
+                    let errorDetails = `Trader: ${traderName}\nPlatform: ${platform}\nError: ${error.message}\nSignature: ${signature}`;
+                    
+                    // Handle insufficient balance errors specifically
+                    if (error.message.includes('insufficient') || error.message.includes('balance') || 
+                        error.message.includes('Insufficient') || error.message.includes('Balance')) {
+                        errorTitle = '💰 Insufficient Balance Error';
+                        errorDetails = `🚨 *INSUFFICIENT BALANCE DETECTED*\n\n` +
+                                     `*Trader*: ${traderName}\n` +
+                                     `*Platform*: ${platform}\n` +
+                                     `*Error*: ${error.message}\n` +
+                                     `*Signature*: ${signature}\n\n` +
+                                     `⚠️ *Action Required*: Please add more SOL to your trading wallet!`;
+                    }
+                    // Handle network/connection errors
+                    else if (error.message.includes('fetch failed') || error.message.includes('timeout') || 
+                             error.message.includes('network') || error.message.includes('connection')) {
+                        errorTitle = '🌐 Network Error';
+                        errorDetails = `🔌 *NETWORK CONNECTION ISSUE*\n\n` +
+                                     `*Trader*: ${traderName}\n` +
+                                     `*Platform*: ${platform}\n` +
+                                     `*Error*: ${error.message}\n` +
+                                     `*Signature*: ${signature}\n\n` +
+                                     `🔄 *Status*: Bot will retry automatically`;
+                    }
+                    // Handle transaction rejection errors
+                    else if (error.message.includes('rejected') || error.message.includes('failed') || 
+                             error.message.includes('invalid') || error.message.includes('error')) {
+                        errorTitle = '❌ Transaction Rejected';
+                        errorDetails = `🚫 *TRANSACTION REJECTED*\n\n` +
+                                     `*Trader*: ${traderName}\n` +
+                                     `*Platform*: ${platform}\n` +
+                                     `*Error*: ${error.message}\n` +
+                                     `*Signature*: ${signature}\n\n` +
+                                     `🔍 *Possible Causes*: Slippage too low, token not found, or market conditions changed`;
+                    }
+                    
+                    await this.notificationManager.sendErrorNotification(
+                        chatId,
+                        errorTitle,
+                        errorDetails
+                    );
+                    
+                    this.logInfo(`[EXEC-MAIN] 📱 Enhanced failure notification sent to Telegram`);
+                }
+            } catch (notificationError) {
+                this.logError(`[EXEC-MAIN] ⚠️ Failed to send failure notification: ${notificationError.message}`);
+            }
+
             throw error; // Rethrow to ensure the worker catches it
         }
     }
@@ -1563,7 +1650,7 @@ class TradeExecutorWorker extends BaseWorker {
                     outputMint,
                     inputAmount,
                     outputAmount: quoteData.result.outAmount,
-                    useSmartTransactions: true, // Enable Helius Smart Transactions
+                    useSmartTransactions: false, // Disable Smart Transactions for Jupiter (direct routing)
                     userConfig: userConfig // Pass user config for PDA/ATA handling
                 }
             );
@@ -1706,7 +1793,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: true // Enable Helius Smart Transactions
+                    useSmartTransactions: false // Disable Smart Transactions for Raydium (direct contract call)
                 }
             );
             
@@ -1824,27 +1911,49 @@ class TradeExecutorWorker extends BaseWorker {
             // ========================================================================
             this.logInfo('[BORSH] 🔧 Serializing PumpFun buy instruction with ROBUST class pattern...');
 
-            // 1. GET REAL-TIME PRICE QUOTE FROM HELIUS JUPITER V6 API
-            this.logInfo('[PUMPFUN-REAL] 🔍 Getting real-time price quote from Helius Jupiter V6 API...');
+            // GOLDEN CLONE STRATEGY - Simple and bulletproof
+            this.logInfo('[GOLDEN-CLONE] 🚀 Bypassing quote API. Directly copying SOL spent.');
             
-            const quote = await this._getJupiterQuote(inputMint, outputMint, inputAmount, swapDetails.masterTraderSlippageBps);
-            if (!quote) {
-                throw new Error('Failed to get price quote from Jupiter API');
-            }
+            const userScaleFactor = userConfig.scaleFactor || 1.0;
+            const scaledSolCost = Math.floor(inputAmount * userScaleFactor);
             
-            this.logInfo(`[PUMPFUN-REAL] ✅ Quote received: ${quote.outAmount} tokens for ${inputAmount/1e9} SOL`);
+            const amountOfTokensToBuy = new BN(0); // Buy as many tokens as possible
+            const maxSolCost = new BN(scaledSolCost); // For the scaled SOL amount
             
-            const amountOfTokensToBuy = new BN(quote.outAmount);
-            const maxSolCost = new BN(inputAmount);
-
-            // 2. CREATE PUMPFUN PAYLOAD USING CLASS PATTERN
-            const payload = new PumpFunBuyPayload({
-                amount: amountOfTokensToBuy,
-                maxSolCost: maxSolCost
+            this.logInfo(`[GOLDEN-CLONE] 🎯 Executing with Max SOL Cost: ${scaledSolCost} lamports`);
+            this.logInfo(`[BORSH-DEBUG] 🔍 BN Objects created:`, {
+                amountOfTokensToBuy: amountOfTokensToBuy.toString(),
+                maxSolCost: maxSolCost.toString(),
+                amountType: typeof amountOfTokensToBuy,
+                maxSolCostType: typeof maxSolCost,
+                amountIsBN: amountOfTokensToBuy instanceof BN,
+                maxSolCostIsBN: maxSolCost instanceof BN
             });
             
-            // 3. SERIALIZE THE ARGUMENTS USING CLASS SCHEMA
-            const argsBuffer = borsh.serialize(PUMPFUN_BUY_SCHEMA, payload);
+            // BULLETPROOF IN-LINE SCHEMA - Using string-based approach (no classes)
+            const payload = {
+                amount: amountOfTokensToBuy,
+                maxSolCost: maxSolCost
+            };
+            
+            // Use correct Borsh schema format
+            const schema = { 
+                struct: {
+                    amount: 'u64',
+                    maxSolCost: 'u64'
+                }
+            };
+            
+            this.logInfo(`[BORSH] 🔧 Serializing with payload:`, {
+                amount: payload.amount.toString(),
+                maxSolCost: payload.maxSolCost.toString(),
+                amountType: typeof payload.amount,
+                maxSolCostType: typeof payload.maxSolCost,
+                schemaType: typeof schema,
+                schemaKeys: Object.keys(schema)
+            });
+            
+            const argsBuffer = borsh.serialize(schema, payload);
 
             // 4. CREATE THE CORRECT 8-BYTE DISCRIMINATOR
             const hash = createHash('sha256');
@@ -1887,7 +1996,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: true // Enable Helius Smart Transactions
+                    useSmartTransactions: false // Disable Smart Transactions for PumpFun (direct contract call)
                 }
             );
             
@@ -2054,7 +2163,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: true // Enable Helius Smart Transactions
+                    useSmartTransactions: false // Disable Smart Transactions for Orca (direct contract call)
                 }
             );
             
@@ -2202,7 +2311,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: true // Enable Helius Smart Transactions
+                    useSmartTransactions: false // Disable Smart Transactions for Meteora (direct contract call)
                 }
             );
             

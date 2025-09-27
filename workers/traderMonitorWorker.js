@@ -13,6 +13,132 @@ const bs58 = require('bs58');
 const { shortenAddress } = require('../utils');
 const { LaserStreamManager } = require('../laserstreamManager'); // gRPC LaserStream
 const { quickMap } = require('../map.js');
+const performanceMonitor = require('../performanceMonitor.js');
+
+// Borsh deserialization for proper instruction decoding
+const borsh = require('borsh');
+const { createHash } = require('crypto');
+
+// ======================================================================
+// ======================== BORSH SCHEMAS FOR SLIPPAGE DETECTIVE =======
+// ======================================================================
+
+// PumpFun Buy/Sell Instruction Payload Class (Updated to match official IDL)
+class PumpFunInstructionPayload {
+    constructor(properties) {
+        this.amount = properties.amount;
+        this.maxSolCost = properties.maxSolCost;
+    }
+}
+
+// Raydium Swap Instruction Payload Class  
+class RaydiumSwapInstructionPayload {
+    constructor(properties) {
+        this.discriminator = properties.discriminator;
+        this.amountIn = properties.amountIn;
+        this.minimumAmountOut = properties.minimumAmountOut;
+    }
+}
+
+// Meteora Swap Instruction Payload Class
+class MeteoraSwapInstructionPayload {
+    constructor(properties) {
+        this.discriminator = properties.discriminator;
+        this.amountIn = properties.amountIn;
+        this.minimumAmountOut = properties.minimumAmountOut;
+    }
+}
+
+// Orca Swap Instruction Payload Class
+class OrcaSwapInstructionPayload {
+    constructor(properties) {
+        this.discriminator = properties.discriminator;
+        this.amountIn = properties.amountIn;
+        this.minimumAmountOut = properties.minimumAmountOut;
+    }
+}
+
+// Jupiter Swap Instruction Payload Class
+class JupiterSwapInstructionPayload {
+    constructor(properties) {
+        this.discriminator = properties.discriminator;
+        this.amountIn = properties.amountIn;
+        this.minimumAmountOut = properties.minimumAmountOut;
+    }
+}
+
+// PumpFun Sell Instruction Payload Class (for sell instructions)
+class PumpFunSellInstructionPayload {
+    constructor(properties) {
+        this.amount = properties.amount;
+        this.minSolOutput = properties.minSolOutput;
+    }
+}
+
+// Define Borsh schemas for deserialization
+const PUMPFUN_INSTRUCTION_SCHEMA = new Map([
+    [PumpFunInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['amount', 'u64'],
+            ['maxSolCost', 'u64']
+        ] 
+    }]
+]);
+
+const RAYDIUM_INSTRUCTION_SCHEMA = new Map([
+    [RaydiumSwapInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['discriminator', 'u8'],
+            ['amountIn', 'u64'],
+            ['minimumAmountOut', 'u64']
+        ] 
+    }]
+]);
+
+const METEORA_INSTRUCTION_SCHEMA = new Map([
+    [MeteoraSwapInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['discriminator', 'u8'],
+            ['amountIn', 'u64'],
+            ['minimumAmountOut', 'u64']
+        ] 
+    }]
+]);
+
+const ORCA_INSTRUCTION_SCHEMA = new Map([
+    [OrcaSwapInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['discriminator', 'u8'],
+            ['amountIn', 'u64'],
+            ['minimumAmountOut', 'u64']
+        ] 
+    }]
+]);
+
+const JUPITER_INSTRUCTION_SCHEMA = new Map([
+    [JupiterSwapInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['discriminator', 'u8'],
+            ['amountIn', 'u64'],
+            ['minimumAmountOut', 'u64']
+        ] 
+    }]
+]);
+
+const PUMPFUN_SELL_INSTRUCTION_SCHEMA = new Map([
+    [PumpFunSellInstructionPayload, { 
+        kind: 'struct', 
+        fields: [
+            ['amount', 'u64'],
+            ['minSolOutput', 'u64']
+        ] 
+    }]
+]);
 
 class TraderMonitorWorker extends BaseWorker {
     constructor() {
@@ -58,7 +184,7 @@ class TraderMonitorWorker extends BaseWorker {
             this.solanaManager = new SolanaManager();
             await this.solanaManager.initialize();
             this.logInfo('✅ SolanaManager initialized.');
-
+            
             // Initialize Golden Filter with static DEX programs
             this.knownDexPrograms = new Set();
             for (const key in config.PLATFORM_IDS) {
@@ -197,21 +323,21 @@ class TraderMonitorWorker extends BaseWorker {
                     
                     // Get all traders for this user from the DB to find their wallets
                     // Use user.id (internal ID) not user.chat_id
-                    const allUserTraders = await this.dataManager.getTraders(user.id);
-                    this.logInfo(`[Monitor] Loaded ${allUserTraders.length} total traders from DB for user ${user.id}`);
-                    
-                    for (const traderName of activeTraderNames) {
-                        const traderInfo = allUserTraders.find(t => t.name === traderName);
-                        if (traderInfo && traderInfo.wallet) {
-                            allActiveWallets.add(traderInfo.wallet);
-                            this.logInfo(`[Monitor] ✅ Added trader ${traderName} with wallet ${traderInfo.wallet}`);
-                            
-                            // PRE-SYNC trader names to Redis for ultra-fast lookup
-                            await this.syncTraderNameToRedis(traderName, traderInfo.wallet);
-                        } else {
-                            this.logWarn(`[Monitor] ⚠️ Trader ${traderName} not found in DB or missing wallet`);
-                        }
-                    }
+                     const allUserTraders = await this.dataManager.getTraders(user.id);
+                     this.logInfo(`[Monitor] Loaded ${allUserTraders.length} total traders from DB for user ${user.id}`);
+                     
+                     for (const traderName of activeTraderNames) {
+                         const traderInfo = allUserTraders.find(t => t.name === traderName);
+                         if (traderInfo && traderInfo.wallet) {
+                             allActiveWallets.add(traderInfo.wallet);
+                             this.logInfo(`[Monitor] ✅ Added trader ${traderName} with wallet ${traderInfo.wallet}`);
+                             
+                             // PRE-SYNC trader names to Redis for ultra-fast lookup
+                             await this.syncTraderNameToRedis(traderName, traderInfo.wallet);
+                         } else {
+                             this.logWarn(`[Monitor] ⚠️ Trader ${traderName} not found in DB or missing wallet`);
+                         }
+                     }
                 } else {
                     this.logInfo(`[Monitor] No active traders found for user ${user.chat_id}`);
                 }
@@ -222,8 +348,8 @@ class TraderMonitorWorker extends BaseWorker {
             this.logInfo(`[Monitor] ⚡ Pre-synced ${this.activeTraders.length} trader names to Redis for instant lookup.`);
 
         } catch(error) {
-            this.logError("CRITICAL FAILURE loading traders from Redis.", { error: error.message, stack: error.stack});
-            this.activeTraders = []; // Safety reset
+             this.logError("CRITICAL FAILURE loading traders from Redis.", { error: error.message, stack: error.stack});
+             this.activeTraders = []; // Safety reset
         }
     }
 
@@ -238,7 +364,7 @@ class TraderMonitorWorker extends BaseWorker {
         const handler = this.messageHandlers.get(message.type);
         if (handler) {
             await handler(message);
-        } else {
+            } else {
             await super.handleMessage(message);
         }
     }
@@ -442,7 +568,7 @@ class TraderMonitorWorker extends BaseWorker {
             setTimeout(async () => {
                 this.logInfo('🔄 Retrying LaserStream connection...');
                 try {
-                    await this.laserstreamManager.startMonitoring(walletAddresses);
+        await this.laserstreamManager.startMonitoring(walletAddresses);
                     this.logInfo('✅ LaserStream monitoring started successfully on retry');
                 } catch (retryError) {
                     this.logError('❌ LaserStream retry failed:', retryError.message);
@@ -451,7 +577,7 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
-    // =================================================================
+  // =================================================================
     // =========== TREASURE HUNTER (BATTLE-TESTED) ====================
     // =================================================================
     // This version intelligently finds the correct transaction object,
@@ -490,76 +616,63 @@ class TraderMonitorWorker extends BaseWorker {
      * Layer 3: Instruction Data Pattern (Discriminator analysis)
      * Layer 4: Economic Signature (SOL/Token balance changes)
      */
-    _isPotentiallyATrade(normalizedTx, sourceWallet, knownDexPrograms) {
+    _isPotentiallyATrade(normalizedTx, sourceWallet) {
         try {
-            this.logInfo(`[DNA-ANALYSIS] 🔬 Starting analysis for ${shortenAddress(sourceWallet)}`);
-            
-            // =========================================================================
-            // ======================== THE UPGRADE ====================================
-            // =========================================================================
-            // We replace the old Layer 1 analysis with our new, smart classifier.
-            const classification = this._classifyTransactionPrograms(normalizedTx);
-            
-            const finalDex = classification.dex;
-            const finalRouter = classification.router || 'Direct'; // If no router found, it's a direct call.
+            this.logInfo(`[GATEKEEPER] 🔬 Analyzing transaction for ${shortenAddress(sourceWallet)}`);
 
-            this.logInfo(`[DNA-ANALYSIS] ✅ Program Analysis Complete: 🛣️ Router: ${finalRouter}, 🏢 DEX: ${finalDex || 'Unknown'}`);
-            
-            // If we couldn't find a real DEX, the trade is not copyable. This is a powerful filter.
-            if (!finalDex) {
-                this.logInfo(`[DNA-ANALYSIS] ❌ FAILED: Could not identify a known DEX destination. Ignoring transaction.`);
+            // Check 1: Did the trader's SOL balance decrease? (A buy)
+            const traderIndex = normalizedTx.accountKeys.indexOf(sourceWallet);
+            if (traderIndex === -1) {
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Trader wallet not in accounts list.`);
                 return false;
             }
-            // =========================================================================
-            
-            // The rest of the DNA analysis continues as before...
-            const layer3Result = this._analyzeLayer3_InstructionData(normalizedTx, finalDex);
-            if (!layer3Result.isValid) {
-                this.logInfo(`[DNA-ANALYSIS] ❌ Layer 3 FAILED: ${layer3Result.reason}`);
+
+            const solChange = normalizedTx.postBalances[traderIndex] - normalizedTx.preBalances[traderIndex];
+            const isBuy = solChange < 0;
+
+            if (!isBuy || Math.abs(solChange) < 100000) { // minimum 0.0001 SOL change
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Not a significant SOL spend.`);
                 return false;
             }
-            this.logInfo(`[DNA-ANALYSIS] ✅ Layer 3 PASSED: Valid instruction pattern (${layer3Result.tradeType})`);
+            
+            // Check 2: Does this transaction involve the Pump.fun program?
+            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toBase58();
+            const usesPumpFun = normalizedTx.accountKeys.includes(pumpFunProgramId);
 
-            const layer4Result = this._analyzeLayer4_EconomicSignature(normalizedTx, sourceWallet);
-            if (!layer4Result.isValid) {
-                this.logInfo(`[DNA-ANALYSIS] ❌ Layer 4 FAILED: ${layer4Result.reason}`);
+            if (!usesPumpFun) {
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Does not involve the Pump.fun program.`);
                 return false;
             }
-            this.logInfo(`[DNA-ANALYSIS] ✅ Layer 4 PASSED: Economic activity confirmed`);
-            
-            // Extract mints using the helper function
-            const { inputMint, outputMint } = this._extractMintsFromAnalysis(layer4Result, normalizedTx);
 
-            // =======================================================================
-            // ==================== SLIPPAGE DETECTION ==============================
-            // =======================================================================
-            // Extract the master trader's slippage from their original instruction
-            const masterTraderSlippageBps = this._extractMasterTraderSlippage(normalizedTx, finalDex, layer4Result);
-            
-            this.logInfo(`[DNA-ANALYSIS] 🎯 All layers PASSED. Final Verdict: ${finalDex} trade via ${finalRouter}.`);
+            // Check 3: Did the trader receive a new token?
+            const receivedToken = normalizedTx.postTokenBalances.find(
+                tb => tb.owner === sourceWallet && tb.uiTokenAmount.uiAmount > 0
+            );
 
-            // Finally, we build the NEW, smarter analysis result
+            if (!receivedToken) {
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Trader did not receive a new token.`);
+                return false;
+            }
+
+            this.logInfo(`[GATEKEEPER] ✅ PASSED: Confirmed Pump.fun buy.`);
+
+            // If all checks pass, it's a valid trade. Build the result for the executor.
             return {
                 isCopyable: true,
                 swapDetails: {
-                    platform: finalDex, // The REAL DEX
-                    router: finalRouter, // The router used (or 'Direct')
-                    tradeType: layer3Result.tradeType,
-                    inputMint: inputMint,
-                    outputMint: outputMint,
+                    platform: 'PUMPFUN', // We know it's Pump.fun
+                    tradeType: 'buy',
+                    inputMint: config.NATIVE_SOL_MINT,
+                    outputMint: receivedToken.mint,
                     traderPubkey: sourceWallet,
-                    originalAmount: Math.abs(layer4Result.solChange || 0) / 1e9, // Amount in SOL for logging
-                    inputAmount: Math.abs(layer4Result.solChange || 0), // Raw amount in lamports for executor
-                    requiresATACreation: outputMint !== config.NATIVE_SOL_MINT,
-                    requiresPDARecovery: ['PumpFun', 'Raydium', 'Meteora', 'Orca', 'Jupiter'].includes(finalDex),
-                    masterTraderSlippageBps: masterTraderSlippageBps // 🎯 THE ALPHA: Master's slippage tolerance
+                    inputAmount: Math.abs(solChange), // The raw lamports the trader spent
                 },
-                summary: `${layer3Result.tradeType} on ${finalDex} via ${finalRouter}`,
-                reason: 'All layers passed with smart classification.'
+                summary: `Direct Pump.fun buy`,
+                reason: 'Passed all Gatekeeper checks.'
             };
 
         } catch (e) {
-            this.logError('[DNA-ANALYSIS] ❌ Error during 4-layer analysis:', { error: e.message });
+            this.logError('[GATEKEEPER] ❌ Error during analysis:', { error: e.message });
             return false;
         }
     }
@@ -692,9 +805,9 @@ class TraderMonitorWorker extends BaseWorker {
      * Helper function to extract token mints from analysis
      */
     _extractMintsFromAnalysis(layer4Result, normalizedTx) {
-        let inputMint = config.NATIVE_SOL_MINT;
-        let outputMint = config.NATIVE_SOL_MINT;
-        
+            let inputMint = config.NATIVE_SOL_MINT;
+            let outputMint = config.NATIVE_SOL_MINT;
+            
         // Use the mints from Layer 4 analysis if available
         if (layer4Result.inputMint) {
             inputMint = layer4Result.inputMint;
@@ -725,6 +838,17 @@ class TraderMonitorWorker extends BaseWorker {
     _extractMasterTraderSlippage(normalizedTx, dexPlatform, layer4Result) {
         try {
             this.logInfo(`[SLIPPAGE-DETECTIVE] 🔍 Extracting master trader's slippage for ${dexPlatform}...`);
+            
+            // ==========================================================
+            // ==================== PUMPFUN BYPASS =======================
+            // ==========================================================
+            // Pump.fun has a unique structure - it doesn't use standard DEX instructions
+            // The slippage is implicit and hard to extract from the transaction data
+            if (dexPlatform === 'PUMPFUN') {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ℹ️ Bypassing instruction check for PUMPFUN. Using default slippage.`);
+                return null; // Will fall back to default slippage
+            }
+            // ==========================================================
             
             // Find the real DEX instruction in the transaction
             const realDexInstruction = this._findRealDexInstruction(normalizedTx, dexPlatform);
@@ -818,8 +942,8 @@ class TraderMonitorWorker extends BaseWorker {
             
             if (!dexPrograms) {
                 this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ No DEX programs found for ${dexPlatform} (mapped to ${configKey})`);
-                return false;
-            }
+            return false;
+        }
             
             const programIdStr = programId.toString();
             
@@ -882,6 +1006,8 @@ class TraderMonitorWorker extends BaseWorker {
                     return this._decodeMeteoraInstruction(instruction);
                 case 'ORCA':
                     return this._decodeOrcaInstruction(instruction);
+                case 'JUPITER':
+                    return this._decodeJupiterInstruction(instruction);
                 default:
                     this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Unknown DEX platform: ${dexPlatform}, using generic decoding`);
                     return this._decodeGenericInstruction(instruction);
@@ -894,35 +1020,67 @@ class TraderMonitorWorker extends BaseWorker {
     }
 
     /**
-     * Decode PumpFun instruction (Buy/Sell)
+     * Decode PumpFun instruction (Buy/Sell) using official discriminators from IDL
      */
     _decodePumpFunInstruction(instruction) {
         try {
-            const data = instruction.data;
-            if (data.length < 8) {
-                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ PumpFun instruction too short: ${data.length} bytes`);
+            const data = Buffer.from(bs58.decode(instruction.data)); // Helius sends data in base58, not base64
+
+            if (data.length < 8) { // Instruction must have at least a discriminator
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ PumpFun instruction too short for a discriminator: ${data.length} bytes`);
                 return null;
             }
-            
-            // PumpFun instruction format (simplified):
-            // Bytes 0-7: Discriminator (8 bytes)
-            // Bytes 8-15: amount (u64) - tokens to buy/sell
-            // Bytes 16-23: maxSolCost (u64) - max SOL willing to spend
-            
-            const discriminator = data.readUInt8(0);
-            const amount = data.readBigUInt64LE(8);
-            const maxSolCost = data.readBigUInt64LE(16);
-            
-            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 PumpFun decoded: discriminator=${discriminator}, amount=${amount}, maxSolCost=${maxSolCost}`);
-            
-            return {
-                amountIn: Number(amount),
-                minimumAmountOut: Number(maxSolCost), // For PumpFun, this is the max SOL cost
-                discriminator: discriminator
-            };
-            
+
+            // Extract the discriminator (first 8 bytes)
+            const discriminator = data.slice(0, 8);
+            const argsData = data.slice(8);
+
+            // Calculate expected discriminators based on Anchor IDL convention
+            const buyHash = createHash('sha256').update('global:buy').digest();
+            const buyDiscriminator = buyHash.slice(0, 8);
+
+            const sellHash = createHash('sha256').update('global:sell').digest();
+            const sellDiscriminator = sellHash.slice(0, 8);
+
+            let decodedArgs;
+            let tradeType;
+
+            // Compare buffers to identify the instruction type
+            if (discriminator.equals(buyDiscriminator)) {
+                tradeType = 'buy';
+                if (argsData.length !== 16) {
+                     this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ PumpFun 'buy' instruction has unexpected args length (${argsData.length} bytes). Skipping.`);
+                     return null;
+                }
+                decodedArgs = borsh.deserialize(PUMPFUN_INSTRUCTION_SCHEMA, PumpFunInstructionPayload, argsData);
+                this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 PumpFun BUY decoded: amount=${decodedArgs.amount}, maxSolCost=${decodedArgs.maxSolCost}`);
+                return {
+                    amountIn: Number(decodedArgs.amount),
+                    minimumAmountOut: Number(decodedArgs.maxSolCost), // For buys, this represents max spend
+                    discriminator: discriminator.toString('hex')
+                };
+
+            } else if (discriminator.equals(sellDiscriminator)) {
+                tradeType = 'sell';
+                 if (argsData.length !== 16) {
+                     this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ PumpFun 'sell' instruction has unexpected args length (${argsData.length} bytes). Skipping.`);
+                     return null;
+                }
+                decodedArgs = borsh.deserialize(PUMPFUN_SELL_INSTRUCTION_SCHEMA, PumpFunSellInstructionPayload, argsData);
+                 this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 PumpFun SELL decoded: amount=${decodedArgs.amount}, minSolOutput=${decodedArgs.minSolOutput}`);
+                 return {
+                    amountIn: Number(decodedArgs.amount), // For sells, amountIn is token amount
+                    minimumAmountOut: Number(decodedArgs.minSolOutput),
+                    discriminator: discriminator.toString('hex')
+                };
+
+            } else {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Unknown PumpFun instruction discriminator: ${discriminator.toString('hex')}`);
+                return null;
+            }
+
         } catch (error) {
-            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding PumpFun instruction: ${error.message}`);
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error Borsh decoding PumpFun instruction: ${error.message}`);
             return null;
         }
     }
@@ -932,61 +1090,129 @@ class TraderMonitorWorker extends BaseWorker {
      */
     _decodeRaydiumInstruction(instruction) {
         try {
-            const data = instruction.data;
+            const data = Buffer.from(bs58.decode(instruction.data)); // Helius sends data in base58
             if (data.length < 17) {
                 this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Raydium instruction too short: ${data.length} bytes`);
                 return null;
             }
             
-            // Raydium instruction format:
+            // Raydium instruction format (Borsh-serialized):
             // Byte 0: Discriminator (u8)
             // Bytes 1-8: amountIn (u64)
             // Bytes 9-16: minimumAmountOut (u64)
             
-            const discriminator = data.readUInt8(0);
-            const amountIn = data.readBigUInt64LE(1);
-            const minimumAmountOut = data.readBigUInt64LE(9);
+            // Deserialize using Borsh schema
+            const decodedArgs = borsh.deserialize(RAYDIUM_INSTRUCTION_SCHEMA, RaydiumSwapInstructionPayload, data);
             
-            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Raydium decoded: discriminator=${discriminator}, amountIn=${amountIn}, minimumAmountOut=${minimumAmountOut}`);
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Raydium Borsh decoded: discriminator=${decodedArgs.discriminator}, amountIn=${decodedArgs.amountIn}, minimumAmountOut=${decodedArgs.minimumAmountOut}`);
             
-            return {
-                amountIn: Number(amountIn),
-                minimumAmountOut: Number(minimumAmountOut),
-                discriminator: discriminator
+                return {
+                amountIn: Number(decodedArgs.amountIn),
+                minimumAmountOut: Number(decodedArgs.minimumAmountOut),
+                discriminator: decodedArgs.discriminator
             };
             
         } catch (error) {
-            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Raydium instruction: ${error.message}`);
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error Borsh decoding Raydium instruction: ${error.message}`);
             return null;
         }
     }
 
     /**
-     * Decode Meteora instruction
+     * Decode Meteora instruction using proper Borsh deserialization
      */
     _decodeMeteoraInstruction(instruction) {
         try {
-            // Meteora has different instruction formats, using generic approach for now
-            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Meteora instruction decoding (placeholder)`);
-            return this._decodeGenericInstruction(instruction);
+            const data = Buffer.from(bs58.decode(instruction.data)); // Helius sends data in base58
+            if (data.length < 17) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Meteora instruction too short: ${data.length} bytes`);
+                return null;
+            }
+            
+            // Meteora instruction format (Borsh-serialized):
+            // Byte 0: Discriminator (u8)
+            // Bytes 1-8: amountIn (u64)
+            // Bytes 9-16: minimumAmountOut (u64)
+            
+            // Deserialize using Borsh schema
+            const decodedArgs = borsh.deserialize(METEORA_INSTRUCTION_SCHEMA, MeteoraSwapInstructionPayload, data);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Meteora Borsh decoded: discriminator=${decodedArgs.discriminator}, amountIn=${decodedArgs.amountIn}, minimumAmountOut=${decodedArgs.minimumAmountOut}`);
+            
+            return {
+                amountIn: Number(decodedArgs.amountIn),
+                minimumAmountOut: Number(decodedArgs.minimumAmountOut),
+                discriminator: decodedArgs.discriminator
+            };
             
         } catch (error) {
-            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Meteora instruction: ${error.message}`);
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error Borsh decoding Meteora instruction: ${error.message}`);
             return null;
         }
     }
 
     /**
-     * Decode Orca instruction
+     * Decode Orca instruction using proper Borsh deserialization
      */
     _decodeOrcaInstruction(instruction) {
         try {
-            // Orca has complex instruction formats, using generic approach for now
-            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Orca instruction decoding (placeholder)`);
-            return this._decodeGenericInstruction(instruction);
+            const data = Buffer.from(bs58.decode(instruction.data)); // Helius sends data in base58
+            if (data.length < 17) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Orca instruction too short: ${data.length} bytes`);
+                return null;
+            }
+            
+            // Orca instruction format (Borsh-serialized):
+            // Byte 0: Discriminator (u8)
+            // Bytes 1-8: amountIn (u64)
+            // Bytes 9-16: minimumAmountOut (u64)
+            
+            // Deserialize using Borsh schema
+            const decodedArgs = borsh.deserialize(ORCA_INSTRUCTION_SCHEMA, OrcaSwapInstructionPayload, data);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Orca Borsh decoded: discriminator=${decodedArgs.discriminator}, amountIn=${decodedArgs.amountIn}, minimumAmountOut=${decodedArgs.minimumAmountOut}`);
+            
+            return {
+                amountIn: Number(decodedArgs.amountIn),
+                minimumAmountOut: Number(decodedArgs.minimumAmountOut),
+                discriminator: decodedArgs.discriminator
+            };
             
         } catch (error) {
-            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error decoding Orca instruction: ${error.message}`);
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error Borsh decoding Orca instruction: ${error.message}`);
+            return null;
+        }
+    }
+
+    /**
+     * Decode Jupiter instruction using proper Borsh deserialization
+     */
+    _decodeJupiterInstruction(instruction) {
+        try {
+            const data = Buffer.from(bs58.decode(instruction.data)); // Helius sends data in base58
+            if (data.length < 17) {
+                this.logInfo(`[SLIPPAGE-DETECTIVE] ⚠️ Jupiter instruction too short: ${data.length} bytes`);
+                return null;
+            }
+            
+            // Jupiter instruction format (Borsh-serialized):
+            // Byte 0: Discriminator (u8)
+            // Bytes 1-8: amountIn (u64)
+            // Bytes 9-16: minimumAmountOut (u64)
+            
+            // Deserialize using Borsh schema
+            const decodedArgs = borsh.deserialize(JUPITER_INSTRUCTION_SCHEMA, JupiterSwapInstructionPayload, data);
+            
+            this.logInfo(`[SLIPPAGE-DETECTIVE] 🔧 Jupiter Borsh decoded: discriminator=${decodedArgs.discriminator}, amountIn=${decodedArgs.amountIn}, minimumAmountOut=${decodedArgs.minimumAmountOut}`);
+            
+            return {
+                amountIn: Number(decodedArgs.amountIn),
+                minimumAmountOut: Number(decodedArgs.minimumAmountOut),
+                discriminator: decodedArgs.discriminator
+            };
+            
+        } catch (error) {
+            this.logWarn(`[SLIPPAGE-DETECTIVE] ❌ Error Borsh decoding Jupiter instruction: ${error.message}`);
             return null;
         }
     }
@@ -1671,6 +1897,7 @@ class TraderMonitorWorker extends BaseWorker {
     // ====== UNIFIED TRANSACTION HANDLER (DEBUGGING + ANALYSIS) ============
     // =======================================================================
     async handleUnifiedTransaction(sourceWallet, signature, transactionUpdate) {
+        const detectionStartTime = Date.now(); // 🔧 PERFORMANCE: Start timing detection
         try {
             console.log(`[MONITOR-BRAIN] 🧠 Analyzing transaction... Sig: ${shortenAddress(signature)}`);
             
@@ -1740,14 +1967,26 @@ class TraderMonitorWorker extends BaseWorker {
                 
                 console.log(`🚀 FORWARDING PURIFIED COPY TRADE to executor...`);
                 this.signalMessage('EXECUTE_COPY_TRADE', messagePayload);
+                
+                // 🔧 PERFORMANCE: Record successful detection latency
+                const detectionLatency = Date.now() - detectionStartTime;
+                performanceMonitor.recordDetectionLatency(detectionLatency);
                 // ==========================================================
 
             } else {
                 console.log(`[MONITOR-BRAIN] ⏭️ Transaction did not pass analysis. Ignoring.`);
+                
+                // 🔧 PERFORMANCE: Record detection latency even for rejected transactions
+                const detectionLatency = Date.now() - detectionStartTime;
+                performanceMonitor.recordDetectionLatency(detectionLatency);
             }
 
         } catch (error) {
             this.logError('❌ Error in Unified Transaction Handler:', { error: error.message, stack: error.stack });
+            
+            // 🔧 PERFORMANCE: Record detection latency even for error cases
+            const detectionLatency = Date.now() - detectionStartTime;
+            performanceMonitor.recordDetectionLatency(detectionLatency);
         }
     }
     
@@ -1885,7 +2124,7 @@ class TraderMonitorWorker extends BaseWorker {
             // ====== CACHING INTEGRATION - AVOID RE-PROCESSING ===================
             // =======================================================================
             // PERFORM ANALYSIS IN MONITOR (as originally designed)
-            const analysisResult = this._isPotentiallyATrade(normalizedTx, sourceWallet, this.knownDexPrograms);
+            const analysisResult = this._isPotentiallyATrade(normalizedTx, sourceWallet);
             
             // ================================================================
             // ======================== THE FIX ===============================
@@ -2009,7 +2248,7 @@ class TraderMonitorWorker extends BaseWorker {
         const privateRouters = ['BloomRouter', 'PrivateRouter', 'BLURRouter'];
         return privateRouters.includes(platform);
     }
-    
+
     async customCleanup() {
         if (this.laserstreamManager) {
             await this.laserstreamManager.stop();
@@ -2051,4 +2290,4 @@ TraderMonitorWorker.prototype.getMasterTraderWallets = function() {
     return Array.from(this.activeTraders.map(trader => trader.walletAddress));
 };
 
-module.exports = TraderMonitorWorker;
+module.exports = TraderMonitorWorker;    
