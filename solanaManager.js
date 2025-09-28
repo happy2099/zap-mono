@@ -154,6 +154,59 @@ class SolanaManager {
        }
    }
 
+   async getDecodedAmmPool(poolAddress) {
+    try {
+        const borsh = require('borsh');
+        const BN = require('bn.js');
+        const { PublicKey } = require('@solana/web3.js');
+
+        const PoolLayout = new Map([[Object, { 
+            kind: 'struct', 
+            fields: [
+                ['pool_bump', 'u8'],
+                ['index', 'u16'],
+                ['creator', 'publicKey'],
+                ['base_mint', 'publicKey'],
+                ['quote_mint', 'publicKey'],
+                ['lp_mint', 'publicKey'],
+                ['pool_base_token_account', 'publicKey'],
+                ['pool_quote_token_account', 'publicKey'],
+                ['lp_supply', 'u64'],
+                ['coin_creator', 'publicKey'],
+                ['pool_base_token_reserves', 'u64'],
+                ['pool_quote_token_reserves', 'u64'],
+            ] 
+        }]]);
+
+        const accountInfo = await this.connection.getAccountInfo(new PublicKey(poolAddress));
+        if (!accountInfo) return null;
+        
+        // The discriminator is the first 8 bytes of the account data
+        const decodedData = borsh.deserialize(PoolLayout, Object, accountInfo.data.slice(8));
+        
+        // Convert buffers to PublicKeys and BN to numbers/BigInts for easier use
+        const formatDecodedData = (data) => {
+            const formatted = {};
+            for (const [key, value] of Object.entries(data)) {
+                if (value && typeof value.toBuffer === 'function') {
+                    formatted[key] = new PublicKey(value);
+                } else if (value instanceof BN) {
+                    formatted[key] = BigInt(value.toString());
+                } else {
+                    formatted[key] = value;
+                }
+            }
+            return formatted;
+        };
+
+        return formatDecodedData(decodedData);
+        
+    } catch (error) {
+        console.error(`[SolanaManager] Failed to decode AMM pool account ${poolAddress}:`, error);
+        return null;
+    }
+}
+
    async createAndInitializeNonceAccount(payerKeypair) {
        try {
            const nonceAccountKeypair = Keypair.generate();
@@ -252,16 +305,6 @@ class SolanaManager {
            throw error;
        }
    }
-
-   // REMOVED: sendRawSerializedTransaction - Use singaporeSenderManager.js for all transaction sending
-
-
-
-   // REMOVED: sendVersionedTransaction - Use singaporeSenderManager.js for all transaction sending
-
-// ADD this new function inside the SolanaManager class in solanaManager.js
-
-   // REMOVED: getPriorityFeeEstimate - Use singaporeSenderManager.js for all fee calculations
 
 
 

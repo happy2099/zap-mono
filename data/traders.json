@@ -6,9 +6,9 @@
         "user_id": "1758133086172",
         "name": "Eu",
         "wallet": "DfMxre4cKmvogbLrPigxmibVTTQDuzjdXojWzjCXXhzj",
-        "active": true,
+        "active": false,
         "created_at": "2025-05-24T08:37:53.854Z",
-        "updated_at": "2025-09-25T18:22:44.972Z"
+        "updated_at": "2025-09-28T07:48:59.381Z"
       },
       "H": {
         "id": "1758133933150",
@@ -17,16 +17,16 @@
         "wallet": "Av3xWHJ5EsoLZag6pr7LKbrGgLRTaykXomDD5kBhL9YQ",
         "active": true,
         "created_at": "2025-05-24T08:38:53.150Z",
-        "updated_at": "2025-09-25T12:09:35.411Z"
+        "updated_at": "2025-09-28T07:49:18.354Z"
       },
       "oz": {
         "id": "1758133961125",
         "user_id": "1758133086172",
         "name": "oz",
         "wallet": "DZAa55HwXgv5hStwaTEJGXZz1DhHejvpb7Yr762urXam",
-        "active": true,
+        "active": false,
         "created_at": "2025-05-24T08:39:21.125Z",
-        "updated_at": "2025-09-27T09:02:01.640Z"
+        "updated_at": "2025-09-27T19:54:29.734Z"
       },
       "Orange": {
         "id": "1758133989617",
@@ -69,9 +69,9 @@
         "user_id": "1758133086172",
         "name": "alo",
         "wallet": "xXpRSpAe1ajq4tJP78tS3X1AqNwJVQ4Vvb1Swg4hHQh",
-        "active": true,
+        "active": false,
         "created_at": "2025-06-09T15:35:07.068Z",
-        "updated_at": "2025-09-25T07:14:33.475Z"
+        "updated_at": "2025-09-27T19:54:12.164Z"
       },
       "otta": {
         "id": "1758191590310",
@@ -141,9 +141,9 @@
         "user_id": "1758133086172",
         "name": "cupsey-2",
         "wallet": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
-        "active": true,
+        "active": false,
         "created_at": "2025-09-19T16:06:08.429Z",
-        "updated_at": "2025-09-27T15:50:08.530Z"
+        "updated_at": "2025-09-28T07:48:55.005Z"
       },
       "Yenni": {
         "id": "1758459570903",
@@ -152,7 +152,7 @@
         "wallet": "5B52w1ZW9tuwUduueP5J7HXz5AcGfruGoX6YoAudvyxG",
         "active": true,
         "created_at": "2025-09-21T12:59:30.903Z",
-        "updated_at": "2025-09-23T13:56:19.963Z"
+        "updated_at": "2025-09-28T08:08:02.671Z"
       },
       "Kev": {
         "id": "1758459646483",
@@ -161,7 +161,7 @@
         "wallet": "BTf4A2exGK9BCVDNzy65b9dUzXgMqB4weVkvTMFQsadd",
         "active": true,
         "created_at": "2025-09-21T13:00:46.483Z",
-        "updated_at": "2025-09-23T05:48:15.558Z"
+        "updated_at": "2025-09-28T07:49:13.473Z"
       }
     }
   }

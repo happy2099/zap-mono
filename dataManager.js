@@ -9,9 +9,10 @@ const path = require('path');
 const BN = require('bn.js');
 
 class DataManager {
-    constructor() {
+    constructor(redisManager = null) {
         this.dataPath = path.join(__dirname, 'data');
         this.isInitialized = false;
+        this.redisManager = redisManager; // Redis manager for caching
         this.logger = {
             info: (msg, data) => console.log(`[JSON-DB] ${msg}`, data ? JSON.stringify(data) : ''),
             error: (msg, data) => console.error(`[JSON-DB] ${msg}`, data ? JSON.stringify(data) : ''),
@@ -538,27 +539,239 @@ class DataManager {
     }
 
     async getSettings() {
+        // We need access to Redis here. We assume it's initialized.
+        if (!this.redisManager) {
+            // Lazy-initialize RedisManager if it hasn't been done
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const configKey = 'app:settings';
+
         try {
-            const settingsData = await this.readJsonFile('settings.json');
-            return settingsData;
+            // 1. Try to fetch from Redis ONLY (no file fallback)
+            const redisSettings = await this.redisManager.getObject(configKey);
+            if (redisSettings) {
+                this.logger.debug(`[SETTINGS] ⚡ Redis HIT for settings.`);
+                return redisSettings;
+            }
+
+            // 2. If not in Redis, return null (let caller handle it)
+            this.logger.warn(`[SETTINGS] ❌ No settings found in Redis. Config not initialized.`);
+            return null;
+
         } catch (error) {
-            this.logger.error('Error loading settings:', error);
-            return {
+            this.logger.error('Error loading settings from Redis:', error);
+            return null;
+        }
+    }
+
+    // ========================= REDIS-ONLY CONFIG MANAGEMENT ========================
+    
+    async setSettings(settings) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const configKey = 'app:settings';
+        try {
+            await this.redisManager.setObject(configKey, settings, 86400); // 24 hours TTL
+            this.logger.info(`[SETTINGS] ✅ Settings saved to Redis.`);
+            return true;
+        } catch (error) {
+            this.logger.error('Error saving settings to Redis:', error);
+            return false;
+        }
+    }
+
+    async updateScaleFactor(scaleFactor) {
+        const currentSettings = await this.getSettings();
+        if (!currentSettings) {
+            this.logger.error(`[SETTINGS] ❌ Cannot update scale factor: No settings found in Redis.`);
+            return false;
+        }
+
+        currentSettings.botSettings.scaleFactor = scaleFactor;
+        return await this.setSettings(currentSettings);
+    }
+
+    async updateSlippage(slippage) {
+        const currentSettings = await this.getSettings();
+        if (!currentSettings) {
+            this.logger.error(`[SETTINGS] ❌ Cannot update slippage: No settings found in Redis.`);
+            return false;
+        }
+
+        currentSettings.botSettings.maxSlippage = slippage;
+        return await this.setSettings(currentSettings);
+    }
+
+    async initializeDefaultSettings() {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const configKey = 'app:settings';
+        
+        // Check if settings already exist
+        const existingSettings = await this.redisManager.getObject(configKey);
+        if (existingSettings) {
+            this.logger.info(`[SETTINGS] ✅ Settings already exist in Redis.`);
+            return existingSettings;
+        }
+
+        // Initialize default settings in Redis
+        const defaultSettings = {
                 botSettings: {
-                    scaleFactor: 0.1,
-                    minSolAmount: 0.1,
-                    maxSolAmount: 10.0,
-                    maxSlippage: 0.05,
+                copyTrading: true, // Pure copy trading bot
+                maxSlippage: 0.15,
+                minSolAmount: 0.001,
+                maxSolAmount: 50.0,
+                enableNotifications: true,
+                enableLogging: true,
+                scaleFactor: 1.0, // 100% - exact copy by default
                     enableATASlicing: true,
                     ataSliceOffset: 64,
                     ataSliceLength: 8,
-                    supportedPlatforms: ['PumpFun', 'Raydium', 'Jupiter', 'Meteora', 'Orca'],
+                supportedPlatforms: ["PumpFun", "Raydium", "Jupiter", "Meteora", "Orca"],
                     enableRouterDetection: true,
-                    computeBudgetUnits: 200000,
+                computeBudgetUnits: 500000,
                     computeBudgetFee: 0
-                }
-            };
+            },
+            tradingSettings: {
+                defaultSolAmount: 0.1,
+                maxPositions: 100,
+                stopLoss: 0.0,
+                takeProfit: 0.0
+            },
+            settings: {}
+        };
+
+        await this.redisManager.setObject(configKey, defaultSettings, 86400); // 24 hours TTL
+        this.logger.info(`[SETTINGS] ✅ Default settings initialized in Redis.`);
+        return defaultSettings;
+    }
+
+    // ========================= REDIS PORTFOLIO MANAGEMENT ========================
+    
+    async addPosition(chatId, tokenMint, positionData) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
         }
+
+        const positionKey = `portfolio:${chatId}:${tokenMint}`;
+        try {
+            await this.redisManager.setObject(positionKey, positionData, 86400); // 24 hours TTL
+            this.logger.info(`[PORTFOLIO] ✅ Position added for user ${chatId}: ${tokenMint} - ${positionData.tokenAmount} tokens`);
+            return true;
+        } catch (error) {
+            this.logger.error(`[PORTFOLIO] ❌ Failed to add position for user ${chatId}, token ${tokenMint}:`, error);
+            return false;
+        }
+    }
+
+    async getPosition(chatId, tokenMint) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const positionKey = `portfolio:${chatId}:${tokenMint}`;
+        try {
+            const position = await this.redisManager.getObject(positionKey);
+            if (position) {
+                this.logger.debug(`[PORTFOLIO] ⚡ Position found for user ${chatId}, token ${tokenMint}: ${position.tokenAmount} tokens`);
+            }
+            return position;
+        } catch (error) {
+            this.logger.error(`[PORTFOLIO] ❌ Failed to get position for user ${chatId}, token ${tokenMint}:`, error);
+            return null;
+        }
+    }
+
+    async updatePosition(chatId, tokenMint, newTokenAmount) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const positionKey = `portfolio:${chatId}:${tokenMint}`;
+        try {
+            const existingPosition = await this.getPosition(chatId, tokenMint);
+            if (!existingPosition) {
+                this.logger.warn(`[PORTFOLIO] ⚠️ No position found to update for user ${chatId}, token ${tokenMint}`);
+                return false;
+            }
+
+            existingPosition.tokenAmount = newTokenAmount;
+            existingPosition.lastUpdated = new Date().toISOString();
+            
+            await this.redisManager.setObject(positionKey, existingPosition, 86400);
+            this.logger.info(`[PORTFOLIO] ✅ Position updated for user ${chatId}, token ${tokenMint}: ${newTokenAmount} tokens`);
+            return true;
+        } catch (error) {
+            this.logger.error(`[PORTFOLIO] ❌ Failed to update position for user ${chatId}, token ${tokenMint}:`, error);
+            return false;
+        }
+    }
+
+    async removePosition(chatId, tokenMint) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        const positionKey = `portfolio:${chatId}:${tokenMint}`;
+        try {
+            await this.redisManager.del(positionKey);
+            this.logger.info(`[PORTFOLIO] ✅ Position removed for user ${chatId}, token ${tokenMint}`);
+            return true;
+        } catch (error) {
+            this.logger.error(`[PORTFOLIO] ❌ Failed to remove position for user ${chatId}, token ${tokenMint}:`, error);
+            return false;
+        }
+    }
+
+    async getAllPositions(chatId) {
+        if (!this.redisManager) {
+            const { RedisManager } = require('./redis/redisManager');
+            this.redisManager = new RedisManager();
+            await this.redisManager.initialize();
+        }
+
+        try {
+            const keys = await this.redisManager.keys(`portfolio:${chatId}:*`);
+            const positions = {};
+            
+            for (const key of keys) {
+                const tokenMint = key.replace(`portfolio:${chatId}:`, '');
+                const position = await this.getPosition(chatId, tokenMint);
+                if (position) {
+                    positions[tokenMint] = position;
+                }
+            }
+            
+            this.logger.info(`[PORTFOLIO] 📊 Found ${Object.keys(positions).length} active positions for user ${chatId}`);
+            return positions;
+        } catch (error) {
+            this.logger.error(`[PORTFOLIO] ❌ Failed to get all positions for user ${chatId}:`, error);
+            return {};
+        }
+    }
+
+    async hasPosition(chatId, tokenMint) {
+        const position = await this.getPosition(chatId, tokenMint);
+        return position !== null && position.tokenAmount > 0;
     }
 
     async updateUserSlippage(chatId, slippageBps) {

@@ -165,8 +165,17 @@ const config = {
     PUMP_FUN_CONSTANTS: {
         GLOBAL: new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk'),
         FEE_RECIPIENT: new PublicKey('CebN5WGQ4jvEPvsVU4EoHEpgzq1VV7AbicfhtW4xC9iM'),
+        EVENT_AUTHORITY: new PublicKey('CEntr3oDe4kAv3g4StGgG3sCjwsUQu3JTT5sSxxHgas'),
+        FEE_PROGRAM: new PublicKey('pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ'),
         BUY_DISCRIMINATOR: Buffer.from('169168196c813e37', 'hex'),
         SELL_DISCRIMINATOR: Buffer.from('43a0271383796d13', 'hex'),
+    },
+    
+    // --- PUMP.FUN AMM Constants (For Post-Migration Trading) ---
+    PUMP_FUN_AMM_CONSTANTS: {
+        GLOBAL_CONFIG: new PublicKey('11111111111111111111111111111111'), // Placeholder - needs actual value
+        FEE_PROGRAM: new PublicKey('pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ'), // Same as bonding curve
+        EVENT_AUTHORITY: new PublicKey('CEntr3oDe4kAv3g4StGgG3sCjwsUQu3JTT5sSxxHgas'), // Same as bonding curve
     },
     
     // Native SOL mint address

@@ -408,7 +408,7 @@ class LaserStreamManager extends EventEmitter {
     // DEEP ANALYSIS: Check log messages for real DEX program IDs (legacy method)
     _deepAnalyzeLogMessages(logMessages) {
         try {
-            console.log(`[DEEP-ANALYSIS] 🔍 Analyzing ${logMessages.length} log messages for real DEX...`);
+            // console.log(`[DEEP-ANALYSIS] 🔍 Analyzing ${logMessages.length} log messages for real DEX...`); // SILENCED FOR CLEAN TERMINAL
             
             // Look for DEX program IDs in log messages
             const dexPatterns = {
@@ -526,22 +526,22 @@ class LaserStreamManager extends EventEmitter {
             
             // Analyze token balance changes
             if (meta.preTokenBalances && meta.postTokenBalances) {
-                console.log(`[TOKEN-BALANCE] 🔍 Pre-token balances:`, meta.preTokenBalances.length, 'items');
-                console.log(`[TOKEN-BALANCE] 🔍 Post-token balances:`, meta.postTokenBalances.length, 'items');
+                // console.log(`[TOKEN-BALANCE] 🔍 Pre-token balances:`, meta.preTokenBalances.length, 'items'); // SILENCED FOR CLEAN TERMINAL
+                // console.log(`[TOKEN-BALANCE] 🔍 Post-token balances:`, meta.postTokenBalances.length, 'items'); // SILENCED FOR CLEAN TERMINAL
                 
                 // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
-                console.log(`[TOKEN-BALANCE] 📊 SERIALIZED PARSED DATA:`);
-                console.log(`[TOKEN-BALANCE] 📊 preTokenBalances: [ ${meta.preTokenBalances.length} items ]`);
-                console.log(`[TOKEN-BALANCE] 📊 postTokenBalances: [ ${meta.postTokenBalances.length} items ]`);
+                // console.log(`[TOKEN-BALANCE] 📊 SERIALIZED PARSED DATA:`); // SILENCED FOR CLEAN TERMINAL
+                // console.log(`[TOKEN-BALANCE] 📊 preTokenBalances: [ ${meta.preTokenBalances.length} items ]`); // SILENCED FOR CLEAN TERMINAL
+                // console.log(`[TOKEN-BALANCE] 📊 postTokenBalances: [ ${meta.postTokenBalances.length} items ]`); // SILENCED FOR CLEAN TERMINAL
                 
                 // Debug: Log the actual structure of token balances
                 if (meta.preTokenBalances.length > 0) {
-                    console.log(`[TOKEN-BALANCE] 🔍 Sample pre-token balance:`, JSON.stringify(meta.preTokenBalances[0], null, 2));
-                    console.log(`[TOKEN-BALANCE] 📊 Full preTokenBalances structure:`, JSON.stringify(meta.preTokenBalances, null, 2));
+                    // console.log(`[TOKEN-BALANCE] 🔍 Sample pre-token balance:`, JSON.stringify(meta.preTokenBalances[0], null, 2)); // SILENCED FOR CLEAN TERMINAL
+                    // console.log(`[TOKEN-BALANCE] 📊 Full preTokenBalances structure:`, JSON.stringify(meta.preTokenBalances, null, 2)); // SILENCED FOR CLEAN TERMINAL
                 }
                 if (meta.postTokenBalances.length > 0) {
-                    console.log(`[TOKEN-BALANCE] 🔍 Sample post-token balance:`, JSON.stringify(meta.postTokenBalances[0], null, 2));
-                    console.log(`[TOKEN-BALANCE] 📊 Full postTokenBalances structure:`, JSON.stringify(meta.postTokenBalances, null, 2));
+                    // console.log(`[TOKEN-BALANCE] 🔍 Sample post-token balance:`, JSON.stringify(meta.postTokenBalances[0], null, 2)); // SILENCED FOR CLEAN TERMINAL
+                    // console.log(`[TOKEN-BALANCE] 📊 Full postTokenBalances structure:`, JSON.stringify(meta.postTokenBalances, null, 2)); // SILENCED FOR CLEAN TERMINAL
                 }
                 
                 const preTokenMap = new Map();
@@ -1158,20 +1158,20 @@ class LaserStreamManager extends EventEmitter {
                         return;
                     }
 
-                    // DEBUG: Log wallet detection
-                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Source wallet: ${shortenAddress(sourceWallet)}`);
-                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Active wallets: ${Array.from(this.activeTraderWallets).map(w => shortenAddress(w)).join(', ')}`);
-                    console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Is monitored? ${this.activeTraderWallets.has(sourceWallet)}`);
+                    // DEBUG: Log wallet detection (SILENCED FOR CLEAN TERMINAL)
+                    // console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Source wallet: ${shortenAddress(sourceWallet)}`);
+                    // console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Active wallets: ${Array.from(this.activeTraderWallets).map(w => shortenAddress(w)).join(', ')}`);
+                    // console.log(`[LASERSTREAM-PIPE] 🔍 DEBUG: Is monitored? ${this.activeTraderWallets.has(sourceWallet)}`);
 
                     // Check if the source wallet is one we are monitoring.
                     if (!this.activeTraderWallets.has(sourceWallet)) {
-                        console.log(`[LASERSTREAM-PIPE] ⏭️ Not from monitored trader: ${shortenAddress(sourceWallet)}`);
+                        // console.log(`[LASERSTREAM-PIPE] ⏭️ Not from monitored trader: ${shortenAddress(sourceWallet)}`); // SILENCED FOR CLEAN TERMINAL
                         return; // Not from a monitored trader, ignore.
                     }
 
                     // 2. Its ONLY job is to emit the RAW, unprocessed transaction.
                     // It does NOT do any analysis itself.
-                    console.log(`[LASERSTREAM-PIPE] ✅ Detected activity from monitored trader: ${shortenAddress(sourceWallet)}`);
+                    // console.log(`[LASERSTREAM-PIPE] ✅ Detected activity from monitored trader: ${shortenAddress(sourceWallet)}`); // SILENCED FOR CLEAN TERMINAL
                     
                     // Use the explicit callback set by the monitor.
                     if (typeof this.transactionNotificationCallback === 'function') {
@@ -1213,29 +1213,29 @@ class LaserStreamManager extends EventEmitter {
     // Enhanced transaction handling with refined data extraction
     async handleTransactionUpdate(transactionUpdate) {
         try {
-            console.log(`[LASERSTREAM-PRO] 📡 Received transaction update from LaserStream`);
+            // console.log(`[LASERSTREAM-PRO] 📡 Received transaction update from LaserStream`); // SILENCED FOR CLEAN TERMINAL
             
             // Use the new normalizeTransaction function
             const normalizedTx = normalizeTransaction(transactionUpdate);
             if (!normalizedTx) {
-                console.log(`[LASERSTREAM-PRO] ⚠️ Transaction filtered out (vote/failed) - ignoring`);
+                // console.log(`[LASERSTREAM-PRO] ⚠️ Transaction filtered out (vote/failed) - ignoring`); // SILENCED FOR CLEAN TERMINAL
                 return;
             }
             
             // 🔧 DUPLICATE DETECTION: Check if we've already processed this signature
             if (this.processedSignatures.has(normalizedTx.signature)) {
-                console.log(`[LASERSTREAM-PRO] ⚠️ Duplicate transaction detected: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)} - SKIPPING`);
+                // console.log(`[LASERSTREAM-PRO] ⚠️ Duplicate transaction detected: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)} - SKIPPING`); // SILENCED FOR CLEAN TERMINAL
                 return;
             }
             
             // Mark as processed
             this.processedSignatures.add(normalizedTx.signature);
-            console.log(`[LASERSTREAM-PRO] 🔍 Processing NEW transaction: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)}`);
+            // console.log(`[LASERSTREAM-PRO] 🔍 Processing NEW transaction: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)}`); // SILENCED FOR CLEAN TERMINAL
             
-            console.log(`[LASERSTREAM-PRO] 🔍 Normalized transaction: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)}`);
-            console.log(`[LASERSTREAM-PRO] 🔍 SOL Change: ${normalizedTx.solChange}`);
-            console.log(`[LASERSTREAM-PRO] 🔍 Token Changes: ${normalizedTx.tokenChanges.length}`);
-            console.log(`[LASERSTREAM-PRO] 🔍 Significant Change: ${normalizedTx.significantChange}`);
+            // console.log(`[LASERSTREAM-PRO] 🔍 Normalized transaction: ${normalizedTx.signature.substring(0, 8)}...${normalizedTx.signature.substring(-8)}`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`[LASERSTREAM-PRO] 🔍 SOL Change: ${normalizedTx.solChange}`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`[LASERSTREAM-PRO] 🔍 Token Changes: ${normalizedTx.tokenChanges.length}`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`[LASERSTREAM-PRO] 🔍 Significant Change: ${normalizedTx.significantChange}`); // SILENCED FOR CLEAN TERMINAL
             
             // Extract account keys with proper Helius LaserStream format handling
             let accountKeys = [];
@@ -1264,7 +1264,7 @@ class LaserStreamManager extends EventEmitter {
                         // Case 5: Try to convert directly
                         return new PublicKey(key).toBase58();
                     } catch (error) {
-                        console.log(`[LASERSTREAM-DEBUG] Failed to parse account key:`, key, error.message);
+                        // console.log(`[LASERSTREAM-DEBUG] Failed to parse account key:`, key, error.message); // SILENCED FOR CLEAN TERMINAL
                         return null;
                     }
                 }).filter(key => key !== null);
@@ -1299,23 +1299,23 @@ class LaserStreamManager extends EventEmitter {
 
             // Find which trader wallet is involved
             if (!this.activeTraderWallets || this.activeTraderWallets.size === 0) {
-                console.log(`[LASERSTREAM-DEBUG] ⚠️ No active trader wallets set, skipping transaction`);
+                // console.log(`[LASERSTREAM-DEBUG] ⚠️ No active trader wallets set, skipping transaction`); // SILENCED FOR CLEAN TERMINAL
                 return;
             }
             const sourceWallet = accountKeys.find(key => this.activeTraderWallets && this.activeTraderWallets.has(key));
             
-            // DEBUG: Log transaction structure and wallet detection details
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction Structure Debug:`);
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction keys:`, Object.keys(transaction));
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Message keys:`, transaction.message ? Object.keys(transaction.message) : 'No message');
-            console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys type:`, transaction.message?.accountKeys ? typeof transaction.message.accountKeys : 'No accountKeys');
-            console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys length:`, transaction.message?.accountKeys?.length || 0);
-            console.log(`[LASERSTREAM-DEBUG] 🔍 First accountKey sample:`, transaction.message?.accountKeys?.[0]);
+            // DEBUG: Log transaction structure and wallet detection details (SILENCED FOR CLEAN TERMINAL)
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction Structure Debug:`);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Transaction keys:`, Object.keys(transaction));
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Message keys:`, transaction.message ? Object.keys(transaction.message) : 'No message');
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys type:`, transaction.message?.accountKeys ? typeof transaction.message.accountKeys : 'No accountKeys');
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 AccountKeys length:`, transaction.message?.accountKeys?.length || 0);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 First accountKey sample:`, transaction.message?.accountKeys?.[0]);
             
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Wallet Detection Debug:`);
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Active Trader Wallets: ${Array.from(this.activeTraderWallets).join(', ')}`);
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Account Keys in Transaction: ${accountKeys.slice(0, 5).join(', ')}${accountKeys.length > 5 ? '...' : ''}`);
-            console.log(`[LASERSTREAM-DEBUG] 🔍 Source Wallet Found: ${sourceWallet || 'NONE'}`);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Wallet Detection Debug:`);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Active Trader Wallets: ${Array.from(this.activeTraderWallets).join(', ')}`);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Account Keys in Transaction: ${accountKeys.slice(0, 5).join(', ')}${accountKeys.length > 5 ? '...' : ''}`);
+            // console.log(`[LASERSTREAM-DEBUG] 🔍 Source Wallet Found: ${sourceWallet || 'NONE'}`);
             
             if (sourceWallet) {
                 // --- START OF NEW MASTER PLAN LOGIC ---
@@ -1330,7 +1330,7 @@ class LaserStreamManager extends EventEmitter {
                 // --- NOISE FILTERING DISABLED in config.js, so we don't check here ---
 
                 // If we reach this point, the transaction is FRESH and it is NOT noise.
-                console.log(`[LASERSTREAM-PROFESSIONAL] 🎯 High-quality transaction detected for ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureStr)}`);
+                // console.log(`[LASERSTREAM-PROFESSIONAL] 🎯 High-quality transaction detected for ${shortenAddress(sourceWallet)} | Sig: ${shortenAddress(signatureStr)}`); // SILENCED FOR CLEAN TERMINAL
                 
                 // 🚀 REDIS CACHE ENHANCEMENT: Store pre-fetched data for instant access
                 try {
@@ -1340,7 +1340,7 @@ class LaserStreamManager extends EventEmitter {
                     const cacheKey = `laserstream:prefetch:${signatureStr}`;
                     if (this.redisManager) {
                         await this.redisManager.setWithExpiry(cacheKey, JSON.stringify(preFetchedData), 30);
-                        console.log(`[LASERSTREAM-PROFESSIONAL] 💎 Pre-fetched data cached for ${shortenAddress(signatureStr)}`);
+                        // console.log(`[LASERSTREAM-PROFESSIONAL] 💎 Pre-fetched data cached for ${shortenAddress(signatureStr)}`); // SILENCED FOR CLEAN TERMINAL
                     }
                 } catch (cacheError) {
                     console.error('[LASERSTREAM-PROFESSIONAL] ⚠️ Failed to cache pre-fetched data:', cacheError.message);
@@ -1356,7 +1356,7 @@ class LaserStreamManager extends EventEmitter {
                 }
             } else {
                 // DEBUG: Log when no source wallet is found
-                console.log(`[LASERSTREAM-DEBUG] 🚫 No active trader wallet found in transaction. Skipping.`);
+                // console.log(`[LASERSTREAM-DEBUG] 🚫 No active trader wallet found in transaction. Skipping.`); // SILENCED FOR CLEAN TERMINAL
             }
             
         } catch (error) {

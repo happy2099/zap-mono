@@ -27,7 +27,7 @@ class RedisManager {
             POOL_STATES: 5 * 60,       // 5 minutes
             TRANSACTION_CACHE: 60 * 60, // 1 hour
             USER_SESSIONS: 24 * 60 * 60, // 24 hours
-            ACTIVE_TRADERS: 15 * 60,   // 15 minutes
+            ACTIVE_TRADERS: 24 * 60 * 60, // 24 hours (CRITICAL FIX: Prevent trader data expiration)
             TRADE_QUEUE: 10 * 60       // 10 minutes
         };
     }
@@ -526,6 +526,29 @@ async getPreSignedTx(tokenMint) {
 
     getTradeReadyCacheSize() {
         return this.tradeReadyCache.size;
+    }
+
+    // ===== SETTINGS CACHING METHODS =====
+    
+    async setObject(key, object, ttlSeconds) {
+        try {
+            const dataString = JSON.stringify(object);
+            await this.set(key, dataString, { EX: ttlSeconds });
+            return true;
+        } catch (error) {
+            console.error(`[Redis] ❌ Failed to set object for key ${key}:`, error);
+            return false;
+        }
+    }
+
+    async getObject(key) {
+        try {
+            const dataString = await this.get(key);
+            return dataString ? JSON.parse(dataString) : null;
+        } catch (error) {
+            console.error(`[Redis] ❌ Failed to get object for key ${key}:`, error);
+            return null;
+        }
     }
 }
 

@@ -241,7 +241,7 @@ class TelegramWorker extends BaseWorker {
 
             // Check if user has trading wallets
             const wallets = await this.dataManager.getUserWallets(String(chatId));
-            console.log(`[DEBUG] Wallet check for user ${chatId}: found ${wallets.length} wallets`);
+            // console.log(`[DEBUG] Wallet check for user ${chatId}: found ${wallets.length} wallets`); // SILENCED FOR CLEAN TERMINAL
             if (wallets.length === 0) {
                 const message = `❌ *Cannot start copying*\n\nYou need to add a trading wallet first.\n\nPlease go to "Manage Wallets" to import or generate a wallet.`;
                 await this.telegramUi.sendOrEditMessage(chatId, message, {
@@ -463,12 +463,12 @@ class TelegramWorker extends BaseWorker {
                 throw new Error('User not found in database');
             }
 
-            console.log(`[DEBUG] Creating wallet in database:`, {
-                userId: user.id,
-                label: label,
-                publicKey: wallet.publicKey.toBase58(),
-                hasEncryptedKey: !!wallet.encryptedPrivateKey
-            });
+            // console.log(`[DEBUG] Creating wallet in database:`, { // SILENCED FOR CLEAN TERMINAL
+            //     userId: user.id,
+            //     label: label,
+            //     publicKey: wallet.publicKey.toBase58(),
+            //     hasEncryptedKey: !!wallet.encryptedPrivateKey
+            // });
 
             try {
                 const result = await this.dataManager.createWallet(
@@ -479,7 +479,7 @@ class TelegramWorker extends BaseWorker {
                     wallet.nonceAccountPubkey ? wallet.nonceAccountPubkey.toBase58() : null,
                     wallet.encryptedNonceAccountPrivateKey || null
                 );
-                console.log(`[DEBUG] createWallet result:`, result);
+                // console.log(`[DEBUG] createWallet result:`, result); // SILENCED FOR CLEAN TERMINAL
             } catch (createError) {
                 console.error(`[DEBUG] Error creating wallet:`, createError);
                 throw createError;
@@ -487,7 +487,7 @@ class TelegramWorker extends BaseWorker {
 
             // Verify wallet was created
             const createdWallet = await this.dataManager.getWalletByLabel(chatId, label);
-            console.log(`[DEBUG] Wallet created in database:`, createdWallet);
+            // console.log(`[DEBUG] Wallet created in database:`, createdWallet); // SILENCED FOR CLEAN TERMINAL
 
             this.logInfo('Wallet stored in database', { chatId, label, userId: user.id });
             

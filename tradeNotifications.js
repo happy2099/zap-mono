@@ -163,142 +163,67 @@ class TradeNotificationManager {
 
     async notifySuccessfulCopy(chatId, traderName, copyWalletLabel, tradeResult) {
         try {
-            if (!tradeResult || typeof tradeResult !== 'object' || !tradeResult.signature || !tradeResult.tradeType) {
-                throw new Error("Invalid or incomplete tradeResult object provided for successful copy notification.");
+            if (!tradeResult || typeof tradeResult !== 'object' || !tradeResult.signature) {
+                throw new Error("Invalid tradeResult provided for notification.");
             }
 
+            // --- Use the new, VERIFIED data from the executor ---
             const {
-                signature, tradeType, outputMint, inputMint, inputAmountRaw, outputAmountRaw, solSpent, solReceived
+                signature, tradeType, outputMint, solSpent, // Lamports WE spent
+                tokensBoughtRaw, decimals                    // The raw amount of tokens WE received
             } = tradeResult;
 
-            const targetMintAddress = tradeType === 'buy' ? outputMint : inputMint;
             const solScanUrl = `https://solscan.io/tx/${signature}`;
 
-            let tokenDecimals = tradeResult.tokenDecimals ?? 9;
-            const solPriceUsd = await this.getSolPriceInUSD();
-            let tokenSymbol = shortenAddress(targetMintAddress, 6);
-            let tokenName = tokenSymbol;
-
-            if (targetMintAddress) {
-                try {
-                    const enhancedData = await this.getEnhancedTokenData(targetMintAddress);
-                    if (enhancedData) {
-                        tokenSymbol = enhancedData.symbol || tokenSymbol;
-                        tokenName = enhancedData.name || tokenName;
-                        if (typeof enhancedData.decimals === 'number') {
-                            tokenDecimals = enhancedData.decimals;
-                        }
-                    }
-                } catch (fetchError) { 
-                    console.error(`Error fetching token data: ${fetchError.message}`); 
-                }
-            }
-
-            const formatValue = (value, unitType = 'sol', precision = 6) => {
-                if (value == null || (typeof value === 'string' && value.trim() === '')) return '_N/A_';
-
-                try {
-                    if (unitType === 'token' && typeof value === 'string') {
-                        const amountBigInt = BigInt(value);
-                        if (amountBigInt === 0n) return '0';
-                        const divisor = BigInt(10) ** BigInt(tokenDecimals || 9);
-                        const displayVal = (Number(amountBigInt * BigInt(10 ** precision)) / Number(divisor)) / (10 ** precision);
-                        return escapeMarkdownV2(displayVal.toLocaleString(undefined, {
-                            minimumFractionDigits: Math.min(2, precision),
-                            maximumFractionDigits: precision
-                        }));
-                    } else if (unitType === 'sol' && typeof value === 'number') {
-                        return escapeMarkdownV2(value.toLocaleString(undefined, {
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: precision
-                        }));
-                    }
-                    return '_Err_';
-                } catch (e) {
-                    console.error(`Error formatting value ${value} (${unitType}):`, e.message);
-                    return '_Err_';
-                }
+            // Fetch token metadata for display
+            const tokenData = await this.getEnhancedTokenData(outputMint) || {
+                symbol: shortenAddress(outputMint, 6),
+                name: 'Unknown Token'
             };
 
-            let messageTitle = "";
-            let summaryContent = "";
-            let tradeDetailsContent = "";
+            // --- 1. THE FIX for "SOL Spent" ---
+            // Convert the lamports we spent into a human-readable SOL string.
+            const solSpentFormatted = escapeMarkdownV2(
+                (solSpent / 1000000000).toLocaleString(undefined, { minimumFractionDigits: 4, maximumFractionDigits: 4 })
+            );
 
+            // --- 2. THE FIX for "Tokens Bought" ---
+            // Use the raw token amount and its decimals to create a correct display string.
+            let tokensBoughtFormatted = '_Err_';
+            if (typeof tokensBoughtRaw !== 'undefined' && typeof decimals === 'number' && decimals >= 0) {
+                if (tokensBoughtRaw === 0) {
+                    tokensBoughtFormatted = '0';
+                } else {
+                    const divisor = BigInt(10) ** BigInt(decimals);
+                    tokensBoughtFormatted = escapeMarkdownV2(
+                        (Number(BigInt(tokensBoughtRaw) * 1000000n / divisor) / 1000000).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 6 })
+                    );
+                }
+            }
+            
+            // Escape all parts of the message for Telegram
             const escTrader = escapeMarkdownV2(traderName);
             const escWallet = escapeMarkdownV2(copyWalletLabel);
+            const escSymbol = escapeMarkdownV2(tokenData.symbol);
+            const escName = escapeMarkdownV2(tokenData.name);
+            
+            // Construct the final, correct message
+            const message =
+                  `🟢 *Buy Order Executed* ✅\n\n` +
+                  `👤 *Trader*: ${escTrader}\n` +
+                  `💼 *Wallet*: ${escWallet}\n\n` +
+                  `*Summary*: Bought ${tokensBoughtFormatted} ${escSymbol} for ${solSpentFormatted} SOL\n\n` +
+                  `*Trade Details*:\n` +
+                  `• *Token Name*: ${escName}\n` +
+                  `• *Token Symbol*: ${escSymbol}\n` +
+                  `• *Tokens Bought*: ${tokensBoughtFormatted}\n` +
+                  `• *SOL Spent*: ${solSpentFormatted} SOL\n` +
+                  `*Tx Link*: [View on Solscan](${solScanUrl})`;
 
-            if (tradeType === 'buy') {
-                const amountToken = formatValue(outputAmountRaw, 'token', 4);
-                const solUsed = formatValue(solSpent, 'sol', 6);
-
-                messageTitle = `🟢 *Buy Order Executed* ✅`;
-                summaryContent = `*Summary*: Bought ${amountToken} ${escapeMarkdownV2(tokenSymbol)} for ${solUsed} SOL`;
-
-                tradeDetailsContent = `*Token Name*: ${escapeMarkdownV2(tokenName)}\n` +
-                    `*Token Symbol*: ${escapeMarkdownV2(tokenSymbol)}\n` +
-                    `*Tokens Bought*: ${amountToken} ${escapeMarkdownV2(tokenSymbol)}\n` +
-                    `*SOL Spent*: ${solUsed} SOL\n`;
-
-                       } else if (tradeType === 'sell') {
-                const amountToken = formatValue(inputAmountRaw, 'token', 4);
-                const solReceivedFormatted = formatValue(solReceived, 'sol', 6);
-                const sellFeeFormatted = formatValue(tradeResult.solFee, 'sol', 8);
-
-                // Get original position to calculate PnL and total fees
-                let userPositions;
-                if (!this.dataManager) {
-                    console.warn("[TradeNotifications] dataManager not available, skipping PnL calculation");
-                    userPositions = new Map();
-                } else {
-                    userPositions = await this.dataManager.getUserPositions(chatId);
-                }
-                const originalPosition = userPositions.get(targetMintAddress) || {};
-                const originalSolSpent = originalPosition.solSpent || tradeResult.originalSolSpent || 0;
-                const buyFee = originalPosition.solFeeBuy || 0;
-                const totalFee = buyFee + (tradeResult.solFee || 0);
-
-                let pnlSol = 0;
-                if (typeof solReceived === 'number') {
-                    pnlSol = solReceived - originalSolSpent;
-                }
-                const pnlNetSol = pnlSol - totalFee; // PnL after all fees
-
-                const pnlPrefix = pnlNetSol >= 0 ? '🟢' : '🔻';
-                const pnlGrossDisplay = formatValue(pnlSol, 'sol', 6);
-                const pnlNetDisplay = formatValue(pnlNetSol, 'sol', 6);
-                
-                messageTitle = `🔴 *Sell Order Executed* ✅`;
-                summaryContent = `*Summary*: Sold ${amountToken} ${escapeMarkdownV2(tokenSymbol)} for ${solReceivedFormatted} SOL`;
-
-                tradeDetailsContent =
-                    `*P/L \\(Net\\)*: ${pnlPrefix} *${pnlNetDisplay} SOL*\n` +
-                    `*P/L \\(Gross\\)*: ${pnlGrossDisplay} SOL\n\n` +
-                    `*SOL Received*: ${solReceivedFormatted} SOL\n` +
-                    `*SOL Spent \\(initial\\)*: ${formatValue(originalSolSpent, 'sol', 6)} SOL\n\n` +
-                    `*Network Fees*\n`+
-                    `• Sell Fee: ${sellFeeFormatted} SOL\n` +
-                    `• Total Fees: ${formatValue(totalFee, 'sol', 8)} SOL`;
-            } else {
-                console.warn(`[Notification] Unknown trade type: ${tradeType}`);
-                return;
-            }
-
-            let finalMessage =
-                `${messageTitle}\n\n` +
-                `👤 *Trader*: ${escTrader}\n` +
-                `💼 *Wallet*: ${escWallet}\n\n` +
-                `${summaryContent}\n\n` +
-                `*Trade Details*:\n` +
-                `${tradeDetailsContent}` +
-                `*Tx Link*: [View on Solscan](${solScanUrl})\n\n`;
-
-            if (tradeResult.solFee != null) {
-                finalMessage += `*Network Fee*: ${formatValue(tradeResult.solFee, 'sol', 8)} SOL\n`;
-            }
-
-            await this._sendMessage(chatId, finalMessage);
+            await this._sendMessage(chatId, message);
 
         } catch (error) {
+            // This is the original, good error handling logic
             const telegramError = error.response?.body?.description || error.message;
             console.error(`❌ Error sending successful copy notification to chat ${chatId}:`, telegramError, error.stack);
             const fallbackSig = tradeResult?.signature ? `\`${escapeMarkdownV2(tradeResult.signature)}\`` : 'N/A';
@@ -519,6 +444,49 @@ class TradeNotificationManager {
             await this._sendMessage(chatId, message);
         } catch (error) {
             console.error(`[Notify] Failed to send simple migration alert for ${tokenMint}:`, error.message);
+        }
+    }
+
+    // NEW METHOD: Send trade notification with verified bot execution data
+    async sendTradeNotification(tradeData) {
+        try {
+            const { signature, traderName, platform, solSpent, inputMint, outputMint, tokensBoughtRaw, decimals } = tradeData;
+            
+            // Get enhanced token data for the output token
+            const tokenData = await this.getEnhancedTokenData(outputMint) || { 
+                symbol: shortenAddress(outputMint),
+                name: 'Unknown Token'
+            };
+            
+            // Convert lamports to SOL for display
+            const solSpentFormatted = (solSpent / 1000000000).toFixed(4);
+            
+            // Format token amount based on decimals
+            let tokensBoughtFormatted = '0';
+            if (tokensBoughtRaw && tokensBoughtRaw > 0 && decimals !== 'unknown') {
+                const divisor = Math.pow(10, decimals);
+                tokensBoughtFormatted = (Number(tokensBoughtRaw) / divisor).toFixed(2);
+            }
+            
+            const message = `🕺 *BUY ORDER EXECUTED* 🕺\n\n` +
+                          `*Trader*: ${escapeMarkdownV2(traderName)}\n` +
+                          `*Wallet*: Trading Wallet\n` +
+                          `*Summary*: Bought ${tokensBoughtFormatted} ${escapeMarkdownV2(tokenData.symbol)} for ${solSpentFormatted} SOL\n\n` +
+                          `*Trade Details:*\n` +
+                          `• Token Name: ${escapeMarkdownV2(tokenData.name)}\n` +
+                          `• Token Symbol: ${escapeMarkdownV2(tokenData.symbol)}\n` +
+                          `• Tokens Bought: ${tokensBoughtFormatted} ${escapeMarkdownV2(tokenData.symbol)}\n` +
+                          `• SOL Spent: ${solSpentFormatted} SOL\n` +
+                          `• Platform: ${escapeMarkdownV2(platform)}\n` +
+                          `• Tx Link: [View on Solscan](https://solscan.io/tx/${signature})`;
+            
+            const chatId = config.ADMIN_CHAT_ID;
+            await this._sendMessage(chatId, message);
+            
+            console.log(`[TRADE_NOTIFICATION] ✅ Trade notification sent for ${traderName} on ${platform}`);
+            
+        } catch (error) {
+            console.error(`[TRADE_NOTIFICATION] ❌ Failed to send trade notification:`, error.message);
         }
     }
 }

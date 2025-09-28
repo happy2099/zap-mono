@@ -109,9 +109,9 @@ class RawTransactionFetcher {
                 return null;
             }
 
-            console.log(`[RAW-FETCHER] ✅ Transaction parsed successfully`);
-            console.log(`   Instructions: ${parsedTransaction.transaction.message.instructions.length}`);
-            console.log(`   Account Keys: ${parsedTransaction.transaction.message.accountKeys.length}`);
+            // console.log(`[RAW-FETCHER] ✅ Transaction parsed successfully`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   Instructions: ${parsedTransaction.transaction.message.instructions.length}`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   Account Keys: ${parsedTransaction.transaction.message.accountKeys.length}`); // SILENCED FOR CLEAN TERMINAL
 
             return parsedTransaction;
 

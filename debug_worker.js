@@ -34,13 +34,13 @@ const run = async () => {
                         console.log(`   Transaction keys: ${Object.keys(rawTx.transaction)}`);
                         
                         if (rawTx.transaction.message) {
-                            console.log(`   Message keys: ${Object.keys(rawTx.transaction.message)}`);
-                            console.log(`   Account keys length: ${rawTx.transaction.message.accountKeys?.length || 0}`);
+                            // console.log(`   Message keys: ${Object.keys(rawTx.transaction.message)}`); // SILENCED FOR CLEAN TERMINAL
+                            // console.log(`   Account keys length: ${rawTx.transaction.message.accountKeys?.length || 0}`); // SILENCED FOR CLEAN TERMINAL
                         }
                         
                         if (rawTx.transaction.meta) {
-                            console.log(`   Meta keys: ${Object.keys(rawTx.transaction.meta)}`);
-                            console.log(`   Inner instructions: ${rawTx.transaction.meta.innerInstructions?.length || 0}`);
+                            // console.log(`   Meta keys: ${Object.keys(rawTx.transaction.meta)}`); // SILENCED FOR CLEAN TERMINAL
+                            // console.log(`   Inner instructions: ${rawTx.transaction.meta.innerInstructions?.length || 0}`); // SILENCED FOR CLEAN TERMINAL
                         }
                     }
                     

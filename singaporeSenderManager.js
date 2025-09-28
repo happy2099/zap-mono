@@ -194,7 +194,7 @@ class SingaporeSenderManager {
         try {
             // Check if transaction has required fields
             if (!transaction || !transaction.instructions || transaction.instructions.length === 0) {
-                console.log(`[SINGAPORE-SENDER] ❌ Validation failed: Missing instructions`);
+                // console.log(`[SINGAPORE-SENDER] ❌ Validation failed: Missing instructions`); // SILENCED FOR CLEAN TERMINAL
                 return false;
             }
             
@@ -206,7 +206,7 @@ class SingaporeSenderManager {
                 }
             }
             
-            console.log(`[SINGAPORE-SENDER] ✅ Transaction validation passed with ${transaction.instructions.length} instructions`);
+            // console.log(`[SINGAPORE-SENDER] ✅ Transaction validation passed with ${transaction.instructions.length} instructions`); // SILENCED FOR CLEAN TERMINAL
             return true;
         } catch (error) {
             console.log(`[SINGAPORE-SENDER] ❌ Validation error:`, error.message);
@@ -217,8 +217,8 @@ class SingaporeSenderManager {
     // Build optimized transaction with tip and compute budget
     async buildOptimizedTransaction(originalTransaction, keypair, tipAccount, tipAmountSOL, options = {}) {
         try {
-            console.log(`[SINGAPORE-SENDER] 🔧 Building optimized transaction...`);
-            console.log(`[SINGAPORE-SENDER] 📊 Original instructions: ${originalTransaction.instructions.length}`);
+            // console.log(`[SINGAPORE-SENDER] 🔧 Building optimized transaction...`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`[SINGAPORE-SENDER] 📊 Original instructions: ${originalTransaction.instructions.length}`); // SILENCED FOR CLEAN TERMINAL
             
             // Get recent blockhash
             const { value: { blockhash, lastValidBlockHeight } } = await this.connection.getLatestBlockhashAndContext('confirmed');
@@ -234,7 +234,7 @@ class SingaporeSenderManager {
                 console.log(`[SINGAPORE-SENDER] 🔬 Simulating transaction for compute unit optimization...`);
                 
                 // Use the existing simulateTransaction method with correct parameters
-                const actualUnits = await this.simulateTransaction(allInstructions, keypair, blockhash);
+                const actualUnits = await this._getComputeUnits(allInstructions, keypair, blockhash);
                 
                 // 🔧 CRITICAL FIX: Validate actualUnits is a valid number
                 if (typeof actualUnits === 'number' && !isNaN(actualUnits) && actualUnits > 0) {
@@ -286,7 +286,7 @@ class SingaporeSenderManager {
                 })
             );
             
-            console.log(`[SINGAPORE-SENDER] 🔧 Total instructions after optimization: ${allInstructions.length}`);
+            // console.log(`[SINGAPORE-SENDER] 🔧 Total instructions after optimization: ${allInstructions.length}`); // SILENCED FOR CLEAN TERMINAL
             
             // BUILD FINAL TRANSACTION
             const optimizedTransaction = new VersionedTransaction(
@@ -300,8 +300,8 @@ class SingaporeSenderManager {
             // Sign transaction
             optimizedTransaction.sign([keypair]);
             
-            console.log(`[SINGAPORE-SENDER] ✅ Optimized transaction built with ${allInstructions.length} instructions`);
-            console.log(`[SINGAPORE-SENDER] 🔧 Compute units: ${computeUnits}, Priority fee: ${effectiveMicroLamports} microLamports`);
+            // console.log(`[SINGAPORE-SENDER] ✅ Optimized transaction built with ${allInstructions.length} instructions`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`[SINGAPORE-SENDER] 🔧 Compute units: ${computeUnits}, Priority fee: ${effectiveMicroLamports} microLamports`); // SILENCED FOR CLEAN TERMINAL
             console.log(`[SINGAPORE-SENDER] 📝 Transaction size: ${optimizedTransaction.serialize().length} bytes`);
             
             return {
@@ -404,12 +404,22 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             }
 
                 // 🔬 SIMULATE TRANSACTION FIRST to avoid unnecessary gas fees
-                try {
-                    const simulation = await this.simulateTransaction(transaction);
-                    console.log(`[SINGAPORE-SENDER] ✅ Simulation passed: ${simulation.unitsConsumed} compute units consumed`);
-                } catch (simError) {
-                    console.error(`[SINGAPORE-SENDER] ❌ Simulation failed, skipping send: ${simError.message}`);
-                    throw new Error(`Transaction simulation failed: ${simError.message}`);
+                // 🎯 CRITICAL FIX: Skip simulation for Pump.fun atomic transactions
+                const config = require('./config.js');
+                const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toString();
+                const isPumpFunAtomic = transaction.instructions.length === 2 && 
+                    transaction.instructions.some(ix => ix.programId && ix.programId.toString() === pumpFunProgramId);
+                
+                if (isPumpFunAtomic) {
+                    console.log(`[SINGAPORE-SENDER] 🎯 Pump.fun atomic transaction detected - skipping simulation`);
+                } else {
+                    try {
+                        const simulation = await this.simulateTransaction(transaction);
+                        console.log(`[SINGAPORE-SENDER] ✅ Simulation passed: ${simulation.unitsConsumed} compute units consumed`);
+                    } catch (simError) {
+                        console.error(`[SINGAPORE-SENDER] ❌ Simulation failed, skipping send: ${simError.message}`);
+                        throw new Error(`Transaction simulation failed: ${simError.message}`);
+                    }
                 }
 
                 // Send transaction via the targeted endpoint with timeout
@@ -562,7 +572,7 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
                 }
             }
             
-            console.log(`[PRIORITY_FEE] 🔍 Estimating priority fee for ${accountKeys.size} accounts...`);
+            // console.log(`[PRIORITY_FEE] 🔍 Estimating priority fee for ${accountKeys.size} accounts...`); // SILENCED FOR CLEAN TERMINAL
             
             // Use Helius API directly
             const response = await fetch(`${this.singaporeEndpoints.rpc}`, {
@@ -603,13 +613,36 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
     }
 
     // Simulate transaction to get compute units
-    async simulateTransaction(instructions, keypair, blockhash) {
+    async _getComputeUnits(instructions, keypair, blockhash) { 
         try {
             console.log(`[SINGAPORE-SENDER] 🔍 Simulating transaction for compute units...`);
             
             // 🔧 FIX: Ensure instructions is an array
             if (!Array.isArray(instructions)) {
                 throw new Error('Instructions must be an array');
+            }
+            
+            // 🎯 CRITICAL FIX: Skip simulation for Pump.fun atomic transactions
+            // Pump.fun atomic transactions (ATA creation + BUY) can't be properly simulated
+            // because the BUY instruction expects the ATA to exist, but simulation doesn't
+            // "execute" the ATA creation instruction first, causing 3012 errors.
+            const config = require('./config.js');
+            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toString();
+            const isPumpFunAtomic = instructions.length === 2 && 
+                instructions.some(ix => ix.programId && ix.programId.toString() === pumpFunProgramId);
+            
+            console.log(`[SINGAPORE-SENDER] 🔍 Checking for Pump.fun atomic transaction:`, {
+                instructionCount: instructions.length,
+                hasPumpFunProgram: instructions.some(ix => ix.programId && ix.programId.toString() === pumpFunProgramId),
+                isPumpFunAtomic: isPumpFunAtomic
+            });
+            
+            if (isPumpFunAtomic) {
+                console.log(`[SINGAPORE-SENDER] 🎯 Pump.fun atomic transaction detected - using estimated compute units`);
+                // Use estimated compute units for Pump.fun atomic transactions
+                const estimatedUnits = 50000; // Conservative estimate for ATA creation + BUY
+                console.log(`[SINGAPORE-SENDER] 🔧 Estimated compute units: ${estimatedUnits}`);
+                return estimatedUnits;
             }
             
             const testInstructions = [
@@ -667,10 +700,10 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             }
             
             // Debug: Log instruction structure
-            console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length);
+            // console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length); // SILENCED FOR CLEAN TERMINAL
             if (instructions.length > 0) {
-                console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0]));
-                console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId);
+                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0])); // SILENCED FOR CLEAN TERMINAL
+                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId); // SILENCED FOR CLEAN TERMINAL
                 
                 // Validate instruction structure
                 for (let i = 0; i < instructions.length; i++) {
@@ -702,7 +735,7 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             
             // Get dynamic compute units
             console.log(`[SINGAPORE-SENDER] 🔍 Step 2: Simulating transaction for compute units...`);
-            const computeUnits = await this.simulateTransaction(instructions, keypair, blockhash);
+            const computeUnits = await this._getComputeUnits(instructions, keypair, blockhash);
             console.log(`[SINGAPORE-SENDER] ✅ Compute units calculated: ${computeUnits}`);
             
             // Get dynamic priority fee

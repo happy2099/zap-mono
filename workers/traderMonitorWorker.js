@@ -630,6 +630,9 @@ class TraderMonitorWorker extends BaseWorker {
             const solChange = normalizedTx.postBalances[traderIndex] - normalizedTx.preBalances[traderIndex];
             const isBuy = solChange < 0;
 
+            this.logInfo(`[GATEKEEPER] 🔍 SOL Change: ${solChange} lamports (${(solChange / 1000000000).toFixed(4)} SOL)`);
+            this.logInfo(`[GATEKEEPER] 🔍 Is Buy: ${isBuy}, Abs Change: ${Math.abs(solChange)}`);
+
             if (!isBuy || Math.abs(solChange) < 100000) { // minimum 0.0001 SOL change
                 this.logInfo(`[GATEKEEPER] ❌ REJECTED: Not a significant SOL spend.`);
                 return false;
@@ -638,6 +641,10 @@ class TraderMonitorWorker extends BaseWorker {
             // Check 2: Does this transaction involve the Pump.fun program?
             const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toBase58();
             const usesPumpFun = normalizedTx.accountKeys.includes(pumpFunProgramId);
+
+            this.logInfo(`[GATEKEEPER] 🔍 Pump.fun Program ID: ${pumpFunProgramId}`);
+            this.logInfo(`[GATEKEEPER] 🔍 Uses Pump.fun: ${usesPumpFun}`);
+            this.logInfo(`[GATEKEEPER] 🔍 Account Keys (first 5): ${normalizedTx.accountKeys.slice(0, 5).map(addr => shortenAddress(addr)).join(', ')}`);
 
             if (!usesPumpFun) {
                 this.logInfo(`[GATEKEEPER] ❌ REJECTED: Does not involve the Pump.fun program.`);
@@ -648,6 +655,9 @@ class TraderMonitorWorker extends BaseWorker {
             const receivedToken = normalizedTx.postTokenBalances.find(
                 tb => tb.owner === sourceWallet && tb.uiTokenAmount.uiAmount > 0
             );
+
+            this.logInfo(`[GATEKEEPER] 🔍 Post Token Balances: ${normalizedTx.postTokenBalances.length} entries`);
+            this.logInfo(`[GATEKEEPER] 🔍 Received Token: ${receivedToken ? `Yes (${receivedToken.mint})` : 'No'}`);
 
             if (!receivedToken) {
                 this.logInfo(`[GATEKEEPER] ❌ REJECTED: Trader did not receive a new token.`);
@@ -1908,15 +1918,15 @@ class TraderMonitorWorker extends BaseWorker {
                 return; 
             }
 
-            // Rich transaction structure logging
-            this.logInfo(`[RAW-TX] 📊 SERIALIZED PARSED DATA:`);
-            this.logInfo(`[RAW-TX] 📊 preTokenBalances: [ ${coreTx.meta?.preTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 postTokenBalances: [ ${coreTx.meta?.postTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 preBalances: [ ${coreTx.meta?.preBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 postBalances: [ ${coreTx.meta?.postBalances?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 logMessages: [ ${coreTx.meta?.logMessages?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 accountKeys: [ ${coreTx.message?.accountKeys?.length || 0} items ]`);
-            this.logInfo(`[RAW-TX] 📊 instructions: [ ${coreTx.message?.instructions?.length || 0} items ]`);
+            // Rich transaction structure logging (SILENCED FOR CLEAN TERMINAL)
+            // this.logInfo(`[RAW-TX] 📊 SERIALIZED PARSED DATA:`);
+            // this.logInfo(`[RAW-TX] 📊 preTokenBalances: [ ${coreTx.meta?.preTokenBalances?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 postTokenBalances: [ ${coreTx.meta?.postTokenBalances?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 preBalances: [ ${coreTx.meta?.preBalances?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 postBalances: [ ${coreTx.meta?.postBalances?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 logMessages: [ ${coreTx.meta?.logMessages?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 accountKeys: [ ${coreTx.message?.accountKeys?.length || 0} items ]`);
+            // this.logInfo(`[RAW-TX] 📊 instructions: [ ${coreTx.message?.instructions?.length || 0} items ]`);
             
             // --- PART 2: Deep Analysis (from _processTraderActivity) ---
             const analysisResult = await this._processTraderActivity(sourceWallet, signature, transactionUpdate);
@@ -2009,7 +2019,7 @@ class TraderMonitorWorker extends BaseWorker {
             // STEP 2: CRITICAL ALT FIX - Check for and fetch accounts from lookup tables.
             const addressTableLookups = coreTx.message.addressTableLookups || coreTx.message.message?.addressTableLookups;
             if (addressTableLookups && this.solanaManager) {
-                this.logInfo(`[NORMALIZER] Found ${addressTableLookups.length} ALT(s). Fetching full account list...`);
+                // this.logInfo(`[NORMALIZER] Found ${addressTableLookups.length} ALT(s). Fetching full account list...`); // SILENCED FOR CLEAN TERMINAL
                 for (const lookup of addressTableLookups) {
                     const altAccount = await this.solanaManager.fetchALTTable(lookup.accountKey);
                     if (altAccount) {
@@ -2020,7 +2030,7 @@ class TraderMonitorWorker extends BaseWorker {
             }
             
             const fullAccountListStrings = fullAccountList.map(pk => pk.toBase58());
-            this.logInfo(`[NORMALIZER] Built complete account list with ${fullAccountListStrings.length} accounts.`);
+            // this.logInfo(`[NORMALIZER] Built complete account list with ${fullAccountListStrings.length} accounts.`); // SILENCED FOR CLEAN TERMINAL
             
             // STEP 3: Create the Golden Record with the COMPLETE account list.
                         
@@ -2030,8 +2040,8 @@ class TraderMonitorWorker extends BaseWorker {
                 isSuccess: (() => {
                     const err = coreTx.meta.err;
                     const isSuccess = err === null || err === undefined;
-                    this.logInfo(`[DEBUG] coreTx.meta.err: ${JSON.stringify(err)}`);
-                    this.logInfo(`[DEBUG] isSuccess calculation: ${isSuccess}`);
+                    // this.logInfo(`[DEBUG] coreTx.meta.err: ${JSON.stringify(err)}`); // SILENCED FOR CLEAN TERMINAL
+                    // this.logInfo(`[DEBUG] isSuccess calculation: ${isSuccess}`); // SILENCED FOR CLEAN TERMINAL
                     return isSuccess;
                 })(),
                 slot: transactionUpdate.slot,
@@ -2048,38 +2058,38 @@ class TraderMonitorWorker extends BaseWorker {
                 addressTableLookups: addressTableLookups || []
             };
 
-            // 🗺️ MAPPING: Show normalization process
-            this.logInfo(`[MAPPING] 📥 RAW: ${coreTx.message.accountKeys?.length || 0} base accounts`);
-            this.logInfo(`[MAPPING] 🔄 NORMALIZED: ${fullAccountListStrings.length} total accounts (including ALT)`);
-            this.logInfo(`[MAPPING] 📋 Instructions: ${normalizedTx.instructions.length}`);
+            // 🗺️ MAPPING: Show normalization process (SILENCED FOR CLEAN TERMINAL)
+            // this.logInfo(`[MAPPING] 📥 RAW: ${coreTx.message.accountKeys?.length || 0} base accounts`);
+            // this.logInfo(`[MAPPING] 🔄 NORMALIZED: ${fullAccountListStrings.length} total accounts (including ALT)`);
+            // this.logInfo(`[MAPPING] 📋 Instructions: ${normalizedTx.instructions.length}`);
             
-            // ===== DETAILED SERIALIZED PARSED DATA LOGGING =====
-            this.logInfo(`[MAPPING] 📊 SERIALIZED PARSED DATA:`);
-            this.logInfo(`[MAPPING] 📊 preTokenBalances: [ ${normalizedTx.preTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 postTokenBalances: [ ${normalizedTx.postTokenBalances?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 preBalances: [ ${normalizedTx.preBalances?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 postBalances: [ ${normalizedTx.postBalances?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 logMessages: [ ${normalizedTx.logMessages?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 instructions: [ ${normalizedTx.instructions?.length || 0} items ]`);
-            this.logInfo(`[MAPPING] 📊 accountKeys: [ ${normalizedTx.accountKeys?.length || 0} items ]`);
+            // ===== DETAILED SERIALIZED PARSED DATA LOGGING ===== (SILENCED FOR CLEAN TERMINAL)
+            // this.logInfo(`[MAPPING] 📊 SERIALIZED PARSED DATA:`);
+            // this.logInfo(`[MAPPING] 📊 preTokenBalances: [ ${normalizedTx.preTokenBalances?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 postTokenBalances: [ ${normalizedTx.postTokenBalances?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 preBalances: [ ${normalizedTx.preBalances?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 postBalances: [ ${normalizedTx.postBalances?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 logMessages: [ ${normalizedTx.logMessages?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 instructions: [ ${normalizedTx.instructions?.length || 0} items ]`);
+            // this.logInfo(`[MAPPING] 📊 accountKeys: [ ${normalizedTx.accountKeys?.length || 0} items ]`);
             
             // ===== DETAILED TOKEN BALANCE STRUCTURE =====
             if (normalizedTx.preTokenBalances && normalizedTx.preTokenBalances.length > 0) {
-                this.logInfo(`[MAPPING] 📊 preTokenBalances structure:`, JSON.stringify(normalizedTx.preTokenBalances, null, 2));
+                // this.logInfo(`[MAPPING] 📊 preTokenBalances structure:`, JSON.stringify(normalizedTx.preTokenBalances, null, 2)); // SILENCED FOR CLEAN TERMINAL
             }
             if (normalizedTx.postTokenBalances && normalizedTx.postTokenBalances.length > 0) {
-                this.logInfo(`[MAPPING] 📊 postTokenBalances structure:`, JSON.stringify(normalizedTx.postTokenBalances, null, 2));
+                // this.logInfo(`[MAPPING] 📊 postTokenBalances structure:`, JSON.stringify(normalizedTx.postTokenBalances, null, 2)); // SILENCED FOR CLEAN TERMINAL
             }
             
-            // ===== DETAILED TRANSACTION STRUCTURE =====
-            this.logInfo(`[MAPPING] 📊 Transaction structure:`);
-            this.logInfo(`[MAPPING] 📊 hasTransaction: ${!!normalizedTx}`);
-            this.logInfo(`[MAPPING] 📊 hasMeta: ${!!normalizedTx.meta}`);
-            this.logInfo(`[MAPPING] 📊 transaction keys: ${normalizedTx ? Object.keys(normalizedTx).join(', ') : 'none'}`);
-            this.logInfo(`[MAPPING] 📊 meta keys: ${normalizedTx.meta ? Object.keys(normalizedTx.meta).join(', ') : 'none'}`);
+            // ===== DETAILED TRANSACTION STRUCTURE ===== (SILENCED FOR CLEAN TERMINAL)
+            // this.logInfo(`[MAPPING] 📊 Transaction structure:`);
+            // this.logInfo(`[MAPPING] 📊 hasTransaction: ${!!normalizedTx}`);
+            // this.logInfo(`[MAPPING] 📊 hasMeta: ${!!normalizedTx.meta}`);
+            // this.logInfo(`[MAPPING] 📊 transaction keys: ${normalizedTx ? Object.keys(normalizedTx).join(', ') : 'none'}`);
+            // this.logInfo(`[MAPPING] 📊 meta keys: ${normalizedTx.meta ? Object.keys(normalizedTx.meta).join(', ') : 'none'}`);
             
-            // ===== FULL NORMALIZED TRANSACTION STRUCTURE =====
-            this.logInfo(`[MAPPING] 📊 Full normalized transaction structure:`, JSON.stringify(normalizedTx, null, 2));
+            // ===== FULL NORMALIZED TRANSACTION STRUCTURE ===== (SILENCED FOR CLEAN TERMINAL)
+            // this.logInfo(`[MAPPING] 📊 Full normalized transaction structure:`, JSON.stringify(normalizedTx, null, 2));
             // =========================================================================
 
             // ===============================================
@@ -2234,6 +2244,25 @@ class TraderMonitorWorker extends BaseWorker {
             await this.laserstreamManager.startMonitoring(walletAddresses);
             this.monitoringStats.lastRefresh = Date.now();
         }, 5 * 60 * 1000); // every 5 minutes
+
+        // CRITICAL FIX: Prevent Redis trader data expiration
+        setInterval(async () => {
+            try {
+                this.logInfo('🔄 Refreshing Redis trader data TTL to prevent expiration...');
+                const allUsers = await this.dataManager.loadUsers();
+                
+                for (const user of Object.values(allUsers)) {
+                    const activeTraderNames = await this.redisManager.getActiveTraders(user.chat_id.toString());
+                    if (activeTraderNames && activeTraderNames.length > 0) {
+                        // Refresh TTL by re-setting the data
+                        await this.redisManager.setActiveTraders(user.chat_id.toString(), activeTraderNames);
+                        this.logInfo(`✅ Refreshed TTL for ${activeTraderNames.length} traders for user ${user.chat_id}`);
+                    }
+                }
+            } catch (error) {
+                this.logError('❌ Failed to refresh Redis trader TTL:', error.message);
+            }
+        }, 10 * 60 * 1000); // every 10 minutes (well before 24h expiration)
 
         // Cache cleanup every 2 minutes
         setInterval(() => {

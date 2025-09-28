@@ -26,7 +26,7 @@ class DataMapper {
 
     logCompleteMapping(rawHeliusData, normalizedData, tradeDetails, clonedInstructions, finalTransaction = null) {
         try {
-            console.log(`\n🗺️ MAPPING STARTED FOR: ${rawHeliusData?.signature || 'unknown'}`);
+            // console.log(`\n🗺️ MAPPING STARTED FOR: ${rawHeliusData?.signature || 'unknown'}`); // SILENCED FOR CLEAN TERMINAL
             const startTime = Date.now();
             
             // Calculate byte volume for cloned instructions
@@ -371,20 +371,20 @@ class DataMapper {
 
     _printMapping(mapping) {
         // Clear some space for better visibility
-        console.log('\n\n' + '='.repeat(80));
-        console.log(`🗺️  DATA MAPPING FOR SIGNATURE: ${mapping.signature}`);
-        console.log('='.repeat(80));
+        // console.log('\n\n' + '='.repeat(80)); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`🗺️  DATA MAPPING FOR SIGNATURE: ${mapping.signature}`); // SILENCED FOR CLEAN TERMINAL
+        // console.log('='.repeat(80)); // SILENCED FOR CLEAN TERMINAL
 
         // =======================================================
         // ================ PERFORMANCE METRICS ==================
         // =======================================================
-        console.log('\n🚀 PERFORMANCE METRICS');
-        console.log('-'.repeat(40));
+        // console.log('\n🚀 PERFORMANCE METRICS'); // SILENCED FOR CLEAN TERMINAL
+        // console.log('-'.repeat(40)); // SILENCED FOR CLEAN TERMINAL
         
         // Byte Volume Analysis
         const byteVol = mapping.performance.byteVolume;
-        console.log(`📊 TRANSACTION SIZE: ${byteVol.totalBytes} bytes (${byteVol.sizeCategory})`);
-        console.log(`📋 Instructions: ${byteVol.instructionCount} | Avg: ${byteVol.averageBytes} bytes/ix`);
+        // console.log(`📊 TRANSACTION SIZE: ${byteVol.totalBytes} bytes (${byteVol.sizeCategory})`); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`📋 Instructions: ${byteVol.instructionCount} | Avg: ${byteVol.averageBytes} bytes/ix`); // SILENCED FOR CLEAN TERMINAL
         
         // Latency Analysis
         const latency = mapping.performance.latency;
@@ -408,8 +408,8 @@ class DataMapper {
         // ================ DETAILED BREAKDOWN ===================
         // =======================================================
         console.log('\n📥 STAGE 1 & 2: RAW / NORMALIZED DATA');
-        console.log('-'.repeat(40));
-        console.log(`Total Account Keys: ${mapping.stages.raw.accountKeysCount}`); 
+        // console.log('-'.repeat(40)); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`Total Account Keys: ${mapping.stages.raw.accountKeysCount}`); // SILENCED FOR CLEAN TERMINAL 
 
         console.log('\n🔍 STAGE 3: ANALYZED TRADE');
         console.log('-'.repeat(40));
@@ -470,7 +470,7 @@ class DataMapper {
         }
         const filePath = path.join(logDir, filename);
         fs.writeFileSync(filePath, JSON.stringify(this.mappingLog, null, 2), 'utf-8');
-        console.log(`[MAPPING] Exported complete mapping log to ${filePath}`);
+        // console.log(`[MAPPING] Exported complete mapping log to ${filePath}`); // SILENCED FOR CLEAN TERMINAL
     }
 }
 
@@ -480,10 +480,10 @@ const quickMap = {
      * Map raw Helius instruction to show what we're cloning
      */
     rawInstruction: (rawIx, accountKeys) => {
-        console.log('\n🔍 RAW INSTRUCTION MAPPING:');
-        console.log(`Program ID Index: ${rawIx.programIdIndex}`);
-        console.log(`Program ID: ${shortenAddress(accountKeys[rawIx.programIdIndex])}`);
-        console.log(`Accounts: [${rawIx.accounts?.join(', ') || 'none'}]`);
+        // console.log('\n🔍 RAW INSTRUCTION MAPPING:'); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`Program ID Index: ${rawIx.programIdIndex}`); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`Program ID: ${shortenAddress(accountKeys[rawIx.programIdIndex])}`); // SILENCED FOR CLEAN TERMINAL
+        // console.log(`Accounts: [${rawIx.accounts?.join(', ') || 'none'}]`); // SILENCED FOR CLEAN TERMINAL
         
         // Handle different data types safely
         let dataDisplay = 'empty';
@@ -557,8 +557,8 @@ const quickMap = {
      * Map the complete detection to execution flow
      */
     completeFlow: (signature, traderName, tradeType, dexPlatform, isDeBridge = false) => {
-        console.log('\n🔄 COMPLETE DETECTION → EXECUTION FLOW MAPPING');
-        console.log('='.repeat(60));
+        // console.log('\n🔄 COMPLETE DETECTION → EXECUTION FLOW MAPPING'); // SILENCED FOR CLEAN TERMINAL
+        // console.log('='.repeat(60)); // SILENCED FOR CLEAN TERMINAL
         
         if (isDeBridge) {
             console.log(`📡 STAGE 1 (DETECTION): LaserStream gRPC → DeBridge Worker`);
@@ -586,11 +586,11 @@ const quickMap = {
             console.log(`   └─ Instruction Reconstruction: DeBridge IDL-based`);
             console.log(`   └─ 🔧 DeBridge: Automatic PDA/ATA reconstruction`);
             
-            console.log(`\n🚀 STAGE 5 (EXECUTION): DeBridge-Validated → Blockchain`);
-            console.log(`   └─ Transaction Building: DeBridge-validated instructions`);
-            console.log(`   └─ Signing: User keypair signing`);
-            console.log(`   └─ Submission: RPC transaction submission`);
-            console.log(`   └─ 🔧 DeBridge: Pre-validated instructions`);
+            // console.log(`\n🚀 STAGE 5 (EXECUTION): DeBridge-Validated → Blockchain`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   └─ Transaction Building: DeBridge-validated instructions`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   └─ Signing: User keypair signing`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   └─ Submission: RPC transaction submission`); // SILENCED FOR CLEAN TERMINAL
+            // console.log(`   └─ 🔧 DeBridge: Pre-validated instructions`); // SILENCED FOR CLEAN TERMINAL
         } else {
             console.log(`📡 STAGE 1 (DETECTION): LaserStream gRPC → TraderMonitorWorker`);
             console.log(`   └─ Signature: ${signature}`);
@@ -625,8 +625,8 @@ const quickMap = {
      * Map DeBridge benefits and performance
      */
     debridgeBenefits: (benefits) => {
-        console.log('\n🚀 DEBRIDGE BENEFITS MAPPING');
-        console.log('='.repeat(50));
+        // console.log('\n🚀 DEBRIDGE BENEFITS MAPPING'); // SILENCED FOR CLEAN TERMINAL
+        // console.log('='.repeat(50)); // SILENCED FOR CLEAN TERMINAL
         console.log(`✅ Automatic ALT resolution: ${benefits.automaticALT || 'N/A'}`);
         console.log(`✅ Automatic CPI flattening: ${benefits.automaticCPI || 'N/A'}`);
         console.log(`✅ Automatic IDL parsing: ${benefits.automaticIDL || 'N/A'}`);
@@ -639,8 +639,8 @@ const quickMap = {
      * Map DeBridge vs Manual performance comparison
      */
     performanceComparison: (manualLatency, debridgeLatency) => {
-        console.log('\n⚡ PERFORMANCE COMPARISON MAPPING');
-        console.log('='.repeat(50));
+        // console.log('\n⚡ PERFORMANCE COMPARISON MAPPING'); // SILENCED FOR CLEAN TERMINAL
+        // console.log('='.repeat(50)); // SILENCED FOR CLEAN TERMINAL
         console.log(`📊 Manual ALT Handling:`);
         console.log(`   - Detection: 5-15ms`);
         console.log(`   - Normalization: 10-20ms`);
