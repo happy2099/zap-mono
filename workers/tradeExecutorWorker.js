@@ -681,7 +681,13 @@ class TradeExecutorWorker extends BaseWorker {
         const executionStartTime = Date.now(); // 🔧 PERFORMANCE: Start timing execution
 
         // ========================= THE IDEMPOTENCY FIX ========================
-        const swapDetails = message.analysisResult?.swapDetails;
+        const analysisResult = message.analysisResult;
+        if (!analysisResult || !analysisResult.isCopyable || !analysisResult.swapDetails) {
+            this.logError(`[EXEC-MAIN] ❌ Job REJECTED: Monitor did not provide a valid analysis result.`, { signature });
+            return;
+        }
+
+        const swapDetails = analysisResult.swapDetails;
         if (!swapDetails || !swapDetails.outputMint) {
              this.logWarn(`[EXEC-MAIN] ❌ Job REJECTED: Invalid analysis result, cannot determine token to lock.`, { signature });
              return;
@@ -693,7 +699,7 @@ class TradeExecutorWorker extends BaseWorker {
 
         try {
             // ========================= ACQUIRE THE LOCK ========================
-            lockAcquired = await this.redisManager.set(lockKey, 'true', 15, 'NX'); // Set lock for 15s, NX = only if not exists
+            lockAcquired = await this.redisManager.set(lockKey, 'true', { EX: 20, NX: true }); // Set lock for 20s, NX = only if not exists
             if (!lockAcquired) {
                 this.logInfo(`[EXEC-MAIN] ⏭️ Job SKIPPED: Another process is already buying ${shortenAddress(swapDetails.outputMint)}. Ignoring duplicate.`, { signature });
                 return; // Gracefully exit, preventing duplicate execution
@@ -701,15 +707,6 @@ class TradeExecutorWorker extends BaseWorker {
             // ===================================================================
 
             this.logInfo(`[EXEC-MAIN] 🚀 Processing job for sig: ${shortenAddress(signature)}`);
-
-            // --- 1. VALIDATE THE JOB ---
-            const analysisResult = message.analysisResult;
-            if (!analysisResult || !analysisResult.isCopyable || !analysisResult.swapDetails) {
-                this.logError(`[EXEC-MAIN] ❌ Job REJECTED: Monitor did not provide a valid analysis result.`, { signature });
-                return;
-            }
-
-            const swapDetails = analysisResult.swapDetails;
             const platform = swapDetails.platform;
             const tradeType = swapDetails.tradeType;
             
@@ -1196,40 +1193,38 @@ class TradeExecutorWorker extends BaseWorker {
     // ADD THIS NEW FUNCTION
     async _fetchTradeResults(signature, outputMint, userWalletPublicKey) {
         try {
-            this.logInfo(`[VERIFY] 🔍 Fetching results for signature: ${shortenAddress(signature)}`);
-            // Wait a moment for the transaction to be indexed by the RPC
+            this.logInfo(`[VERIFY-V2] 🔍 Fetching results for sig: ${shortenAddress(signature)}`);
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            const tx = await this.solanaManager.connection.getParsedTransaction(signature, 'confirmed');
+            // ========================= THE VERSIONED TRANSACTION FIX ========================
+            const tx = await this.solanaManager.connection.getTransaction(signature, {
+                maxSupportedTransactionVersion: 0, // This is essential for V0 transactions
+                commitment: 'confirmed'
+            });
+            // ============================================================================
+
             if (!tx) {
-                this.logWarn(`[VERIFY] ⚠️ Transaction not found after delay. Cannot verify token amount.`);
+                this.logWarn(`[VERIFY-V2] ⚠️ Transaction not found. Cannot verify token amount.`);
                 return null;
             }
 
+            // The rest of the logic remains the same.
             const postBalances = tx.meta.postTokenBalances;
             const preBalances = tx.meta.preTokenBalances;
-
             const ownerAddress = userWalletPublicKey.toBase58();
             const mintAddress = outputMint.toString();
 
             const postBalance = postBalances.find(tb => tb.owner === ownerAddress && tb.mint === mintAddress);
             const preBalance = preBalances.find(tb => tb.owner === ownerAddress && tb.mint === mintAddress);
 
-            const postAmount = BigInt(postBalance?.uiTokenAmount?.amount || '0');
-            const preAmount = BigInt(preBalance?.uiTokenAmount?.amount || '0');
-
-            const amountBought = postAmount - preAmount;
+            const amountBought = BigInt(postBalance?.uiTokenAmount?.amount || '0') - BigInt(preBalance?.uiTokenAmount?.amount || '0');
             const decimals = postBalance?.uiTokenAmount?.decimals ?? 0;
 
-            this.logInfo(`[VERIFY] ✅ Verification complete. Bought: ${amountBought} (raw)`);
-
-            return {
-                amountBoughtRaw: amountBought,
-                decimals: decimals
-            };
+            this.logInfo(`[VERIFY-V2] ✅ Verification complete. Bought: ${amountBought} (raw)`);
+            return { amountBoughtRaw: amountBought, decimals };
 
         } catch (error) {
-            this.logError(`[VERIFY] ❌ Error fetching trade results for ${shortenAddress(signature)}`, { error: error.message });
+            this.logError(`[VERIFY-V2] ❌ Error fetching trade results`, { signature: shortenAddress(signature), error: error.message });
             return null;
         }
     }
@@ -2193,20 +2188,72 @@ class TradeExecutorWorker extends BaseWorker {
                 ],
                 data: buyInstructionData
             };
-            instructions.push(buyInstruction);
 
-            this.logInfo(`[PUMPFUN-V6-SDK-VERIFIED] ✅ IDL-VERIFIED transaction created.`);
-            
-            // --- SEND THE TRANSACTION ---
-            const executionResult = await this.singaporeSender.executeCopyTrade(
-                instructions,
-                userWallet,
-                { platform: 'PumpFun', inputAmount: scaledSolCost, useSmartTransactions: false }
-            );
-            
-            if (!executionResult || !executionResult.success) {
-                throw new Error(executionResult.error || 'The atomic PumpFun buy transaction failed.');
+        // ========================= TWO-STEP TRANSACTION APPROACH =========================
+        // Step 1: Create ATA with Helius tip
+        const heliusTipWallet = new PublicKey("2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ");
+        const tipAmount = 1000000; // 0.001 SOL (Helius minimum requirement)
+        
+        const tipInstruction = SystemProgram.transfer({
+            fromPubkey: userWallet.publicKey,
+            toPubkey: heliusTipWallet,
+            lamports: tipAmount
+        });
+        
+        // Step 1: ATA Creation + Tip
+        const createAtaInstruction = createAssociatedTokenAccountInstruction(
+            userWallet.publicKey, 
+            ata, 
+            userWallet.publicKey, 
+            mintPubkey
+        );
+        const ataInstructions = [createAtaInstruction, tipInstruction];
+        this.logInfo(`[PUMPFUN-2STEP] 🔧 Step 1: Creating ATA with Helius tip...`);
+        
+        const ataResult = await this.singaporeSender.executeCopyTrade(
+            ataInstructions,
+            userWallet,
+            { platform: 'PumpFun-ATA', inputAmount: 0, useSmartTransactions: false }
+        );
+        
+        if (!ataResult || !ataResult.success) {
+            // Check if the error is "account already exists", which is OK for us
+            if (ataResult.error && ataResult.error.includes("already in use")) {
+                this.logInfo(`[PUMPFUN-2STEP] ✅ ATA already exists. Proceeding.`);
+            } else {
+                throw new Error(`Failed to create ATA: ${ataResult.error || 'Unknown Error'}`);
             }
+        } else {
+            this.logInfo(`[PUMPFUN-2STEP] ✅ ATA created successfully. Sig: ${shortenAddress(ataResult.signature)}`);
+        }
+        
+        // ========================= CRITICAL DELAY + VERIFICATION =========================
+        // Wait for ATA to be fully processed by the blockchain
+        this.logInfo(`[PUMPFUN-2STEP] ⏳ Waiting 5 seconds for ATA to be fully processed...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        
+        // Verify ATA exists and is properly initialized
+        this.logInfo(`[PUMPFUN-2STEP] 🔍 Verifying ATA is ready...`);
+        const ataAccountInfo = await this.solanaManager.connection.getAccountInfo(ata);
+        if (!ataAccountInfo) {
+            throw new Error(`ATA verification failed: Account ${ata.toBase58()} not found after creation`);
+        }
+        this.logInfo(`[PUMPFUN-2STEP] ✅ ATA verified: ${ata.toBase58()} is ready`);
+        // ================================================================================
+        
+        // Step 2: Pump.fun Buy with Tip
+        this.logInfo(`[PUMPFUN-2STEP] 🚀 Step 2: Executing Pump.fun buy with tip...`);
+        const buyInstructions = [tipInstruction, buyInstruction];
+        
+        const executionResult = await this.singaporeSender.executeCopyTrade(
+            buyInstructions,
+            userWallet,
+            { platform: 'PumpFun', inputAmount: scaledSolCost, useSmartTransactions: false }
+        );
+            
+        if (!executionResult || !executionResult.success) {
+            throw new Error(executionResult.error || 'The PumpFun buy transaction failed.');
+        }
 
             this.logInfo(`[PUMPFUN-V6-SDK-VERIFIED] ✅ SUCCESS! Signature: ${executionResult.signature}`);
 
@@ -2338,43 +2385,63 @@ class TradeExecutorWorker extends BaseWorker {
 
     
     async findAMMPool(mintPubkey) {
-        this.logInfo(`[AMM-FINDER] 🔍 Searching for AMM pool for mint: ${shortenAddress(mintPubkey.toBase58())}`);
+        this.logInfo(`[AMM-FINDER-V2] 🔍 Searching for AMM pool for mint: ${shortenAddress(mintPubkey.toBase58())}`);
         try {
             const ammProgramId = config.DEX_PROGRAM_IDS.PUMP_FUN_AMM;
             
-            // Use Helius API to get all accounts owned by the AMM program. This is more efficient.
+            // ========================= DOCUMENTED OFFSET CALCULATION ========================
+            // AMM Pool Account Structure (based on IDL):
+            // - pool_bump: u8 (1 byte)
+            // - index: u16 (2 bytes) 
+            // - creator: Pubkey (32 bytes)
+            // - base_mint: Pubkey (32 bytes) ← TARGET FIELD at offset 35
+            // - quote_mint: Pubkey (32 bytes)
+            // - ... other fields
+            const MEMCMP_OFFSET_FOR_BASE_MINT = 35; // 1 + 2 + 32 = 35 bytes
+            // ===========================================================================
+            
             const response = await fetch(this.solanaManager.connection.rpcEndpoint, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     jsonrpc: '2.0',
-                    id: 'zapbot-get-amm-pool',
+                    id: 'zapbot-find-amm-pool',
                     method: 'getProgramAccounts',
                     params: [
                         ammProgramId.toBase58(),
                         {
                             encoding: 'base64',
                             filters: [
-                                { memcmp: { offset: 42, bytes: mintPubkey.toBase58() } } // Filter by the base_mint address in the Pool account structure
+                                { 
+                                    memcmp: { 
+                                        offset: MEMCMP_OFFSET_FOR_BASE_MINT, 
+                                        bytes: mintPubkey.toBase58() 
+                                    } 
+                                }
                             ]
                         }
                     ]
                 })
             });
-
+    
             const data = await response.json();
-            if (data.error || !data.result || data.result.length === 0) {
-                this.logWarn(`[AMM-FINDER] ⚠️ No AMM pool found via Helius API for mint: ${shortenAddress(mintPubkey.toBase58())}`);
+            if (data.error) {
+                this.logError(`[AMM-FINDER-V2] ❌ RPC error: ${data.error.message}`);
                 return null;
             }
-
-            // The first account found is the pool we need.
+            
+            if (!data.result || data.result.length === 0) {
+                this.logWarn(`[AMM-FINDER-V2] ⚠️ No AMM pool found for mint: ${shortenAddress(mintPubkey.toBase58())}`);
+                return null;
+            }
+    
+            // Handle multiple pools (shouldn't happen, but safe)
             const poolAccountAddress = new PublicKey(data.result[0].pubkey);
-            this.logInfo(`[AMM-FINDER] ✅ Found AMM pool account: ${shortenAddress(poolAccountAddress.toBase58())}`);
+            this.logInfo(`[AMM-FINDER-V2] ✅ Found AMM pool: ${shortenAddress(poolAccountAddress.toBase58())}`);
             return poolAccountAddress;
-
+    
         } catch (error) {
-            this.logError(`[AMM-FINDER] ❌ Error finding AMM pool: ${error.message}`);
+            this.logError(`[AMM-FINDER-V2] ❌ Error finding AMM pool: ${error.message}`);
             return null;
         }
     }
@@ -2394,23 +2461,33 @@ class TradeExecutorWorker extends BaseWorker {
                 pumpFunProgramId
             );
             
+            this.logInfo(`[MIGRATION-CHECK] 🔍 Bonding curve PDA: ${shortenAddress(bondingCurvePDA.toBase58())}`);
+            
+            // ========================= IMPROVED MIGRATION DETECTION =========================
+            // First, check if bonding curve account exists
             const bondingCurveAccount = await this.solanaManager.connection.getAccountInfo(bondingCurvePDA);
-
+            
             if (bondingCurveAccount === null) {
-                this.logInfo(`[MIGRATION-CHECK] ✅ MIGRATED: Bonding curve account is closed. Searching for AMM Pool...`);
+                this.logInfo(`[MIGRATION-CHECK] 🔍 Bonding curve account is null. Checking if AMM pool exists...`);
                 
-                // Now that we know it has migrated, we can use our helper to find the pool.
+                // If bonding curve is null, check if AMM pool exists to confirm migration
                 const ammPoolAddress = await this.findAMMPool(mintPubkey);
-
+                
                 if (ammPoolAddress) {
+                    this.logInfo(`[MIGRATION-CHECK] ✅ CONFIRMED MIGRATED: Found AMM pool at ${shortenAddress(ammPoolAddress.toBase58())}`);
                     return { isMigrated: true, phase: 'AMM', poolAccount: ammPoolAddress, reason: 'Found AMM pool account.' };
                 } else {
-                    return { isMigrated: true, phase: 'AMM', poolAccount: null, reason: 'Bonding curve closed, but could not find AMM pool.' };
+                    // Bonding curve is null but no AMM pool found - this could be a new token or error
+                    this.logWarn(`[MIGRATION-CHECK] ⚠️ Bonding curve null but no AMM pool found. Assuming bonding curve phase.`);
+                    return { isMigrated: false, phase: 'BondingCurve', reason: 'Bonding curve null but no AMM pool found - likely still in bonding curve.' };
                 }
             } else {
+                // Bonding curve account exists - definitely not migrated
                 this.logInfo(`[MIGRATION-CHECK] ✅ NOT MIGRATED: Bonding curve account is active.`);
                 return { isMigrated: false, phase: 'BondingCurve', reason: 'Bonding curve account still exists.' };
             }
+            // =============================================================================
+            
         } catch (error) {
             this.logError(`[MIGRATION-CHECK] ❌ Migration check failed. Defaulting to Bonding Curve phase.`, { stack: error.stack });
             return { isMigrated: false, phase: 'BondingCurve', reason: `Error during check: ${error.message}` };
@@ -2440,19 +2517,20 @@ class TradeExecutorWorker extends BaseWorker {
                 }
             } else {
                  this.logInfo(`[PUMPFUN-SMART-ROUTER] 🎯 Routing to AMM handler...`);
-                 // NOTE: To make AMM buy/sell work, you first need a reliable way to find the 'poolAccount'.
-                 // This often requires an external API call or a complex on-chain query.
-                 // For now, this part of the logic is prepared but will need that piece of data to function.
-                 const { poolAccount } = migrationStatus; 
-                 if (!poolAccount) {
-                    throw new Error(`Token ${tokenMint} has migrated to AMM, but its pool address could not be determined. AMM trading is not yet possible.`);
-                 }
-
-                 if (tradeType === 'buy') {
-                    return await this.executePumpFunAmmBuy(swapDetails, userConfig, poolAccount);
-                 } else {
-                    return await this.executePumpFunAmmSell(swapDetails, userConfig, poolAccount);
-                 }
+                 
+                 // Try to find AMM pool first
+                 const poolAccount = await this.findAMMPool(new PublicKey(tokenMint));
+                 
+                 if (poolAccount) {
+                    throw new Error(`Token ${tokenMint} has migrated, but its AMM pool address could not be found. Aborting trade.`);
+                     if (tradeType === 'buy') {
+                         return await this.executePumpFunAmmBuy(swapDetails, userConfig, poolAccount);
+                     } else {
+                         return await this.executePumpFunAmmSell(swapDetails, userConfig, poolAccount);
+                     }
+                } else {
+                    throw new Error(`Token ${shortenAddress(swapDetails.outputMint)} has migrated, but its AMM pool address could not be found. Aborting trade.`);
+                }
             }
         } catch (error) {
             this.logError(`[PUMPFUN-SMART-ROUTER] ❌ Smart routing failed: ${error.message}`, { stack: error.stack });

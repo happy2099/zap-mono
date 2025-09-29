@@ -15,9 +15,9 @@
         "user_id": "1758133086172",
         "name": "H",
         "wallet": "Av3xWHJ5EsoLZag6pr7LKbrGgLRTaykXomDD5kBhL9YQ",
-        "active": true,
+        "active": false,
         "created_at": "2025-05-24T08:38:53.150Z",
-        "updated_at": "2025-09-28T07:49:18.354Z"
+        "updated_at": "2025-09-28T16:53:41.617Z"
       },
       "oz": {
         "id": "1758133961125",
@@ -141,9 +141,9 @@
         "user_id": "1758133086172",
         "name": "cupsey-2",
         "wallet": "2fg5QD1eD7rzNNCsvnhmXFm5hqNgwTTG8p7kQ6f3rx6f",
-        "active": false,
+        "active": true,
         "created_at": "2025-09-19T16:06:08.429Z",
-        "updated_at": "2025-09-28T07:48:55.005Z"
+        "updated_at": "2025-09-28T16:53:47.847Z"
       },
       "Yenni": {
         "id": "1758459570903",

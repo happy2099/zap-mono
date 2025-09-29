@@ -5,7 +5,8 @@ const { Connection, PublicKey, LAMPORTS_PER_SOL, ComputeBudgetProgram, SystemPro
 const config = require('./config.js');
 const { shortenAddress } = require('./utils.js');
 const performanceMonitor = require('./performanceMonitor.js');
-const leaderTracker = require('./leaderTracker.js'); // <-- ADD THIS LINE
+const leaderTracker = require('./leaderTracker.js');
+const bs58 = require('bs58'); // Required for correct Base58 encoding of transactions
 
 class SingaporeSenderManager {
     constructor(connection = null) {
@@ -270,7 +271,7 @@ class SingaporeSenderManager {
             }
             
             console.log(`[SINGAPORE-SENDER] 🔧 Final compute units: ${computeUnits} (type: ${typeof computeUnits})`);
-            
+
             // ADD COMPUTE BUDGET INSTRUCTIONS (must be first in allInstructions array)
             allInstructions.unshift(
                 ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
@@ -302,10 +303,14 @@ class SingaporeSenderManager {
             
             // console.log(`[SINGAPORE-SENDER] ✅ Optimized transaction built with ${allInstructions.length} instructions`); // SILENCED FOR CLEAN TERMINAL
             // console.log(`[SINGAPORE-SENDER] 🔧 Compute units: ${computeUnits}, Priority fee: ${effectiveMicroLamports} microLamports`); // SILENCED FOR CLEAN TERMINAL
-            console.log(`[SINGAPORE-SENDER] 📝 Transaction size: ${optimizedTransaction.serialize().length} bytes`);
+            
+            // 🔧 CRITICAL FIX: Serialize once and store the result
+            const serializedTransaction = optimizedTransaction.serialize();
+            console.log(`[SINGAPORE-SENDER] 📝 Transaction size: ${serializedTransaction.length} bytes`);
             
             return {
                 transaction: optimizedTransaction,
+                serializedTransaction, // 🔧 Pass the pre-serialized transaction
                 blockhash,
                 lastValidBlockHeight
             };
@@ -321,7 +326,7 @@ class SingaporeSenderManager {
         try {
             console.log(`[SINGAPORE-SENDER] 🔬 Simulating transaction for compute units...`);
             
-            const serializedTx = Buffer.from(transaction.serialize()).toString('base64');
+            const serializedTx = bs58.encode(transaction.serialize());
             
             const response = await fetch(`${this.singaporeEndpoints.rpc}`, {
                 method: 'POST',
@@ -378,7 +383,7 @@ class SingaporeSenderManager {
 
     // Send transaction via Helius Singapore Sender endpoint with smart error recovery and leader targeting
 async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
-    let { transaction, blockhash, lastValidBlockHeight } = transactionData;
+    let { transaction, serializedTransaction, blockhash, lastValidBlockHeight } = transactionData;
 
     // ============================= LEADER TARGETING =============================
     const leader = leaderTracker.getCurrentLeader();
@@ -426,6 +431,22 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
                 
+                // ========================= THE BATTLE-HARDENED FIX ========================
+                // STEP 1: Use the pre-serialized transaction (already done in buildOptimizedTransaction)
+                if (!serializedTransaction) {
+                    throw new Error("CRITICAL: Pre-serialized transaction is missing!");
+                }
+
+                // STEP 2: Encode the byte buffer into a Base58 string, as required by the JSON-RPC API.
+                const encodedTx = bs58.encode(serializedTransaction);
+
+                if (!encodedTx || encodedTx.length === 0) {
+                    throw new Error("CRITICAL: Transaction serialization resulted in an empty string.");
+                }
+                // ============================================================================
+
+                console.log(`[SINGAPORE-SENDER] 🔧 Transaction serialized successfully: ${encodedTx.length} characters`);
+                
             const response = await fetch(targetEndpoint, {
                 method: 'POST',
                     headers: { 
@@ -434,14 +455,14 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
                     },
                 body: JSON.stringify({
                     jsonrpc: '2.0',
-                    id: Date.now().toString(),
+                    id: 'zapbot-sender',
                     method: 'sendTransaction',
                     params: [
-                        Buffer.from(transaction.serialize()).toString('base64'),
+                        encodedTx,
                         {
-                            encoding: 'base64',
-                            skipPreflight: true, // Required for Sender
-                            maxRetries: 0         // Use custom retry logic
+                            skipPreflight: true, // We already simulated; this is for maximum speed.
+                            preflightCommitment: "processed",
+                            maxRetries: 0 // We handle retries in our own loop.
                         }
                     ]
                     }),
@@ -450,13 +471,20 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
                 
                 clearTimeout(timeoutId);
 
-            const result = await response.json();
-            if (result.error) {
-                throw new Error(result.error.message);
-            }
+            const jsonResponse = await response.json();
 
-            console.log(`[SINGAPORE-SENDER] ✅ Transaction sent successfully: ${result.result}`);
-            return result.result;
+            if (jsonResponse.error) {
+                // This is an error from the RPC node itself.
+                throw new Error(`Helius RPC error: ${jsonResponse.error.message} (Code: ${jsonResponse.error.code})`);
+            }
+            
+            const signature = jsonResponse.result;
+            if (!signature) {
+                throw new Error("Transaction sent but no signature was returned from Helius.");
+            }
+            
+            console.log(`[SINGAPORE-SENDER] ✅ Transaction sent successfully! Signature: ${signature}`);
+            return signature;
 
         } catch (error) {
             console.warn(`[SINGAPORE-SENDER] ⚠️ Attempt ${attempt} failed: ${error.message}`);
@@ -495,18 +523,35 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
         
         while (Date.now() - startTime < timeout) {
             try {
-                const status = await this.connection.getSignatureStatuses([signature]);
+                // ========================= HELIUS BEST PRACTICES ========================
+                // Use getSignatureStatuses with searchTransactionHistory for reliability
+                const status = await this.connection.getSignatureStatuses([signature], {
+                    searchTransactionHistory: true // Critical for reliable status checking
+                });
+                // =====================================================================
+                
                 const confirmationStatus = status?.value[0]?.confirmationStatus;
+                const err = status?.value[0]?.err;
+                const confirmations = status?.value[0]?.confirmations;
                 
                 if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
                     const confirmationTime = Date.now() - startTime;
-                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed in ${confirmationTime}ms`);
+                    
+                    // ========================= CRITICAL FIX ========================
+                    // Check if transaction actually succeeded (not just confirmed)
+                    if (err) {
+                        console.error(`[SINGAPORE-SENDER] ❌ TRANSACTION FAILED: ${JSON.stringify(err)}`);
+                        throw new Error(`Transaction failed on-chain: ${JSON.stringify(err)}`);
+                    }
+                    // =============================================================
+                    
+                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed and SUCCEEDED in ${confirmationTime}ms (confirmations: ${confirmations})`);
                     return confirmationTime;
                 }
                 
-                // Log progress
+                // Enhanced progress logging with confirmation details
                 if (Date.now() - startTime > 5000) { // After 5 seconds
-                    console.log(`[SINGAPORE-SENDER] ⏳ Still waiting for confirmation... (${Date.now() - startTime}ms elapsed)`);
+                    console.log(`[SINGAPORE-SENDER] ⏳ Still waiting for confirmation... (${Date.now() - startTime}ms elapsed, status: ${confirmationStatus || 'pending'})`);
                 }
                 
             } catch (error) {
@@ -575,7 +620,7 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             // console.log(`[PRIORITY_FEE] 🔍 Estimating priority fee for ${accountKeys.size} accounts...`); // SILENCED FOR CLEAN TERMINAL
             
             // Use Helius API directly
-            const response = await fetch(`${this.singaporeEndpoints.rpc}`, {
+            const response = await fetch(this.singaporeEndpoints.rpc, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
@@ -604,10 +649,42 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             console.log(`[PRIORITY_FEE] 📊 All fee levels:`, data.result?.priorityFeeLevels);
             
             return cappedFee;
-
+            
         } catch (error) {
             console.error(`[PRIORITY_FEE] ❌ Helius API method failed: ${error.message}`);
             console.warn('[PRIORITY_FEE] ⚠️ Falling back to default priority fee');
+            return 1000000; // Fallback
+        }
+    }
+
+    // ULTRA-FAST priority fee estimation using account keys (RPC Method)
+    async getPriorityFeeByAccountKeys(accountKeys) {
+        try {
+            console.log(`[SENDER-V9-RPC] ⚡ Getting priority fee via RPC for ${accountKeys.length} keys...`);
+            
+            const response = await fetch(config.HELIUS_ENDPOINTS.rpc, { // Use your main RPC URL from config
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: "2.0",
+                    id: "1",
+                    method: "getPriorityFeeEstimate",
+                    params: [{
+                        accountKeys: accountKeys.slice(0, 15),
+                        options: { includeAllPriorityFeeLevels: true }
+                    }]
+                })
+            });
+            
+            const data = await response.json();
+            if (data.error) throw new Error(data.error.message);
+            
+            const priorityFee = data.result?.priorityFeeLevels?.high || 1000000;
+            console.log(`[SENDER-V9-RPC] ⚡ ULTRA-FAST priority fee: ${priorityFee} microLamports`);
+            return priorityFee;
+
+        } catch (error) {
+            console.warn(`[SENDER-V9-RPC] ⚠️ Account keys method failed, using fallback:`, error.message);
             return 1000000; // Fallback
         }
     }
@@ -686,138 +763,137 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
         }
     }
 
-    // ULTRA-FAST copy trade execution with Helius Smart Transactions
+    // ULTRA-FAST copy trade execution with FINAL RUNWAY logic
     async executeCopyTrade(instructions, keypair, options = {}) {
-        const startTime = Date.now(); // 🔧 FIX: Add missing startTime variable
+        const startTime = Date.now();
+        let signature = null;
+
         try {
-            console.log(`[SINGAPORE-SENDER] 🚀 Starting ULTRA-FAST copy trade execution...`);
-            console.log(`[SINGAPORE-SENDER] 🔬 Black Box: Options received:`, JSON.stringify(options, null, 2));
+            console.log(`[SENDER-V13-FINAL] 🚀 Initiating FINAL execution with Helius tip...`);
             
-            // Check if Helius Smart Transactions are enabled
-            if (options.useSmartTransactions) {
-                console.log(`[SINGAPORE-SENDER] 🧠 Helius Smart Transactions enabled - automatic optimization`);
-                return await this.executeWithHeliusSmartTransactions(instructions, keypair, options);
+            // ========== STEP 1: GET BLOCKHASH & EXTRACT ACCOUNTS ==========
+            const { value: { blockhash, lastValidBlockHeight } } = await this.connection.getLatestBlockhashAndContext('confirmed');
+            
+            const allInstructions = [...instructions];
+            const accountKeys = allInstructions.flatMap(ix => ix.keys.map(key => key.pubkey.toString()));
+            const uniqueAccountKeys = [...new Set(accountKeys), keypair.publicKey.toString()];
+
+            // ========== STEP 2: GET DYNAMIC FEES (THE BATTLE-HARDENED METHOD) ==========
+            let priorityFee = 1000000; // Start with a safe fallback
+            try {
+                console.log(`[SENDER-V10-FINAL] ⚡ Getting priority fee via robust RPC method...`);
+                const response = await fetch(this.singaporeEndpoints.rpc, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        jsonrpc: "2.0",
+                        id: "zapbot-fee-check",
+                        method: "getPriorityFeeEstimate",
+                        params: [{ accountKeys: uniqueAccountKeys, options: { includeAllPriorityFeeLevels: true } }]
+                    })
+                });
+                const data = await response.json();
+                if (data.error) throw new Error(data.error.message);
+                priorityFee = data.result?.priorityFeeLevels?.high || 1000000;
+                console.log(`[SENDER-V10-FINAL] ✅ Priority fee set to HIGH: ${priorityFee} microLamports`);
+            } catch (error) {
+                console.warn(`[SENDER-V10-FINAL] ⚠️ Priority fee estimation failed: ${error.message}. Using fallback.`);
             }
+
+            // ========== STEP 2: BUILD THE FINAL TRANSACTION (WITH HELIUS TIP) ==========
+            const computeUnits = await this._getComputeUnits(allInstructions, keypair, blockhash);
             
-            // Debug: Log instruction structure
-            // console.log(`[SINGAPORE-SENDER] 🔍 Instructions received:`, instructions.length); // SILENCED FOR CLEAN TERMINAL
-            if (instructions.length > 0) {
-                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction keys:`, Object.keys(instructions[0])); // SILENCED FOR CLEAN TERMINAL
-                // console.log(`[SINGAPORE-SENDER] 🔍 First instruction programId:`, instructions[0].programId); // SILENCED FOR CLEAN TERMINAL
+            // Use Helius-approved tip address (first one from their list)
+            const heliusTipAccount = new PublicKey('2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ');
+            const tipAmountSOL = 0.0001; // Small tip to satisfy Helius requirement
+
+            allInstructions.unshift(
+                ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
+                ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee })
+            );
+            allInstructions.push(
+                SystemProgram.transfer({ 
+                    fromPubkey: keypair.publicKey, 
+                    toPubkey: heliusTipAccount, 
+                    lamports: Math.floor(tipAmountSOL * LAMPORTS_PER_SOL) 
+                })
+            );
+
+            const transactionMessage = new TransactionMessage({
+                instructions: allInstructions,
+                payerKey: keypair.publicKey,
+                recentBlockhash: blockhash,
+            }).compileToV0Message();
+
+            const transaction = new VersionedTransaction(transactionMessage);
+            transaction.sign([keypair]);
+            const encodedTx = Buffer.from(transaction.serialize()).toString('base64');
+            console.log(`[SENDER-V13-FINAL] ✅ Transaction built and ready for launch.`);
+
+            // ========== STEP 4: LAUNCH & CONFIRM ==========
+            for (let attempt = 1; attempt <= 3; attempt++) {
+                if (await this.connection.isBlockhashValid(blockhash) === false) {
+                    console.warn(`[SENDER-V10-FINAL] ⚠️ Blockhash expired before attempt ${attempt}. Failing fast.`);
+                    throw new Error("Blockhash expired before sending.");
+                }
                 
-                // Validate instruction structure
-                for (let i = 0; i < instructions.length; i++) {
-                    const ix = instructions[i];
-                    if (!ix.programId) {
-                        console.error(`[SINGAPORE-SENDER] ❌ Instruction ${i} missing programId:`, ix);
-                        throw new Error(`Instruction ${i} is missing programId - invalid instruction format`);
-                    }
-                    if (!ix.programId.equals) {
-                        console.error(`[SINGAPORE-SENDER] ❌ Instruction ${i} programId is not a PublicKey:`, ix.programId);
-                        throw new Error(`Instruction ${i} programId is not a valid PublicKey object`);
-                    }
+                try {
+                    console.log(`[SENDER-V10-FINAL] 📤 LAUNCHING (Attempt ${attempt}/3)...`);
+                    const response = await fetch(this.singaporeEndpoints.sender, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            jsonrpc: '2.0',
+                            id: 'zapbot-launch',
+                            method: 'sendTransaction',
+                            params: [
+                                encodedTx, 
+                                { 
+                                    encoding: 'base64',
+                                    skipPreflight: true, 
+                                    maxRetries: 0 
+                                }
+                            ]
+                        })
+                    });
+                    const jsonResponse = await response.json();
+                    
+                    // ========== DEBUG HELIUS RESPONSE ==========
+                    console.log(`[SENDER-V10-FINAL] 🔍 Helius Response Debug:`, {
+                        status: response.status,
+                        hasError: !!jsonResponse.error,
+                        hasResult: !!jsonResponse.result,
+                        resultType: typeof jsonResponse.result,
+                        resultValue: jsonResponse.result,
+                        fullResponse: JSON.stringify(jsonResponse, null, 2)
+                    });
+                    // ==========================================
+                    
+                    if (jsonResponse.error) throw new Error(`Helius RPC Error: ${jsonResponse.error.message}`);
+                    if (!jsonResponse.result) throw new Error("No signature returned from Helius.");
+                    
+                    signature = jsonResponse.result;
+                    break; 
+
+                } catch (error) {
+                    console.warn(`[SENDER-V10-FINAL] ⚠️ Attempt ${attempt} failed: ${error.message}`);
+                    if (attempt === 3) throw error;
+                    await new Promise(resolve => setTimeout(resolve, 1500)); // Shorter delay
                 }
             }
+
+            if (!signature) throw new Error("Failed to get transaction signature after all retries.");
             
-            // Validate user hasn't included compute budget instructions
-            const hasComputeBudget = instructions.some(ix => 
-                ix.programId && ix.programId.equals && ix.programId.equals(ComputeBudgetProgram.programId)
-            );
-            if (hasComputeBudget) {
-                throw new Error('Do not include compute budget instructions - they are added automatically');
-            }
-            
-            // Get recent blockhash
-            console.log(`[SINGAPORE-SENDER] 🔍 Step 1: Getting recent blockhash...`);
-            const { value: blockhashInfo } = await this.connection.getLatestBlockhashAndContext('confirmed');
-            const { blockhash, lastValidBlockHeight } = blockhashInfo;
-            console.log(`[SINGAPORE-SENDER] ✅ Blockhash obtained: ${blockhash.substring(0, 8)}...`);
-            
-            // Get dynamic compute units
-            console.log(`[SINGAPORE-SENDER] 🔍 Step 2: Simulating transaction for compute units...`);
-            const computeUnits = await this._getComputeUnits(instructions, keypair, blockhash);
-            console.log(`[SINGAPORE-SENDER] ✅ Compute units calculated: ${computeUnits}`);
-            
-            // Get dynamic priority fee
-            console.log(`[SINGAPORE-SENDER] 🔍 Step 3: Getting dynamic priority fee...`);
-            const priorityFee = await this.getDynamicPriorityFee(instructions, keypair.publicKey, blockhash);
-            console.log(`[SINGAPORE-SENDER] ✅ Priority fee calculated: ${priorityFee} microLamports`);
-            
-            // Get dynamic tip amount
-            console.log(`[SINGAPORE-SENDER] 🔍 Step 4: Getting dynamic tip amount...`);
-            const tipAmountSOL = await this.getDynamicTipAmount();
-            const tipAccount = new PublicKey(this.tipAccounts[Math.floor(Math.random() * this.tipAccounts.length)]);
-            console.log(`[SINGAPORE-SENDER] ✅ Tip amount: ${tipAmountSOL} SOL to ${tipAccount.toBase58().substring(0, 8)}...`);
-            
-            console.log(`[SINGAPORE-SENDER] 🔧 Copy trade optimization complete:`);
-            console.log(`[SINGAPORE-SENDER]   - Compute units: ${computeUnits}`);
-            console.log(`[SINGAPORE-SENDER]   - Priority fee: ${priorityFee} microLamports`);
-            console.log(`[SINGAPORE-SENDER]   - Tip amount: ${tipAmountSOL} SOL`);
-            
-            // Execute with optimized parameters
-            const masterTxId = options.signature || 'N/A'; // For logging the source
-            console.log(`[SINGAPORE-SENDER] 🔍 Master transaction ID for logging: ${masterTxId}`);
-            
-            const transactionData = await this.buildOptimizedTransaction(
-                { instructions },
-                keypair,
-                tipAccount,
-                tipAmountSOL,
-                {
-                    computeUnits,
-                    priorityFee,
-                    platform: options.platform || 'UNKNOWN'
-                }
-            );
-            
-            const { transaction, blockhash: txBlockhash, lastValidBlockHeight: txLastValidBlockHeight } = transactionData;
-            
-            // Send transaction
-            console.log(`[SINGAPORE-SENDER] ✍️ Signing transaction...`);
-            const newTxId = await this.sendViaSender(transactionData, 3, options.platform || 'UNKNOWN');
-            console.log(`[SINGAPORE-SENDER] ✅ Transaction sent! NEW signature: ${newTxId}`);
-            
-            // Confirm transaction
-            console.log(`[SINGAPORE-SENDER] ⏳ Awaiting confirmation for NEW signature: ${newTxId}`);
-            // ==========================================================
-            // ==================== THE FINAL FIX =======================
-            // ==========================================================
-            const confirmationTime = await this.confirmTransaction(newTxId);
-            // ==========================================================
-            
-            // CALCULATE EXECUTION TIME
+            const confirmationTime = await this.confirmTransaction(signature);
             const executionTime = Date.now() - startTime;
-            this.updateExecutionStats(executionTime, true);
             
-            // RECORD WITH PERFORMANCE MONITOR
-            performanceMonitor.recordExecutionLatency(executionTime);
+            console.log(`[SENDER-V13-FINAL] ✅✅✅ SUCCESS! LANDED IN ${executionTime}ms! SIGNATURE: ${signature}`);
             
-            console.log(`[SINGAPORE-SENDER] ✅ Copy trade execution completed in ${executionTime}ms!`);
-            console.log(`[SINGAPORE-SENDER] 📝 Signature: ${newTxId}`);
-            console.log(`[SINGAPORE-SENDER] ⚡ Execution time: ${executionTime}ms`);
-            console.log(`[SINGAPORE-SENDER] 🔍 Confirmation time: ${confirmationTime}ms`);
-            
-            // Return success result for the executor
-            return {
-                success: true,
-                signature: newTxId,
-                executionTime,
-                confirmationTime,
-                tipAmount: tipAmountSOL,
-                tipAccount: tipAccount.toString()
-            };
-            
+            return { success: true, signature, executionTime, confirmationTime };
+
         } catch (error) {
-            console.error(`[SINGAPORE-SENDER] ❌ CRITICAL FAILURE in executeCopyTrade:`, error.message);
-            console.error(`[SINGAPORE-SENDER] 🔬 Full Error:`, error);
-            console.error(`[SINGAPORE-SENDER] 🔬 Stack Trace:`, error.stack);
-            
-            // Return failure result for the executor
-            return {
-                success: false,
-                error: error.message,
-                executionTime: Date.now() - Date.now() // 0 since it failed
-            };
+            console.error(`[SENDER-V13-FINAL] ❌ EXECUTION FAILED: ${error.message}`, { stack: error.stack });
+            return { success: false, error: error.message };
         }
     }
 

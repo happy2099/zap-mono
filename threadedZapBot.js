@@ -55,6 +55,12 @@ class ThreadedZapBot {
                 file: './workers/dataManagerWorker.js', 
                 options: { maxMemory: '512MB' },
                 required: true
+            },
+            { 
+                name: 'portfolio', 
+                file: './workers/portfolioMonitorWorker.js', 
+                options: { maxMemory: '256MB' },
+                required: false
             }
             // WebSocketWorker removed - was redundant and not actually used
         ];

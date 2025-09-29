@@ -692,27 +692,43 @@ class LaserStreamManager extends EventEmitter {
     detectPlatform(programIds, routerInfo, meta = null) {
         try {
             const platformPrograms = new Map([
-                // Pump.fun programs
-                ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', 'PumpFun'],
-                ['6HB1PioC', 'PumpFun'], // Shortened version from your output
-                ['6HB1PioC...', 'PumpFun'], // Full version
-                // Raydium AMM
-                ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', 'Raydium'],
-                // Orca AMM
-                ['9W959DqEETiGZocYWCQPaJ6sBmUzgfxXfqGeTEdp3aQP', 'Orca'],
-                // Meteora AMM
-                ['Eo7WjKq67rjJQSZxS6z3YkapzY3eMj6Xy8X5EQVn5UaB', 'Meteora'],
-                // Jupiter
-                ['JUP4Fb2cqiRUcaTHdrPC8h2gNsA2ETXiPDD33WcGuJB', 'Jupiter'],
-                ['JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4', 'Jupiter'],
-                // System Program (filter out)
-                ['11111111111111111111111111111111', 'System']
+                // Pump.fun programs (from config.js)
+                ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', 'PUMP_FUN'],
+                ['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', 'PUMP_FUN_AMM'],
+                ['6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC', 'PUMP_FUN_V2'],
+
+                // Raydium DEX
+                ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', 'RAYDIUM_V4'],
+                ['CPMMoo8L3F4NbTegBCKVNunggL7H1bpdTHKxQB5qKP1C', 'RAYDIUM_CPMM'],
+                ['CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', 'RAYDIUM_CLMM'],
+                ['675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv', 'RAYDIUM_AMM'],
+                ['5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h', 'RAYDIUM_STABLE_SWAP'],
+                ['LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj', 'RAYDIUM_LAUNCHPAD'],
+
+                // Meteora DEX
+                ['LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', 'METEORA_DLMM'],
+                ['dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN', 'METEORA_DBC'],
+                ['DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d', 'METEORA_DBC'],
+                ['CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG', 'METEORA_CP_AMM'],
+
+                // Orca DEX
+                ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', 'WHIRLPOOL'],
+
+                // Serum/OpenBook DEX
+                ['9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', 'SERUM_DEX_V3'],
+                ['srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', 'OPENBOOK'],
+                ['srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d', 'OPENBOOK_V3'],
+
+                // System/Token Programs (can filter out if needed)
+                ['11111111111111111111111111111111', 'SYSTEM_PROGRAM'],
+                ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TOKEN_PROGRAM'],
+                ['ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', 'ASSOCIATED_TOKEN_PROGRAM']
             ]);
-            
+
             // Check for direct platform matches (filter out system programs)
             for (const programId of programIds) {
                 if (platformPrograms.has(programId) && platformPrograms.get(programId) !== 'System') {
-                return {
+                    return {
                         platform: platformPrograms.get(programId),
                         programId,
                         isRouter: false
@@ -1169,6 +1185,17 @@ class LaserStreamManager extends EventEmitter {
                         return; // Not from a monitored trader, ignore.
                     }
 
+                    // ========================= DUPLICATE DETECTION =========================
+                    // Check if we've already processed this signature
+                    if (this.processedSignatures.has(signature)) {
+                        console.log(`[LASERSTREAM-PIPE] ⏭️ Duplicate signature ${shortenAddress(signature)} detected and blocked.`);
+                        return; // Skip duplicate
+                    }
+                    
+                    // Mark this signature as processed
+                    this.processedSignatures.add(signature);
+                    // =====================================================================
+                    
                     // 2. Its ONLY job is to emit the RAW, unprocessed transaction.
                     // It does NOT do any analysis itself.
                     // console.log(`[LASERSTREAM-PIPE] ✅ Detected activity from monitored trader: ${shortenAddress(sourceWallet)}`); // SILENCED FOR CLEAN TERMINAL

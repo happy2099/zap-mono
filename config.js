@@ -60,6 +60,8 @@ const config = {
             'grpc.http2.min_time_between_pings_ms': 15000,
         }
     },
+
+    PORTFOLIO_MONITOR_INTERVAL_SECONDS: 30, // Check prices every 30 seconds
     
     // --- Wallet Configuration ---
     USER_WALLET_PUBKEY: process.env.PUBLIC_KEY,
@@ -173,7 +175,7 @@ const config = {
     
     // --- PUMP.FUN AMM Constants (For Post-Migration Trading) ---
     PUMP_FUN_AMM_CONSTANTS: {
-        GLOBAL_CONFIG: new PublicKey('11111111111111111111111111111111'), // Placeholder - needs actual value
+        GLOBAL_CONFIG: new PublicKey('4wTV1YmiEkRvAtNtsSGPtUrqRYQMe5SKy2uB4JCNsSNk'), 
         FEE_PROGRAM: new PublicKey('pfeeUxB6jkeY1Hxd7CsFCAjcbHA9rWtchMGdZ6VojVZ'), // Same as bonding curve
         EVENT_AUTHORITY: new PublicKey('CEntr3oDe4kAv3g4StGgG3sCjwsUQu3JTT5sSxxHgas'), // Same as bonding curve
     },

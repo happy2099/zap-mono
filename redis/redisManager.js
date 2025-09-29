@@ -550,6 +550,19 @@ async getPreSignedTx(tokenMint) {
             return null;
         }
     }
+
+    async updateTokenStatusInRedis(tokenMint, statusData) {
+        try {
+            const key = `status:${tokenMint}`;
+            // Use setObject to store the whole status object. Cache for 1 hour.
+            await this.setObject(key, statusData, 3600); 
+            // console.log(`[REDIS-STATUS] ✅ Updated status for ${tokenMint}`); // Optional: Can be noisy
+        } catch (error) {
+            console.error(`[REDIS-STATUS] ❌ Error updating status for ${tokenMint}:`, error);
+        }
+    }
 }
+
+
 
 module.exports = { RedisManager };
