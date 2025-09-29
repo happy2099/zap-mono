@@ -693,42 +693,44 @@ class LaserStreamManager extends EventEmitter {
         try {
             const platformPrograms = new Map([
                 // Pump.fun programs (from config.js)
-                ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', 'PUMP_FUN'],
-                ['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', 'PUMP_FUN_AMM'],
-                ['6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC', 'PUMP_FUN_V2'],
-
-                // Raydium DEX
-                ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', 'RAYDIUM_V4'],
-                ['CPMMoo8L3F4NbTegBCKVNunggL7H1bpdTHKxQB5qKP1C', 'RAYDIUM_CPMM'],
-                ['CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', 'RAYDIUM_CLMM'],
-                ['675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv', 'RAYDIUM_AMM'],
-                ['5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h', 'RAYDIUM_STABLE_SWAP'],
-                ['LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj', 'RAYDIUM_LAUNCHPAD'],
-
-                // Meteora DEX
-                ['LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', 'METEORA_DLMM'],
-                ['dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN', 'METEORA_DBC'],
-                ['DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d', 'METEORA_DBC'],
-                ['CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG', 'METEORA_CP_AMM'],
-
-                // Orca DEX
-                ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', 'WHIRLPOOL'],
-
-                // Serum/OpenBook DEX
-                ['9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', 'SERUM_DEX_V3'],
-                ['srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', 'OPENBOOK'],
-                ['srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d', 'OPENBOOK_V3'],
-
-                // System/Token Programs (can filter out if needed)
-                ['11111111111111111111111111111111', 'SYSTEM_PROGRAM'],
-                ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'TOKEN_PROGRAM'],
-                ['ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', 'ASSOCIATED_TOKEN_PROGRAM']
+                ['6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P', 'PumpFun'],
+                ['pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA', 'PumpFun'],
+                ['6HB1VBBS8LrdQiR9MZcXV5VdpKFb7vjTMZuQQEQEPioC', 'PumpFun'],
+                
+                // Raydium DEX Programs (from config.js)
+                ['675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8', 'Raydium'],
+                ['CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C', 'Raydium'],
+                ['CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK', 'Raydium'],
+                ['675kPX9MHTjS2zt1qFR1UARY7hdK2uQDchjADx1Z1gkv', 'Raydium'],
+                ['5quBtoiQqxF9Jv6KYKctB59NT3gtJD2Y65kdnB1Uev3h', 'Raydium'],
+                
+                // Meteora DEX Programs (from config.js)
+                ['LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo', 'Meteora'],
+                ['dbcij3LWUppWqq96dh6gJWwBifmcGfLSB5D4DuSMaqN', 'Meteora'],
+                ['DBCFiGetD2C2s9w2b1G9dwy2J2B6Jq2mRGuo1S4t61d', 'Meteora'],
+                ['CPAMdpZCGKUy5JxQXB4dcpGPiikHawvSWAd6mEn1sGG', 'Meteora'],
+                
+                // Orca DEX Programs (from config.js)
+                ['whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc', 'Orca'],
+                
+                // Serum/OpenBook DEX Programs (from config.js)
+                ['9xQeWvG816bUx9EPjHmaT23yvVM2ZWbrrpZb9PusVFin', 'OpenBook'],
+                ['srmqPvymJeFKQ4zGQed1GFppgkRHL9kaELCbyksJtPX', 'OpenBook'],
+                ['srmq2Vp3e2wBq3dDDjWM9t48Xm21S2Jd2eBE4Pj4u7d', 'OpenBook'],
+                
+                // Raydium Launchpad (from config.js)
+                ['LanMV9sAd7wArD4vJFi2qDdfnVhFxYSUg6eADduJ3uj', 'Raydium'],
+                
+                // System Program (filter out)
+                ['11111111111111111111111111111111', 'System'],
+                ['TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', 'System'],
+                ['ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL', 'System']
             ]);
-
+            
             // Check for direct platform matches (filter out system programs)
             for (const programId of programIds) {
                 if (platformPrograms.has(programId) && platformPrograms.get(programId) !== 'System') {
-                    return {
+                return {
                         platform: platformPrograms.get(programId),
                         programId,
                         isRouter: false

@@ -75,6 +75,9 @@ class SolanaManager {
        this.priorityFees = config.MEV_PROTECTION?.priorityFees || { microLamports: 1000000 };
        this.lastBlockhash = null;
        this.lastBlockhashTime = 0;
+         // CRITICAL FIX: Override blockhash settings for speed
+    this.BLOCKHASH_CACHE_EXPIRATION = 1000; // 1 second
+    this.BLOCKHASH_REFRESH_INTERVAL_MS = 500; // 500ms
        this.altTableCache = new Map();
 
        console.log(`SolanaManager created. RPC: ${this.connection.rpcEndpoint}`);
@@ -309,31 +312,38 @@ class SolanaManager {
 
 
    async getBlockhashWithRetry(retries = 3) {
-       const now = Date.now();
-       if (this.lastBlockhash && (now - this.lastBlockhashTime) < config.BLOCKHASH_CACHE_EXPIRATION) {
-           return this.lastBlockhash;
-       }
+    const now = Date.now();
+    if (this.lastBlockhash && (now - this.lastBlockhashTime) < config.BLOCKHASH_CACHE_EXPIRATION) {
+        return this.lastBlockhash;
+    }
 
-       for (let i = 0; i < retries; i++) {
-           try {
-               const blockhashData = await this.connection.getLatestBlockhash('confirmed');
-               this.lastBlockhash = blockhashData.blockhash;
-               this.lastBlockhashTime = Date.now();
-               return { blockhash: this.lastBlockhash, lastValidBlockHeight: blockhashData.lastValidBlockHeight };
-           } catch (error) {
-               console.warn(`[Blockhash] Attempt ${i + 1} failed. Retrying...`);
-               if (i === retries - 1) throw new Error("Failed to get latest blockhash.");
-               await new Promise(resolve => setTimeout(resolve, 500));
-           }
-       }
-   }
+    for (let i = 0; i < retries; i++) {
+        try {
+            const blockhashData = await this.connection.getLatestBlockhash('confirmed');
+            this.lastBlockhash = blockhashData.blockhash;
+            this.lastBlockhashTime = Date.now();
+            return { blockhash: this.lastBlockhash, lastValidBlockHeight: blockhashData.lastValidBlockHeight };
+        } catch (error) {
+            console.warn(`[Blockhash] Attempt ${i + 1} failed. Retrying...`);
+            if (i === retries - 1) throw new Error("Failed to get latest blockhash.");
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+}
 
 
-   startBlockhashCacheRefresh() {
-       if (this.blockhashRefreshInterval) clearInterval(this.blockhashRefreshInterval);
-       this.blockhashRefreshInterval = setInterval(() => this.getBlockhashWithRetry().catch(() => { }), config.BLOCKHASH_REFRESH_INTERVAL_MS);
-       this.blockhashRefreshInterval.unref();
-   }
+startBlockhashCacheRefresh() {
+    if (this.blockhashRefreshInterval) clearInterval(this.blockhashRefreshInterval);
+    
+    // CRITICAL FIX: Refresh much more frequently
+    this.blockhashRefreshInterval = setInterval(() => {
+        this.getBlockhashWithRetry().catch(error => {
+            console.warn(`[BLOCKHASH-REFRESH] Failed to refresh blockhash: ${error.message}`);
+        });
+    }, this.BLOCKHASH_REFRESH_INTERVAL_MS);
+    
+    this.blockhashRefreshInterval.unref();
+}
 
    startCongestionMonitor() {
        const update = async () => {
@@ -381,14 +391,6 @@ class SolanaManager {
            return 0;
        }
    }
-
-   stop() {
-       console.log("SolanaManager stopped.");
-   }
-
-   // REMOVED: sendSol - Use singaporeSenderManager.js for all transaction sending
-
-
 
    stop() {
        if (this.blockhashRefreshInterval) clearInterval(this.blockhashRefreshInterval);

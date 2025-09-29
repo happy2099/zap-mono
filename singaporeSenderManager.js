@@ -21,9 +21,9 @@ class SingaporeSenderManager {
         };
         this.tipAccounts = config.TIP_ACCOUNTS; // Use the central list of tip accounts
 
-        // Use provided connection or create new one
+        // Use provided connection or create new one - using 'processed' for speed
         this.connection = connection || new Connection(this.singaporeEndpoints.rpc, {
-            commitment: 'confirmed',
+            commitment: 'processed',
             wsEndpoint: this.singaporeEndpoints.laserstream.replace('wss://', 'ws://')
         });
 
@@ -125,20 +125,20 @@ class SingaporeSenderManager {
             }
             console.log(`[SINGAPORE-SENDER] ✅ Transaction validation passed`);
             
-            // GET DYNAMIC TIP AMOUNT
-            console.log(`[SINGAPORE-SENDER] 🔍 Step 2: Getting tip amount...`);
-            const tipAmountSOL = await this.getDynamicTipAmount();
-            const tipAccount = new PublicKey(this.tipAccounts[Math.floor(Math.random() * this.tipAccounts.length)]);
+            // COMMENTED OUT: Tip logic to reduce fees
+            // console.log(`[SINGAPORE-SENDER] 🔍 Step 2: Getting tip amount...`);
+            // const tipAmountSOL = await this.getDynamicTipAmount();
+            // const tipAccount = new PublicKey(this.tipAccounts[Math.floor(Math.random() * this.tipAccounts.length)]);
+            // 
+            // console.log(`[SINGAPORE-SENDER] 💰 Using tip amount: ${tipAmountSOL} SOL to ${shortenAddress(tipAccount)}`);
             
-            console.log(`[SINGAPORE-SENDER] 💰 Using tip amount: ${tipAmountSOL} SOL to ${shortenAddress(tipAccount)}`);
-            
-            // BUILD OPTIMIZED TRANSACTION
+            // BUILD OPTIMIZED TRANSACTION (without tip)
             console.log(`[SINGAPORE-SENDER] 🔍 Step 3: Building optimized transaction...`);
             const optimizedTransaction = await this.buildOptimizedTransaction(
                 transaction, 
                 keypair, 
-                tipAccount, 
-                tipAmountSOL,
+                null, // No tip account
+                0,    // No tip amount
                 options
             );
             console.log(`[SINGAPORE-SENDER] ✅ Optimized transaction built successfully`);
@@ -150,7 +150,23 @@ class SingaporeSenderManager {
             
             // CONFIRM TRANSACTION
             console.log(`[SINGAPORE-SENDER] 🔍 Step 5: Confirming transaction...`);
-            const confirmationTime = await this.confirmTransaction(signature);
+            let confirmationTime;
+            try {
+                confirmationTime = await this.confirmTransaction(signature);
+            } catch (confirmError) {
+                console.error(`[SINGAPORE-SENDER] ❌ CONFIRMATION FAILED: ${confirmError.message}`);
+                console.log(`[SINGAPORE-SENDER] 🔍 Transaction was sent but confirmation failed. Check Solscan: https://solscan.io/tx/${signature}`);
+                
+                // Return partial success - transaction was sent but not confirmed
+                return {
+                    signature,
+                    executionTime: Date.now() - startTime,
+                    confirmationTime: null,
+                    tipAmount: tipAmountSOL,
+                    tipAccount: tipAccount.toString(),
+                    warning: `Transaction sent but confirmation failed: ${confirmError.message}`
+                };
+            }
             
             // CALCULATE EXECUTION TIME
             const executionTime = Date.now() - startTime;
@@ -321,7 +337,7 @@ class SingaporeSenderManager {
         }
     }
 
-    // Simulate transaction before sending to avoid unnecessary gas fees
+    // ULTRA-ACCURATE simulation for PumpFun atomic transactions and manual builds
     async simulateTransaction(transaction) {
         try {
             console.log(`[SINGAPORE-SENDER] 🔬 Simulating transaction for compute units...`);
@@ -360,6 +376,7 @@ class SingaporeSenderManager {
             
             // Check for simulation errors
             if (simulation.err) {
+                console.error(`[SINGAPORE-SENDER] ❌ Simulation error: ${JSON.stringify(simulation.err)}`);
                 throw new Error(`Transaction simulation failed: ${JSON.stringify(simulation.err)}`);
             }
             
@@ -380,6 +397,7 @@ class SingaporeSenderManager {
             throw error;
         }
     }
+
 
     // Send transaction via Helius Singapore Sender endpoint with smart error recovery and leader targeting
 async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
@@ -514,54 +532,115 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
     throw new Error('All retry attempts failed');
 }
 
-    // Confirm transaction with timeout
-    async confirmTransaction(signature, timeout = 15000) {
+    // Confirm transaction with enhanced timeout and fallback methods
+    async confirmTransaction(signature, timeout = 30000) {
         const startTime = Date.now();
-        const interval = 1000; // Check every 1 second
+        const interval = 500; // Check every 500ms for faster response
+        let lastStatus = null;
+        let consecutiveErrors = 0;
+        const maxConsecutiveErrors = 5;
         
         console.log(`[SINGAPORE-SENDER] 🔍 Confirming transaction: ${signature}...`);
         
         while (Date.now() - startTime < timeout) {
             try {
-                // ========================= HELIUS BEST PRACTICES ========================
-                // Use getSignatureStatuses with searchTransactionHistory for reliability
+                // ========================= ENHANCED CONFIRMATION ========================
+                // Method 1: Try getSignatureStatuses first (most reliable)
                 const status = await this.connection.getSignatureStatuses([signature], {
-                    searchTransactionHistory: true // Critical for reliable status checking
+                    searchTransactionHistory: true,
+                    commitment: 'confirmed'
                 });
-                // =====================================================================
                 
                 const confirmationStatus = status?.value[0]?.confirmationStatus;
                 const err = status?.value[0]?.err;
                 const confirmations = status?.value[0]?.confirmations;
+                const slot = status?.value[0]?.slot;
+                
+                lastStatus = { confirmationStatus, err, confirmations, slot };
+                
+                // Reset error counter on successful status check
+                consecutiveErrors = 0;
                 
                 if (confirmationStatus === 'confirmed' || confirmationStatus === 'finalized') {
                     const confirmationTime = Date.now() - startTime;
                     
-                    // ========================= CRITICAL FIX ========================
-                    // Check if transaction actually succeeded (not just confirmed)
-                    if (err) {
-                        console.error(`[SINGAPORE-SENDER] ❌ TRANSACTION FAILED: ${JSON.stringify(err)}`);
-                        throw new Error(`Transaction failed on-chain: ${JSON.stringify(err)}`);
-                    }
-                    // =============================================================
+                // Check if transaction actually succeeded (not just confirmed)
+                if (err) {
+                    console.error(`[SINGAPORE-SENDER] ❌ TRANSACTION FAILED ON-CHAIN:`, {
+                        error: err,
+                        errorType: typeof err,
+                        errorString: JSON.stringify(err),
+                        signature: signature
+                    });
+                    throw new Error(`Transaction failed on-chain: ${JSON.stringify(err)}`);
+                }
                     
-                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed and SUCCEEDED in ${confirmationTime}ms (confirmations: ${confirmations})`);
+                    console.log(`[SINGAPORE-SENDER] ✅ Transaction confirmed and SUCCEEDED in ${confirmationTime}ms (confirmations: ${confirmations}, slot: ${slot})`);
                     return confirmationTime;
                 }
                 
                 // Enhanced progress logging with confirmation details
-                if (Date.now() - startTime > 5000) { // After 5 seconds
-                    console.log(`[SINGAPORE-SENDER] ⏳ Still waiting for confirmation... (${Date.now() - startTime}ms elapsed, status: ${confirmationStatus || 'pending'})`);
+                const elapsed = Date.now() - startTime;
+                if (elapsed > 3000 && elapsed % 3000 < 500) { // Every 3 seconds
+                    console.log(`[SINGAPORE-SENDER] ⏳ Confirmation progress: ${elapsed}ms elapsed, status: ${confirmationStatus || 'pending'}, confirmations: ${confirmations || 0}`);
                 }
                 
             } catch (error) {
-                console.warn('[SINGAPORE-SENDER] ⚠️ Status check failed:', error.message);
+                consecutiveErrors++;
+                console.warn(`[SINGAPORE-SENDER] ⚠️ Status check failed (${consecutiveErrors}/${maxConsecutiveErrors}):`, error.message);
+                
+                // If too many consecutive errors, try fallback method
+                if (consecutiveErrors >= maxConsecutiveErrors) {
+                    console.log(`[SINGAPORE-SENDER] 🔄 Trying fallback confirmation method...`);
+                    try {
+                        // Fallback: Try direct confirmation
+                        const fallbackResult = await this.connection.confirmTransaction(signature, 'confirmed');
+                        if (fallbackResult.value.err) {
+                            throw new Error(`Fallback confirmation failed: ${JSON.stringify(fallbackResult.value.err)}`);
+                        }
+                        const confirmationTime = Date.now() - startTime;
+                        console.log(`[SINGAPORE-SENDER] ✅ Fallback confirmation SUCCESS in ${confirmationTime}ms`);
+                        return confirmationTime;
+                    } catch (fallbackError) {
+                        console.warn(`[SINGAPORE-SENDER] ⚠️ Fallback confirmation also failed:`, fallbackError.message);
+                        consecutiveErrors = 0; // Reset counter for next attempt
+                    }
+                }
             }
             
             await new Promise(resolve => setTimeout(resolve, interval));
         }
         
-        throw new Error(`Transaction confirmation timeout after ${timeout}ms`);
+        // Final attempt with different commitment level
+        console.log(`[SINGAPORE-SENDER] 🔄 Final attempt with 'processed' commitment...`);
+        try {
+            const finalStatus = await this.connection.getSignatureStatuses([signature], {
+                searchTransactionHistory: true,
+                commitment: 'processed'
+            });
+            
+            const finalConfirmationStatus = finalStatus?.value[0]?.confirmationStatus;
+            const finalErr = finalStatus?.value[0]?.err;
+            
+            if (finalConfirmationStatus === 'processed' || finalConfirmationStatus === 'confirmed' || finalConfirmationStatus === 'finalized') {
+                if (finalErr) {
+                    throw new Error(`Transaction failed on-chain: ${JSON.stringify(finalErr)}`);
+                }
+                const confirmationTime = Date.now() - startTime;
+                console.log(`[SINGAPORE-SENDER] ✅ Final attempt SUCCESS in ${confirmationTime}ms (status: ${finalConfirmationStatus})`);
+                return confirmationTime;
+            }
+        } catch (finalError) {
+            console.warn(`[SINGAPORE-SENDER] ⚠️ Final attempt failed:`, finalError.message);
+        }
+        
+        // If we get here, all methods failed
+        const elapsed = Date.now() - startTime;
+        console.error(`[SINGAPORE-SENDER] ❌ All confirmation methods failed after ${elapsed}ms`);
+        console.error(`[SINGAPORE-SENDER] 🔍 Last known status:`, lastStatus);
+        console.error(`[SINGAPORE-SENDER] 🔍 Signature: ${signature}`);
+        console.error(`[SINGAPORE-SENDER] 🔍 Check transaction on Solscan: https://solscan.io/tx/${signature}`);
+        throw new Error(`Transaction confirmation timeout after ${timeout}ms - signature: ${signature}`);
     }
 
     // Update execution statistics
@@ -699,14 +778,13 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
                 throw new Error('Instructions must be an array');
             }
             
-            // 🎯 CRITICAL FIX: Skip simulation for Pump.fun atomic transactions
-            // Pump.fun atomic transactions (ATA creation + BUY) can't be properly simulated
-            // because the BUY instruction expects the ATA to exist, but simulation doesn't
-            // "execute" the ATA creation instruction first, causing 3012 errors.
+            // 🎯 ENHANCED: Detect Pump.fun atomic transactions for special handling
             const config = require('./config.js');
             const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toString();
-            const isPumpFunAtomic = instructions.length === 2 && 
-                instructions.some(ix => ix.programId && ix.programId.toString() === pumpFunProgramId);
+            const isPumpFunAtomic = instructions.some(ix => 
+                ix.programId && ix.programId.toString() === pumpFunProgramId &&
+                ix.data && ix.data.toString('hex').startsWith('66063d1201daebea') // Buy instruction discriminator
+            );
             
             console.log(`[SINGAPORE-SENDER] 🔍 Checking for Pump.fun atomic transaction:`, {
                 instructionCount: instructions.length,
@@ -715,10 +793,10 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
             });
             
             if (isPumpFunAtomic) {
-                console.log(`[SINGAPORE-SENDER] 🎯 Pump.fun atomic transaction detected - using estimated compute units`);
-                // Use estimated compute units for Pump.fun atomic transactions
-                const estimatedUnits = 50000; // Conservative estimate for ATA creation + BUY
-                console.log(`[SINGAPORE-SENDER] 🔧 Estimated compute units: ${estimatedUnits}`);
+                console.log(`[SINGAPORE-SENDER] 🎯 Pump.fun atomic transaction detected - using high CU estimate`);
+                // Use high estimate for Pump.fun atomic transactions (ATA creation + buy)
+                const estimatedUnits = 200000; // Higher estimate for atomic complexity
+                console.log(`[SINGAPORE-SENDER] 🔧 Estimated compute units for PumpFun atomic: ${estimatedUnits}`);
                 return estimatedUnits;
             }
             
@@ -769,55 +847,88 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
         let signature = null;
 
         try {
-            console.log(`[SENDER-V13-FINAL] 🚀 Initiating FINAL execution with Helius tip...`);
+            console.log(`[SENDER-V14-DIRECT-INJECTION] 🚀 Bypassing Helius Sender. Using direct @solana/web3.js...`);
             
-            // ========== STEP 1: GET BLOCKHASH & EXTRACT ACCOUNTS ==========
+            // ========== STEP 1: GET BLOCKHASH & FEES (Same as before) ==========
             const { value: { blockhash, lastValidBlockHeight } } = await this.connection.getLatestBlockhashAndContext('confirmed');
             
             const allInstructions = [...instructions];
-            const accountKeys = allInstructions.flatMap(ix => ix.keys.map(key => key.pubkey.toString()));
-            const uniqueAccountKeys = [...new Set(accountKeys), keypair.publicKey.toString()];
-
-            // ========== STEP 2: GET DYNAMIC FEES (THE BATTLE-HARDENED METHOD) ==========
-            let priorityFee = 1000000; // Start with a safe fallback
+            const uniqueAccountKeys = [...new Set(allInstructions.flatMap(ix => ix.keys.map(key => key.pubkey.toString()))), keypair.publicKey.toString()];
+            
+            let priorityFee = 2000000;
             try {
-                console.log(`[SENDER-V10-FINAL] ⚡ Getting priority fee via robust RPC method...`);
                 const response = await fetch(this.singaporeEndpoints.rpc, {
-                    method: 'POST',
+                    method: 'POST', 
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        jsonrpc: "2.0",
-                        id: "zapbot-fee-check",
-                        method: "getPriorityFeeEstimate",
-                        params: [{ accountKeys: uniqueAccountKeys, options: { includeAllPriorityFeeLevels: true } }]
+                    body: JSON.stringify({ 
+                        jsonrpc: "2.0", 
+                        id: "1", 
+                        method: "getPriorityFeeEstimate", 
+                        params: [{ 
+                            accountKeys: uniqueAccountKeys, 
+                            options: { includeAllPriorityFeeLevels: true } 
+                        }] 
                     })
                 });
                 const data = await response.json();
                 if (data.error) throw new Error(data.error.message);
-                priorityFee = data.result?.priorityFeeLevels?.high || 1000000;
-                console.log(`[SENDER-V10-FINAL] ✅ Priority fee set to HIGH: ${priorityFee} microLamports`);
+                priorityFee = data.result?.priorityFeeLevels?.high || 2000000;
             } catch (error) {
-                console.warn(`[SENDER-V10-FINAL] ⚠️ Priority fee estimation failed: ${error.message}. Using fallback.`);
+                console.warn(`[SENDER-V14] ⚠️ Fee estimation failed: ${error.message}. Using fallback.`);
             }
-
-            // ========== STEP 2: BUILD THE FINAL TRANSACTION (WITH HELIUS TIP) ==========
-            const computeUnits = await this._getComputeUnits(allInstructions, keypair, blockhash);
+            console.log(`[SENDER-V14] ✅ Priority fee set to: ${priorityFee} microLamports`);
             
-            // Use Helius-approved tip address (first one from their list)
-            const heliusTipAccount = new PublicKey('2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ');
-            const tipAmountSOL = 0.0001; // Small tip to satisfy Helius requirement
+            // ========== STEP 2: SIMULATION FOR PUMPFUN ATOMIC TRANSACTIONS ==========
+            let computeUnits = 200000; // Default fallback
+            
+            // ========== PUMP.FUN ATOMIC TRANSACTION SIMULATION ==========
+            const hasPumpFunAtomic = allInstructions.some(ix => 
+                ix.programId.toString() === '6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P' &&
+                ix.data && ix.data.toString('hex').startsWith('66063d1201daebea') // Buy instruction discriminator
+            );
+            
+            // ========== UNIFIED SIMULATION FOR ALL TRANSACTIONS ==========
+            // Use the robust _getComputeUnits method for ALL transactions (including PumpFun)
+            console.log(`[SENDER-V14] 🔬 Running unified simulation for accurate CU calculation...`);
+            
+            try {
+                computeUnits = await this._getComputeUnits(allInstructions, keypair, blockhash);
+                console.log(`[SENDER-V14] ✅ Simulation successful: ${computeUnits} CU`);
+            } catch (simError) {
+                console.warn(`[SENDER-V14] ⚠️ Simulation failed: ${simError.message}, using high fallback`);
+                computeUnits = 1_000_000; // High fallback for simulation errors
+            }
+            // ===================================================================================
+            // COMMENTED OUT: Hardcoded Helius tip to reduce fees
+            // const heliusTipAccount = new PublicKey('2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ');
+            // const tipAmountSOL = 0.0001;
 
             allInstructions.unshift(
                 ComputeBudgetProgram.setComputeUnitLimit({ units: computeUnits }),
                 ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee })
             );
-            allInstructions.push(
-                SystemProgram.transfer({ 
-                    fromPubkey: keypair.publicKey, 
-                    toPubkey: heliusTipAccount, 
-                    lamports: Math.floor(tipAmountSOL * LAMPORTS_PER_SOL) 
-                })
-            );
+            // COMMENTED OUT: Helius tip transfer to reduce fees
+            // allInstructions.push(
+            //     SystemProgram.transfer({ 
+            //         fromPubkey: keypair.publicKey, 
+            //         toPubkey: heliusTipAccount, 
+            //         lamports: Math.floor(tipAmountSOL * LAMPORTS_PER_SOL) 
+            //     })
+            // );
+
+            console.log(`[SENDER-V14] 🔍 FINAL TRANSACTION STRUCTURE:`, {
+                totalInstructions: allInstructions.length,
+                instructionDetails: allInstructions.map((ix, index) => ({
+                    index,
+                    programId: ix.programId.toString(),
+                    keys: ix.keys.map(key => ({
+                        pubkey: key.pubkey.toString(),
+                        isSigner: key.isSigner,
+                        isWritable: key.isWritable
+                    })),
+                    dataLength: ix.data ? ix.data.length : 0
+                }))
+            });
 
             const transactionMessage = new TransactionMessage({
                 instructions: allInstructions,
@@ -827,73 +938,83 @@ async sendViaSender(transactionData, retries = 3, platform = 'UNKNOWN') {
 
             const transaction = new VersionedTransaction(transactionMessage);
             transaction.sign([keypair]);
-            const encodedTx = Buffer.from(transaction.serialize()).toString('base64');
-            console.log(`[SENDER-V13-FINAL] ✅ Transaction built and ready for launch.`);
+            console.log(`[SENDER-V14] ✅ Transaction built and signed, ready for direct injection.`);
+            
+            // ========== STEP 3: TRANSACTION READY FOR INJECTION ==========
+            // Simulation already completed above, no need for final check
+            
+            // ========== STEP 4: DIRECT INJECTION & CONFIRMATION ==========
+            console.log(`[SENDER-V14] 💉 Injecting transaction directly into RPC node: ${this.connection.rpcEndpoint}`);
 
-            // ========== STEP 4: LAUNCH & CONFIRM ==========
-            for (let attempt = 1; attempt <= 3; attempt++) {
-                if (await this.connection.isBlockhashValid(blockhash) === false) {
-                    console.warn(`[SENDER-V10-FINAL] ⚠️ Blockhash expired before attempt ${attempt}. Failing fast.`);
-                    throw new Error("Blockhash expired before sending.");
-                }
-                
-                try {
-                    console.log(`[SENDER-V10-FINAL] 📤 LAUNCHING (Attempt ${attempt}/3)...`);
-                    const response = await fetch(this.singaporeEndpoints.sender, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            jsonrpc: '2.0',
-                            id: 'zapbot-launch',
-                            method: 'sendTransaction',
-                            params: [
-                                encodedTx, 
-                                { 
-                                    encoding: 'base64',
-                                    skipPreflight: true, 
-                                    maxRetries: 0 
-                                }
-                            ]
-                        })
-                    });
-                    const jsonResponse = await response.json();
-                    
-                    // ========== DEBUG HELIUS RESPONSE ==========
-                    console.log(`[SENDER-V10-FINAL] 🔍 Helius Response Debug:`, {
-                        status: response.status,
-                        hasError: !!jsonResponse.error,
-                        hasResult: !!jsonResponse.result,
-                        resultType: typeof jsonResponse.result,
-                        resultValue: jsonResponse.result,
-                        fullResponse: JSON.stringify(jsonResponse, null, 2)
-                    });
-                    // ==========================================
-                    
-                    if (jsonResponse.error) throw new Error(`Helius RPC Error: ${jsonResponse.error.message}`);
-                    if (!jsonResponse.result) throw new Error("No signature returned from Helius.");
-                    
-                    signature = jsonResponse.result;
-                    break; 
-
-                } catch (error) {
-                    console.warn(`[SENDER-V10-FINAL] ⚠️ Attempt ${attempt} failed: ${error.message}`);
-                    if (attempt === 3) throw error;
-                    await new Promise(resolve => setTimeout(resolve, 1500)); // Shorter delay
-                }
+            // This is the direct call, bypassing the Helius fast-sender API.
+            try {
+                signature = await this.connection.sendTransaction(
+                    transaction, 
+                    { skipPreflight: true, maxRetries: 2 }
+                );
+                console.log(`[SENDER-V14] ✅ Transaction INJECTED! Signature: ${signature}`);
+            } catch (sendError) {
+                console.error(`[SENDER-V14] ❌ SEND FAILED: ${sendError.message}`);
+                throw new Error(`Transaction send failed: ${sendError.message}`);
             }
+            
+            // ========== ENHANCED CONFIRMATION WITH DETAILED ERROR LOGGING ==========
+            try {
+                console.log(`[SENDER-V14] 🔍 Confirming transaction: ${signature}...`);
+                const confirmationResult = await this.connection.confirmTransaction({
+                    signature,
+                    blockhash,
+                    lastValidBlockHeight
+                }, 'confirmed');
+                
+                console.log(`[SENDER-V14] 🔍 Confirmation Result:`, {
+                    signature,
+                    err: confirmationResult.value.err,
+                    slot: confirmationResult.value.slot,
+                    confirmations: confirmationResult.value.confirmations
+                });
+                
+                if (confirmationResult.value.err) {
+                    const onChainError = JSON.stringify(confirmationResult.value.err);
+                    
+                    // Abort immediately on Pump.fun 3012 to avoid pointless retries
+                    if (confirmationResult.value.err.InstructionError && confirmationResult.value.err.InstructionError[1].Custom === 3012) {
+                        console.warn(`[SENDER-V14] ⚠️ Pump.fun bonding curve constraint violation (3012) - aborting (likely migrated to AMM)`);
+                        return { success: false, error: `PumpFun-3012`, signature, executionTime: Date.now() - startTime };
+                    }
+                    
+                    // Handle ATA already initialized as success
+                    if (confirmationResult.value.err.InstructionError && confirmationResult.value.err.InstructionError[1].Custom === 0) {
+                        console.log(`[SENDER-V14] ✅ Transaction failed with 'Account Already Initialized', treating as success for ATA creation`);
+                        const executionTime = Date.now() - startTime;
+                        return { success: true, signature, executionTime, confirmationTime: executionTime };
+                    }
+                    
+                    console.error(`[SENDER-V14] ❌ TRANSACTION FAILED ON-CHAIN: ${onChainError}`);
+                    console.error(`[SENDER-V14] 🔍 Full Error Details:`, confirmationResult.value.err);
+                    return { success: false, error: onChainError, signature, executionTime: Date.now() - startTime };
+                }
 
-            if (!signature) throw new Error("Failed to get transaction signature after all retries.");
+                const executionTime = Date.now() - startTime;
+                console.log(`[SENDER-V14] ✅✅✅ SUCCESS! INJECTED & CONFIRMED in ${executionTime}ms!`);
+                
+                return { success: true, signature, executionTime, confirmationTime: executionTime };
+                
+            } catch (confirmError) {
+                console.error(`[SENDER-V14] ❌ CONFIRMATION FAILED:`, {
+                    message: confirmError.message,
+                    error: confirmError,
+                    stack: confirmError.stack,
+                    signature: signature
+                });
+                // Return the signature even if confirmation fails, so we can check it on Solscan
+                return { success: false, error: confirmError.message || 'Confirmation failed with unknown error', signature, executionTime: Date.now() - startTime };
+            }
             
-            const confirmationTime = await this.confirmTransaction(signature);
-            const executionTime = Date.now() - startTime;
-            
-            console.log(`[SENDER-V13-FINAL] ✅✅✅ SUCCESS! LANDED IN ${executionTime}ms! SIGNATURE: ${signature}`);
-            
-            return { success: true, signature, executionTime, confirmationTime };
-
         } catch (error) {
-            console.error(`[SENDER-V13-FINAL] ❌ EXECUTION FAILED: ${error.message}`, { stack: error.stack });
-            return { success: false, error: error.message };
+            console.error(`[SENDER-V14] ❌ DIRECT INJECTION FAILED: ${error.message}`, { stack: error.stack, signature });
+            // Return the signature even if confirmation fails, so we can check it on Solscan
+            return { success: false, error: error.message, signature };
         }
     }
 

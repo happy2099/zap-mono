@@ -9,9 +9,9 @@
         "private_key_encrypted": "9845cdc37fc65c2f683d5efbf3b4afd6:6f1d2d81697473f3b979f521:c1ee7333227eaae8ec1d37d774769c69:c18a27f6d59fd99c9abab01de1366a1f994f2552c544c8ffc903cbef2682a2c5352dcb19c9f54ff97560dc03dc2e177405c1420e2d33a176ade284a60be40524ff3c51192666725f5e8530b8b1cc970f7f2141b73cdaf3c7",
         "nonce_account_pubkey": "4hE5vFW3MjCqBf6MXb5hCBWasTrknGGNwuP2smHQEkNN",
         "encrypted_nonce_private_key": "3bc6946a00e4c380e8bdcd22811b6f61:65ff5dc0f460f5d8db37abb2:fa3908b529d60a1a01a32e6824d916bf:748066ec687ccd3725ed5e60a50819f535c47002bcdd8711fd55378470aff145e0ea4d3a1adc674a0361dda0d9ff0ba5bf61be1e23ca63bcdb1efc041421b4ebb8aba5cc94e7493ff6e09ba7c2cd3a0b38e76ba81202328c",
-        "balance": 0.00139006,
+        "balance": 0.009614153,
         "created_at": "2025-09-17T18:32:31.496Z",
-        "updated_at": "2025-09-17T19:40:57.776Z"
+        "updated_at": "2025-09-29T18:45:40.752Z"
       }
     }
   }

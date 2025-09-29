@@ -146,7 +146,7 @@ class TradeExecutorWorker extends BaseWorker {
         super.setupMessageHandlers();
         
         // Register executor-specific handlers
-        this.registerHandler('HANDLE_SMART_COPY', this.handleSmartCopy.bind(this));
+        this.registerHandler('HANDLE_SMART_COPY', this.executeCopyTrade.bind(this));
         this.registerHandler('EXECUTE_COPY_TRADE', this.executeCopyTrade.bind(this));
         this.registerHandler('CANCEL_TRADE', this.cancelTrade.bind(this));
         this.registerHandler('GET_TRADE_STATUS', this.getTradeStatus.bind(this));
@@ -193,86 +193,6 @@ class TradeExecutorWorker extends BaseWorker {
         } catch (error) {
             this.logError('Failed to initialize trade executor worker', { error: error.message });
             throw error;
-        }
-    }
-
-    // Handle smart copy messages from monitor worker
-    async handleSmartCopy(message) {
-        try {
-            this.logInfo('[SMART-COPY-HANDLER] 🔧 Handling smart copy from monitor worker');
-            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Trader: ${message.traderName || 'Unknown'} (${message.traderWallet})`);
-            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Signature: ${message.signature} (type: ${typeof message.signature})`);
-            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
-            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Message keys: ${Object.keys(message)}`);
-            this.logInfo(`[SMART-COPY-HANDLER] 🔍 Analysis result: ${message.analysisResult ? 'Present' : 'Missing'}`);
-            
-            // Route to main execution function
-            await this.executeCopyTrade(message); 
-
-        } catch (error) {
-            this.logError(`[SMART-COPY-HANDLER] ❌ Error handling smart copy: ${error.message}`);
-        }
-    }
-
-
-    // ===== SINGAPORE SENDER DIRECT EXECUTION =====
-    // No quotes needed - Singapore Sender handles everything!
-    async _getHeliusQuote(inputMint, outputMint, inputAmountInLamports, masterTraderSlippageBps = null) {
-        try {
-            const rpcUrl = "https://mainnet.helius-rpc.com/?api-key=" + process.env.HELIUS_API_KEY;
-
-            const slippageBps = masterTraderSlippageBps || this.botConfig?.slippageBps || 150; // 1.5% default
-
-            const quoteRequest = {
-                inputMint: inputMint,
-                outputMint: outputMint,
-                amount: inputAmountInLamports,
-                slippageBps: slippageBps,
-                swapMode: 'ExactIn',
-                asLegacyTransaction: false // Important for modern transactions
-            };
-
-            this.logInfo(`[Helius-QUOTE] 🔍 Requesting quote via JSON-RPC: ${shortenAddress(inputMint)} → ${shortenAddress(outputMint)}, Amount: ${inputAmountInLamports / 1e9} SOL, Slippage: ${slippageBps} bps`);
-
-            const response = await fetch(rpcUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: 'zapbot-helius-quote',
-                    method: 'getQuote',
-                    params: quoteRequest
-                })
-            });
-
-            if (!response.ok) {
-                const errorBody = await response.text();
-                throw new Error(`Helius Quote API HTTP error: ${response.status} ${response.statusText} - ${errorBody}`);
-            }
-
-            const jsonResponse = await response.json();
-
-            if (jsonResponse.error) {
-                throw new Error(`Helius Quote API RPC error: ${jsonResponse.error.code} - ${jsonResponse.error.message}`);
-            }
-
-            const quoteData = jsonResponse.result;
-
-            if (!quoteData || !quoteData.outAmount) {
-                throw new Error('No valid quote response or outAmount received from Helius API');
-            }
-
-            this.logInfo(`[Helius-QUOTE] ✅ Quote successful: Received ${quoteData.outAmount} tokens`);
-
-            return {
-                outAmount: quoteData.outAmount,
-                priceImpact: quoteData.priceImpactPct || 0,
-                route: quoteData.routePlan || []
-            };
-
-        } catch (error) {
-            this.logError(`[Helius-QUOTE] ❌ Error getting quote: ${error.message}`);
-            return null;
         }
     }
 
@@ -377,58 +297,47 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    // ===== SELL EXECUTION FUNCTIONS =====
-    async executePumpFunSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint } = swapDetails;
-        const startTime = Date.now();
-        
+    // ===== ATOMIC ATA CHECK FUNCTION =====
+    async _checkAndCreateATAInstruction(mintPubkey, userWallet, instructions) {
         try {
-            this.logInfo(`[PUMPFUN-SELL] 🚀 Executing PumpFun sell for: ${shortenAddress(inputMint)}`);
+            const ata = getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey);
             
-            // Get user's chatId for portfolio check
-            const users = await this.dataManager.loadUsers();
-            const chatId = Object.keys(users)[0]; // First user for now
+            // Check if ATA exists using RPC call
+            const ataInfo = await this.solanaManager.connection.getAccountInfo(ata, 'processed');
             
-            // Get position from Redis portfolio
-            const position = await this.dataManager.getPosition(chatId, inputMint);
-            if (!position) {
-                throw new Error(`No position found in Redis for user ${chatId}, token ${shortenAddress(inputMint)}`);
+            if (!ataInfo) {
+                // ATA doesn't exist, create instruction
+                const createAtaInstruction = createAssociatedTokenAccountInstruction(
+                    userWallet.publicKey, // payer
+                    ata,                  // associated token account
+                    userWallet.publicKey, // owner
+                    mintPubkey            // mint
+                );
+                instructions.push(createAtaInstruction);
+                this.logInfo(`[ATA-CHECK] ✅ ATA instruction added for mint: ${shortenAddress(mintPubkey.toString())}`);
+                return { ata, created: true };
+            } else {
+                this.logInfo(`[ATA-CHECK] ✅ ATA already exists for mint: ${shortenAddress(mintPubkey.toString())}`);
+                return { ata, created: false };
             }
-            
-            this.logInfo(`[PUMPFUN-SELL] 📊 Selling ${position.tokenAmount} tokens (${position.decimals} decimals)`);
-            
-            const userWallet = await this._getUserWallet();
-            if (!userWallet) throw new Error("User wallet not found");
-            
-            // TODO: Implement actual PumpFun sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-            // For now, we'll simulate the sell and update the portfolio
-            
-            // Simulate sell execution
-            const sellSignature = `SELL_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-            
-            // Update portfolio: remove position after successful sell
-            await this.dataManager.removePosition(chatId, inputMint);
-            this.logInfo(`[PUMPFUN-SELL] 📊 Position removed from portfolio for user ${chatId}: ${shortenAddress(inputMint)}`);
-            
-            return {
-                success: true,
-                signature: sellSignature,
-                amountSold: position.tokenAmount,
-                solReceived: position.solSpent * 0.8, // Simulate 80% return
-                executionTime: Date.now() - startTime
-            };
-            
         } catch (error) {
-            this.logError(`[PUMPFUN-SELL] ❌ PumpFun sell failed: ${error.message}`);
-            throw error;
+            this.logError(`[ATA-CHECK] ❌ Error checking ATA: ${error.message}`);
+            // Fallback: create ATA instruction anyway
+            const ata = getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey);
+            const createAtaInstruction = createAssociatedTokenAccountInstruction(
+                userWallet.publicKey, // payer
+                ata,                  // associated token account
+                userWallet.publicKey, // owner
+                mintPubkey            // mint
+            );
+            instructions.push(createAtaInstruction);
+            this.logInfo(`[ATA-CHECK] ⚠️ Fallback: ATA instruction added due to error`);
+            return { ata, created: true };
         }
     }
 
-
-
     async executePumpFunAmmBuy(swapDetails, userConfig, poolAccount) {
-        const { outputMint, inputAmount } = swapDetails; // For an AMM buy, outputMint is the token we want
+        const { outputMint, inputAmount } = swapDetails;
         const startTime = Date.now();
         this.logInfo(`[PUMPFUN-AMM-BUY] 🚀 Initiating AMM Buy for: ${shortenAddress(outputMint)}`);
 
@@ -439,7 +348,7 @@ class TradeExecutorWorker extends BaseWorker {
             const ammProgramId = config.DEX_PROGRAM_IDS.PUMP_FUN_AMM;
             
             // --- Define AMM-specific constants and PDAs ---
-            const baseMint = new PublicKey(outputMint); // Token we want to buy
+            const baseMint = new PublicKey(outputMint);
             const quoteMint = new PublicKey(config.NATIVE_SOL_MINT);
             const globalConfig = config.PUMP_FUN_AMM_CONSTANTS.GLOBAL_CONFIG;
             const feeProgram = config.PUMP_FUN_AMM_CONSTANTS.FEE_PROGRAM;
@@ -448,6 +357,15 @@ class TradeExecutorWorker extends BaseWorker {
             const poolState = await this.solanaManager.getDecodedAccount(poolAccount, 'pool');
             if (!poolState) throw new Error(`Could not fetch or decode AMM pool state for ${poolAccount.toBase58()}`);
             const coinCreator = poolState.coinCreator;
+
+            // --- ATOMIC ATA CREATION WITH EXISTENCE CHECK ---
+            const instructions = [];
+            
+            // Check and create base token ATA if needed
+            await this._checkAndCreateATAInstruction(baseMint, userWallet, instructions);
+            
+            // Check and create quote token ATA if needed  
+            await this._checkAndCreateATAInstruction(quoteMint, userWallet, instructions);
 
             // --- Define all 22 accounts required by the AMM buy instruction ---
             const userBaseTokenAccount = getAssociatedTokenAddressSync(baseMint, userWallet.publicKey);
@@ -465,22 +383,19 @@ class TradeExecutorWorker extends BaseWorker {
             const coinCreatorVaultAta = getAssociatedTokenAddressSync(quoteMint, coinCreatorVaultAuthority, true);
 
             // --- Prepare Borsh data for the instruction ---
-            // Using the proven working inline schema method
             const argsBuffer = borsh.serialize(
                 { struct: { baseAmountOut: 'u64', maxQuoteAmountIn: 'u64', trackVolume: 'u8' } },
                 { 
-                    baseAmountOut: new BN(0), // For exact in, we set this to 0
-                    maxQuoteAmountIn: new BN(inputAmount), // The scaled SOL amount
-                    trackVolume: 1, // true
+                    baseAmountOut: new BN(0),
+                    maxQuoteAmountIn: new BN(inputAmount),
+                    trackVolume: 1,
                 }
             );
             const discriminator = Buffer.from([102, 6, 61, 18, 1, 218, 235, 234]);
             const instructionData = Buffer.concat([discriminator, argsBuffer]);
 
-            const instructions = [
-                 createAssociatedTokenAccountInstruction(userWallet.publicKey, userBaseTokenAccount, userWallet.publicKey, baseMint),
-                 createAssociatedTokenAccountInstruction(userWallet.publicKey, userQuoteTokenAccount, userWallet.publicKey, quoteMint),
-                {
+            // Add the main swap instruction
+            instructions.push({
                 programId: ammProgramId,
                 keys: [
                     { pubkey: poolAccount, isSigner: false, isWritable: false },
@@ -495,7 +410,7 @@ class TradeExecutorWorker extends BaseWorker {
                     { pubkey: protocolFeeRecipient, isSigner: false, isWritable: false },
                     { pubkey: protocolFeeRecipientTokenAccount, isSigner: false, isWritable: true },
                     { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
-                    { pubkey: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), isSigner: false, isWritable: false }, // Quote Token Program, often different for WSOL
+                    { pubkey: new PublicKey("TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb"), isSigner: false, isWritable: false },
                     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
                     { pubkey: config.ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: eventAuthority, isSigner: false, isWritable: false },
@@ -508,7 +423,7 @@ class TradeExecutorWorker extends BaseWorker {
                     { pubkey: feeProgram, isSigner: false, isWritable: false },
                 ],
                 data: instructionData,
-            }];
+            });
 
             const result = await this.singaporeSender.executeCopyTrade(instructions, userWallet, { platform: 'PumpFunAMM', inputAmount, useSmartTransactions: false });
             if (!result || !result.success) throw new Error(result.error || 'The AMM buy transaction failed.');
@@ -520,10 +435,7 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-
     async executePumpFunAmmSell(swapDetails, userConfig, poolAccount) {
-        // swapDetails.inputMint is the TOKEN we are selling.
-        // swapDetails.outputMint should be SOL.
         const { inputMint: baseMintAddress, inputAmount: tokenAmountToSell } = swapDetails;
         const startTime = Date.now();
         this.logInfo(`[PUMPFUN-AMM-SELL-V2] 🚀 Initiating IDL-PERFECT AMM Sell for ${shortenAddress(baseMintAddress)}`);
@@ -539,14 +451,22 @@ class TradeExecutorWorker extends BaseWorker {
             const globalConfig = config.PUMP_FUN_AMM_CONSTANTS.GLOBAL_CONFIG;
             const feeProgram = config.PUMP_FUN_AMM_CONSTANTS.FEE_PROGRAM;
             const eventAuthority = config.PUMP_FUN_AMM_CONSTANTS.EVENT_AUTHORITY;
-            const protocolFeeRecipient = config.PUMP_FUN_CONSTANTS.FEE_RECIPIENT; 
-            // ====================================================================
+            const protocolFeeRecipient = config.PUMP_FUN_CONSTANTS.FEE_RECIPIENT;
 
             // --- Fetch and Decode On-Chain Pool State ---
             const poolState = await this.solanaManager.getDecodedAmmPool(poolAccount);
             if (!poolState) throw new Error(`Could not fetch AMM pool state for ${poolAccount.toBase58()}`);
 
-            const coinCreator = poolState.coin_creator; // The key from our decoder is lowercase_with_underscores
+            const coinCreator = poolState.coin_creator;
+
+            // --- ATOMIC ATA CREATION WITH EXISTENCE CHECK ---
+            const instructions = [];
+            
+            // Check and create base token ATA if needed
+            await this._checkAndCreateATAInstruction(baseMint, userWallet, instructions);
+            
+            // Check and create quote token ATA if needed  
+            await this._checkAndCreateATAInstruction(quoteMint, userWallet, instructions);
 
             // --- Define all 21 accounts required by the AMM sell instruction ---
             const userBaseTokenAccount = getAssociatedTokenAddressSync(baseMint, userWallet.publicKey);
@@ -559,8 +479,7 @@ class TradeExecutorWorker extends BaseWorker {
             const [feeConfig] = PublicKey.findProgramAddressSync([Buffer.from("fee_config"), ammProgramId.toBuffer()], feeProgram);
 
             // --- Prepare Borsh data for the sell instruction ---
-            // Using the proven working inline schema method
-            const minSolOutput = new BN(0); // For now, we are not calculating slippage on sell, setting to 0.
+            const minSolOutput = new BN(0);
 
             const argsBuffer = borsh.serialize(
                 { struct: { baseAmountIn: 'u64', minQuoteAmountOut: 'u64' } },
@@ -572,7 +491,8 @@ class TradeExecutorWorker extends BaseWorker {
             const discriminator = Buffer.from([51, 230, 133, 164, 1, 127, 131, 173]);
             const instructionData = Buffer.concat([discriminator, argsBuffer]);
 
-            const instructions = [{
+            // Add the main swap instruction
+            instructions.push({
                 programId: ammProgramId,
                 keys: [
                     { pubkey: poolAccount, isSigner: false, isWritable: true },
@@ -586,8 +506,8 @@ class TradeExecutorWorker extends BaseWorker {
                     { pubkey: poolState.pool_quote_token_account, isSigner: false, isWritable: true },
                     { pubkey: protocolFeeRecipient, isSigner: false, isWritable: false },
                     { pubkey: protocolFeeRecipientTokenAccount, isSigner: false, isWritable: true },
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // Base Token Program
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false }, // Quote Token Program
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
                     { pubkey: config.ASSOCIATED_TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
                     { pubkey: eventAuthority, isSigner: false, isWritable: false },
@@ -598,7 +518,7 @@ class TradeExecutorWorker extends BaseWorker {
                     { pubkey: feeProgram, isSigner: false, isWritable: false },
                 ],
                 data: instructionData,
-            }];
+            });
 
             const result = await this.singaporeSender.executeCopyTrade(instructions, userWallet, { platform: 'PumpFunAMMSell', inputAmount: tokenAmountToSell, useSmartTransactions: false });
             if (!result || !result.success) throw new Error(result.error || 'The AMM sell transaction failed.');
@@ -612,75 +532,13 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    async executeRaydiumSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
-        try {
-            this.logInfo('[RAYDIUM-SELL] 🚀 Executing Raydium sell transaction...');
-            
-            // Get real-time price quote for sell
-            const quote = await this._getHeliusQuote(inputMint, outputMint, inputAmount);
-            if (!quote) {
-                throw new Error('Failed to get price quote for sell');
-            }
-            
-            this.logInfo(`[RAYDIUM-SELL] ✅ Sell quote: ${quote.outAmount} SOL for ${inputAmount} tokens`);
-            
-            // TODO: Implement Raydium sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-
-            return {
-                success: true,
-                signature: 'PLACEHOLDER_SIGNATURE',
-                amountSold: inputAmount,
-                price: quote.outAmount / inputAmount,
-                executionTime: Date.now()
-            };
-
-        } catch (error) {
-            this.logError(`[RAYDIUM-SELL] ❌ Raydium sell failed: ${error.message}`);
-            throw error;
-        }
-    }
-
-    async executeMeteoraSell(swapDetails, userConfig = {}) {
-        const { inputMint, outputMint, inputAmount } = swapDetails;
-        try {
-            this.logInfo('[METEORA-SELL] 🚀 Executing Meteora sell transaction...');
-            
-            // Get real-time price quote for sell
-            const quote = await this._getHeliusQuote(inputMint, outputMint, inputAmount);
-            if (!quote) {
-                throw new Error('Failed to get price quote for sell');
-            }
-            
-            this.logInfo(`[METEORA-SELL] ✅ Sell quote: ${quote.outAmount} SOL for ${inputAmount} tokens`);
-            
-            // TODO: Implement Meteora sell instruction
-            // This would be similar to buy but with sell discriminator and different instruction data
-            
-            return {
-                success: true,
-                signature: 'PLACEHOLDER_SIGNATURE',
-                amountSold: inputAmount,
-                price: quote.outAmount / inputAmount,
-                executionTime: Date.now()
-            };
-            
-        } catch (error) {
-            this.logError(`[METEORA-SELL] ❌ Meteora sell failed: ${error.message}`);
-            throw error;
-        }
-    }
-
     // ====================================================================
     // ====== MASTER EXECUTION FUNCTION (v3 - Final Version) ==============
     // ====================================================================
     async executeCopyTrade(message) {
-        // We use the signature for unique logging throughout the process
         const signature = message.signature || 'unknown_signature';
-        const executionStartTime = Date.now(); // 🔧 PERFORMANCE: Start timing execution
+        const executionStartTime = Date.now();
 
-        // ========================= THE IDEMPOTENCY FIX ========================
         const analysisResult = message.analysisResult;
         if (!analysisResult || !analysisResult.isCopyable || !analysisResult.swapDetails) {
             this.logError(`[EXEC-MAIN] ❌ Job REJECTED: Monitor did not provide a valid analysis result.`, { signature });
@@ -695,26 +553,22 @@ class TradeExecutorWorker extends BaseWorker {
 
         const lockKey = `lock:buy:${swapDetails.outputMint}`;
         let lockAcquired = false;
-        // ========================================================================
 
         try {
             // ========================= ACQUIRE THE LOCK ========================
-            lockAcquired = await this.redisManager.set(lockKey, 'true', { EX: 20, NX: true }); // Set lock for 20s, NX = only if not exists
+            lockAcquired = await this.redisManager.set(lockKey, 'true', { EX: 20, NX: true });
             if (!lockAcquired) {
                 this.logInfo(`[EXEC-MAIN] ⏭️ Job SKIPPED: Another process is already buying ${shortenAddress(swapDetails.outputMint)}. Ignoring duplicate.`, { signature });
-                return; // Gracefully exit, preventing duplicate execution
+                return;
             }
-            // ===================================================================
 
             this.logInfo(`[EXEC-MAIN] 🚀 Processing job for sig: ${shortenAddress(signature)}`);
             const platform = swapDetails.platform;
             const tradeType = swapDetails.tradeType;
             
             // ========================= REDIS-ONLY CONFIG LOADING ========================
-            // Load settings from Redis ONLY (no file fallback)
             let settings = await this.dataManager.getSettings();
             if (!settings) {
-                // Initialize default settings in Redis if not found
                 this.logWarn(`[EXEC-MAIN] ⚠️ No settings found in Redis. Initializing defaults...`);
                 await this.dataManager.initializeDefaultSettings();
                 settings = await this.dataManager.getSettings();
@@ -724,13 +578,12 @@ class TradeExecutorWorker extends BaseWorker {
             }
 
             const userConfig = {
-                scaleFactor: settings.botSettings.scaleFactor, // Use actual Redis value
+                scaleFactor: settings.botSettings.scaleFactor,
                 slippage: settings.botSettings.maxSlippage,
                 platformPreferences: settings.botSettings.supportedPlatforms
             };
             
             this.logInfo(`[EXEC-MAIN] 📋 Redis config loaded: Scale Factor: ${userConfig.scaleFactor} (${userConfig.scaleFactor * 100}%)`);
-            // ================================================================
 
             this.logInfo(`[EXEC-MAIN] 📋 Trusting Monitor's Report:`, {
                 platform: platform,
@@ -743,44 +596,34 @@ class TradeExecutorWorker extends BaseWorker {
             if (tradeType === 'sell') {
                 const tokenMintToSell = swapDetails.inputMint;
                 
-                // Get user's chatId for portfolio check
                 const userWallet = await this._getUserWallet();
                 if (!userWallet) throw new Error("Could not load primary trading wallet.");
                 
-                // Get chatId from user data
                 const users = await this.dataManager.loadUsers();
-                const chatId = Object.keys(users)[0]; // First user for now
+                const chatId = Object.keys(users)[0];
                 
-                // Check Redis portfolio for position
                 const hasPosition = await this.dataManager.hasPosition(chatId, tokenMintToSell);
                 
                 if (!hasPosition) {
                     this.logInfo(`[EXEC-MAIN] ⏭️ SELL detected, but user ${chatId} has NO position in Redis for ${shortenAddress(tokenMintToSell)}. Skipping.`, { signature });
-                    return; // Gracefully exit
+                    return;
                 } else {
-                    // Get position details from Redis
                     const position = await this.dataManager.getPosition(chatId, tokenMintToSell);
                     this.logInfo(`[EXEC-MAIN] 🎯 SELL detected and position CONFIRMED in Redis for user ${chatId}: ${position.tokenAmount} tokens of ${shortenAddress(tokenMintToSell)}. Proceeding with sell logic.`);
-                    // The code will continue to the switch statement to execute the sell.
                 }
             } else if (tradeType !== 'buy') {
-                // For now, we only support 'buy' and 'sell'.
                 this.logWarn(`[EXEC-MAIN] ⚠️ Unsupported trade type "${tradeType}". Ignoring.`, { signature });
                 return;
             }
+
             // --- 3. EXECUTE THE TRADE (Routing) ---
             let result;
-            let amountSpentInLamports = 0; // The actual amount we spent
+            let amountSpentInLamports = 0;
 
-            // The switch statement now routes to the specific buy/sell function.
-            // It's also responsible for getting the final scaled SOL amount we spent.
-            const userWallet = await this._getUserWallet(); // Get the user wallet once
+            const userWallet = await this._getUserWallet();
             if (!userWallet) throw new Error("Could not load primary user wallet.");
             
-            // Apply the user scale factor to the master trader's input amount
             amountSpentInLamports = Math.floor(swapDetails.inputAmount * userConfig.scaleFactor);
-            
-            // Update swapDetails with the scaled amount for all DEX functions
             swapDetails.inputAmount = amountSpentInLamports;
             this.logInfo(`[EXEC-MAIN] 🔧 Applied scale factor: ${swapDetails.inputAmount / userConfig.scaleFactor} → ${amountSpentInLamports} (${userConfig.scaleFactor * 100}%)`);
             
@@ -789,13 +632,11 @@ class TradeExecutorWorker extends BaseWorker {
                     if (tradeType === 'buy') {
                         result = await this.executeJupiterBuy(swapDetails, userConfig);
                     } else {
-                        // Implement executeJupiterSell in the future
                         throw new Error("Sell logic for Jupiter is not yet implemented.");
                     }
                     break;
 
                 case 'pumpfun':
-                    // Use smart routing to handle both bonding curve and AMM phases
                     result = await this.executePumpFunTrade(swapDetails, userConfig, tradeType);
                     break;
 
@@ -803,7 +644,7 @@ class TradeExecutorWorker extends BaseWorker {
                      if (tradeType === 'buy') {
                         result = await this.executeRaydiumBuy(swapDetails, userConfig);
                     } else {
-                        result = await this.executeRaydiumSell(swapDetails, userConfig);
+                        throw new Error('Raydium sell not implemented - use buy only');
                     }
                     break;
 
@@ -811,15 +652,13 @@ class TradeExecutorWorker extends BaseWorker {
                     if (tradeType === 'buy') {
                         result = await this.executeMeteoraBuy(swapDetails, userConfig);
                     } else {
-                        result = await this.executeMeteoraSell(swapDetails, userConfig);
+                        throw new Error('Meteora sell not implemented - use buy only');
                     }
                     break;
 
                 case 'photon':
                 case 'router:photon':
-                    // Photon is a router - route to underlying DEX
                     this.logInfo(`[EXEC-MAIN] 🔄 Photon router detected - routing to underlying DEX`);
-                    // For now, treat Photon as Jupiter (most common underlying DEX)
                     if (tradeType === 'buy') {
                         result = await this.executeJupiterBuy(swapDetails, userConfig);
                     } else {
@@ -830,7 +669,6 @@ class TradeExecutorWorker extends BaseWorker {
                 case 'router:jupiter':
                 case 'router:jupiter_v4':
                 case 'router:jupiter_v6':
-                    // Jupiter routers - use Jupiter execution
                     this.logInfo(`[EXEC-MAIN] 🔄 Jupiter router detected - using Jupiter execution`);
                     if (tradeType === 'buy') {
                         result = await this.executeJupiterBuy(swapDetails, userConfig);
@@ -840,7 +678,6 @@ class TradeExecutorWorker extends BaseWorker {
                     break;
 
                 case 'router:axiom':
-                    // Axiom router - route to underlying DEX
                     this.logInfo(`[EXEC-MAIN] 🔄 Axiom router detected - routing to underlying DEX`);
                     if (tradeType === 'buy') {
                         result = await this.executeJupiterBuy(swapDetails, userConfig);
@@ -856,7 +693,7 @@ class TradeExecutorWorker extends BaseWorker {
 
             if (!result || !result.success || !result.signature) {
                  this.logError(`[EXEC-MAIN] ❌ Trade execution failed or returned no signature.`, { platform });
-                 return; // Stop here if the trade failed
+                 return;
             }
 
             // --- 4. POST-TRADE VERIFICATION & NOTIFICATION ---
@@ -866,9 +703,8 @@ class TradeExecutorWorker extends BaseWorker {
             
             // --- 5. PORTFOLIO TRACKING: Store position in Redis ---
             if (verification && verification.amountBoughtRaw > 0) {
-                // Get user's chatId for portfolio storage
                 const users = await this.dataManager.loadUsers();
-                const chatId = Object.keys(users)[0]; // First user for now
+                const chatId = Object.keys(users)[0];
                 
                 const positionData = {
                     tokenMint: swapDetails.outputMint,
@@ -890,10 +726,9 @@ class TradeExecutorWorker extends BaseWorker {
                 signature: result.signature,
                 traderName: message.traderName,
                 platform: platform,
-                solSpent: amountSpentInLamports, // The lamports WE spent
+                solSpent: amountSpentInLamports,
                 inputMint: swapDetails.inputMint,
                 outputMint: swapDetails.outputMint,
-                // Use verified results, with fallbacks
                 tokensBoughtRaw: verification ? verification.amountBoughtRaw : 0,
                 decimals: verification ? verification.decimals : 'unknown'
             };
@@ -905,12 +740,9 @@ class TradeExecutorWorker extends BaseWorker {
                 executionTime: result.executionTime
             });
             
-            // 🔧 PERFORMANCE: Record complete copy trade cycle
             const executionLatency = Date.now() - executionStartTime;
-            const detectionLatency = message.detectionLatency || 0; // If available from monitor
+            const detectionLatency = message.detectionLatency || 0;
             performanceMonitor.recordCopyTradeCycle(detectionLatency, executionLatency);
-            
-            // Success - lock will be released in finally block
             
             return result;
 
@@ -918,7 +750,7 @@ class TradeExecutorWorker extends BaseWorker {
             this.logError(`[EXEC-MAIN] ❌ FATAL ERROR in trade execution pipeline`, { 
                 signature,
                 error: error.message,
-                stack: error.stack // Always log the stack for deep debugging
+                stack: error.stack
             });
 
             // --- SEND FAILURE NOTIFICATION TO TELEGRAM ---
@@ -928,11 +760,9 @@ class TradeExecutorWorker extends BaseWorker {
                     const traderName = message.traderName || 'Unknown Trader';
                     const platform = message.analysisResult?.swapDetails?.platform || 'Unknown';
                     
-                    // Check for specific error types and send appropriate notifications
                     let errorTitle = 'Trade Execution Failed';
                     let errorDetails = `Trader: ${traderName}\nPlatform: ${platform}\nError: ${error.message}\nSignature: ${signature}`;
                     
-                    // Handle insufficient balance errors specifically
                     if (error.message.includes('insufficient') || error.message.includes('balance') || 
                         error.message.includes('Insufficient') || error.message.includes('Balance')) {
                         errorTitle = '💰 Insufficient Balance Error';
@@ -943,7 +773,6 @@ class TradeExecutorWorker extends BaseWorker {
                                      `*Signature*: ${signature}\n\n` +
                                      `⚠️ *Action Required*: Please add more SOL to your trading wallet!`;
                     }
-                    // Handle network/connection errors
                     else if (error.message.includes('fetch failed') || error.message.includes('timeout') || 
                              error.message.includes('network') || error.message.includes('connection')) {
                         errorTitle = '🌐 Network Error';
@@ -954,7 +783,6 @@ class TradeExecutorWorker extends BaseWorker {
                                      `*Signature*: ${signature}\n\n` +
                                      `🔄 *Status*: Bot will retry automatically`;
                     }
-                    // Handle transaction rejection errors
                     else if (error.message.includes('rejected') || error.message.includes('failed') || 
                              error.message.includes('invalid') || error.message.includes('error')) {
                         errorTitle = '❌ Transaction Rejected';
@@ -978,20 +806,15 @@ class TradeExecutorWorker extends BaseWorker {
                 this.logError(`[EXEC-MAIN] ⚠️ Failed to send failure notification: ${notificationError.message}`);
             }
 
-            throw error; // Rethrow to ensure the worker catches it
+            throw error;
         } finally {
-             // ========================= RELEASE THE LOCK ========================
              if (lockAcquired) {
                  await this.redisManager.del(lockKey);
                  this.logInfo(`[EXEC-MAIN] ✅ Lock released for ${shortenAddress(swapDetails.outputMint)}.`);
              }
-             // ===================================================================
         }
     }
     
-    // REMOVED: handleCopyTrade() - REDUNDANT (now integrated into executeCopyTrade)
-
-
     async cancelTrade(tradeId) {
         try {
             if (this.pendingTrades.has(tradeId)) {
@@ -1053,17 +876,13 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    // REMOVED: processTraderActivity() - OBSOLETE (used removed tradingEngine)
-
     async customCleanup() {
         try {
-            // Cancel all pending trades
             const pendingTradeIds = Array.from(this.pendingTrades.keys());
             for (const tradeId of pendingTradeIds) {
                 await this.cancelTrade(tradeId);
             }
 
-            // Close database connection
             if (this.dataManager) {
                 await this.dataManager.close();
             }
@@ -1074,88 +893,13 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    // ===== PDA/ATA RECONSTRUCTION =====
-    
-    async _reconstructPDAAndATA(analysisResult, swapDetails) {
-        try {
-            this.logInfo(`[PDA-ATA] 🔧 Starting PDA/ATA reconstruction...`);
-            
-            // Get user's wallet
-            const userWallet = await this._getUserWallet();
-            if (!userWallet) {
-                throw new Error('User wallet not found');
-            }
-            
-            // Get user configs for scale factor and slippage from dataManager
-            const userConfig = analysisResult.userConfig || {
-                scaleFactor: this.dataManager?.getUserConfig?.()?.scaleFactor || 0.1,
-                slippage: this.dataManager?.getUserConfig?.()?.maxSlippage || 0.15,
-                platformPreferences: this.dataManager?.getUserConfig?.()?.supportedPlatforms || ['PumpFun', 'Raydium', 'Jupiter']
-            };
-            
-            this.logInfo(`[PDA-ATA] 🔧 User configs:`, {
-                scaleFactor: userConfig.scaleFactor,
-                slippage: userConfig.slippage,
-                platformPreferences: userConfig.platformPreferences
-            });
-            
-            // 1. ATA RECONSTRUCTION: Create Associated Token Accounts if needed
-            if (swapDetails.requiresATACreation) {
-                this.logInfo(`[PDA-ATA] 🔧 Creating ATA for ${swapDetails.outputMint}`);
-                
-                // Check if ATA exists - Pass userWallet.publicKey, NOT the whole userWallet object
-                const ataExists = await this._checkATAExists(userWallet.publicKey, swapDetails.outputMint);
-                if (!ataExists) {
-                    this.logInfo(`[PDA-ATA] 🔧 ATA does not exist, creating...`);
-                    await this._createATA(userWallet, swapDetails.outputMint);
-                    this.logInfo(`[PDA-ATA] ✅ ATA created successfully`);
-                } else {
-                    this.logInfo(`[PDA-ATA] ✅ ATA already exists`);
-                }
-            }
-            
-            // 2. PDA RECONSTRUCTION: Reconstruct Program Derived Addresses if needed
-            if (swapDetails.requiresPDARecovery) {
-                this.logInfo(`[PDA-ATA] 🔧 Reconstructing PDA for ${swapDetails.platform}`);
-                
-                // For PumpFun: Reconstruct bonding curve PDA
-                if (swapDetails.platform === 'PumpFun') {
-                    const bondingCurvePDA = await this._reconstructPumpFunBondingCurve(swapDetails.outputMint);
-                    this.logInfo(`[PDA-ATA] ✅ PumpFun bonding curve PDA: ${bondingCurvePDA}`);
-                }
-                
-                // For Raydium: Reconstruct pool PDA
-                if (swapDetails.platform === 'Raydium') {
-                    const poolPDA = await this._reconstructRaydiumPool(swapDetails.inputMint, swapDetails.outputMint);
-                    this.logInfo(`[PDA-ATA] ✅ Raydium pool PDA: ${poolPDA}`);
-                }
-            }
-            
-            // 3. APPLY USER CONFIGS: Scale factor and slippage
-            const scaledAmount = Math.floor(swapDetails.inputAmount * userConfig.scaleFactor);
-            this.logInfo(`[PDA-ATA] 🔧 Applied user scale factor: ${swapDetails.inputAmount} → ${scaledAmount} (${userConfig.scaleFactor * 100}%)`);
-            
-            // Update swap details with user configs
-            swapDetails.scaledAmount = scaledAmount;
-            swapDetails.userSlippage = userConfig.slippage;
-            
-            this.logInfo(`[PDA-ATA] ✅ PDA/ATA reconstruction completed with user configs`);
-            
-        } catch (error) {
-            this.logError(`[PDA-ATA] ❌ PDA/ATA reconstruction failed: ${error.message}`);
-            throw error;
-        }
-    }
-    
     async _getUserWallet() {
         try {
-            // Get the first available user from the database
             const users = await this.dataManager.readJsonFile('users.json');
             if (!users || !users.users) {
                 throw new Error('No users found in database');
             }
             
-            // Get the first user (admin user)
             const firstUserId = Object.keys(users.users)[0];
             if (!firstUserId) {
                 throw new Error('No users found');
@@ -1164,22 +908,17 @@ class TradeExecutorWorker extends BaseWorker {
             const user = users.users[firstUserId];
             this.logInfo(`[PDA-ATA] 🔍 Using user: ${user.first_name} (${user.chat_id})`);
             
-            // Get user's wallet from wallet manager
             if (this.walletManager) {
                 const userWallet = await this.walletManager.getPrimaryTradingKeypair(user.chat_id);
                 if (userWallet && userWallet.keypair && userWallet.wallet) {
                     this.logInfo(`[PDA-ATA] ✅ Found wallet: ${userWallet.wallet.publicKey.toString()}`);
-                    // CRITICAL FIX: Return the actual Keypair instance, not the database object
-                    return userWallet.keypair; // Return the real Keypair for signing
+                    return userWallet.keypair;
                 }
             }
             
-            // Fallback: use environment variable or config
             const walletFromEnv = process.env.WALLET_PUBLIC_KEY;
             if (walletFromEnv) {
                 this.logInfo(`[PDA-ATA] ✅ Using wallet from environment: ${walletFromEnv}`);
-                // CRITICAL FIX: For fallback, we need a real Keypair, not just a PublicKey
-                // This is a limitation - we can't sign without the private key
                 throw new Error('Environment wallet fallback not supported - private key required for signing');
             }
             
@@ -1190,25 +929,21 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    // ADD THIS NEW FUNCTION
     async _fetchTradeResults(signature, outputMint, userWalletPublicKey) {
         try {
             this.logInfo(`[VERIFY-V2] 🔍 Fetching results for sig: ${shortenAddress(signature)}`);
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // ========================= THE VERSIONED TRANSACTION FIX ========================
             const tx = await this.solanaManager.connection.getTransaction(signature, {
-                maxSupportedTransactionVersion: 0, // This is essential for V0 transactions
+                maxSupportedTransactionVersion: 0,
                 commitment: 'confirmed'
             });
-            // ============================================================================
 
             if (!tx) {
                 this.logWarn(`[VERIFY-V2] ⚠️ Transaction not found. Cannot verify token amount.`);
                 return null;
             }
 
-            // The rest of the logic remains the same.
             const postBalances = tx.meta.postTokenBalances;
             const preBalances = tx.meta.preTokenBalances;
             const ownerAddress = userWalletPublicKey.toBase58();
@@ -1229,83 +964,6 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    async _checkATAExists(owner, mint) {
-        try {
-            const { PublicKey } = require('@solana/web3.js');
-            const { getAssociatedTokenAddress } = require('@solana/spl-token');
-            
-            // Get ATA address - Handle both PublicKey and Keypair objects
-            const ownerPublicKey = owner.publicKey ? owner.publicKey : owner;
-            const ataAddress = await getAssociatedTokenAddress(
-                new PublicKey(mint),
-                new PublicKey(ownerPublicKey)
-            );
-            
-            // Check if account exists using HELIUS RPC (FASTER!)
-            const connection = this.solanaManager?.connection;
-            if (!connection) {
-                throw new Error('Helius RPC connection not available');
-            }
-            
-            this.logInfo(`[PDA-ATA] 🔧 Checking ATA existence via Helius RPC...`);
-            const accountInfo = await connection.getAccountInfo(ataAddress);
-            const exists = accountInfo !== null;
-            this.logInfo(`[PDA-ATA] 🔧 ATA exists: ${exists} (checked via Helius RPC)`);
-            return exists;
-            
-        } catch (error) {
-            this.logError(`[PDA-ATA] ❌ Failed to check ATA existence: ${error.message}`);
-            return false;
-        }
-    }
-    
-    async _createATA(ownerWallet, mint) {
-        try {
-            const { PublicKey, Transaction } = require('@solana/web3.js');
-            const { createAssociatedTokenAccountInstruction } = require('@solana/spl-token');
-            
-            const connection = this.solanaManager?.connection;
-            if (!connection) {
-                throw new Error('Helius RPC connection not available');
-            }
-            
-            // Get ATA address using sync version (faster) - Use ownerWallet.publicKey
-            const { getAssociatedTokenAddressSync } = require('@solana/spl-token');
-            const ataAddress = getAssociatedTokenAddressSync(
-                new PublicKey(mint),
-                ownerWallet.publicKey // Use .publicKey here
-            );
-            
-            // Create instruction - Use ownerWallet.publicKey for all PublicKey constructors
-            const createATAInstruction = createAssociatedTokenAccountInstruction(
-                ownerWallet.publicKey, // payer
-                ataAddress, // associated token account
-                ownerWallet.publicKey, // owner
-                new PublicKey(mint) // mint
-            );
-            
-            // Create transaction
-            const transaction = new Transaction().add(createATAInstruction);
-            
-            // Get recent blockhash via HELIUS RPC (FASTER!)
-            this.logInfo(`[PDA-ATA] 🔧 Getting recent blockhash via Helius RPC...`);
-            const { blockhash } = await connection.getLatestBlockhash();
-            transaction.recentBlockhash = blockhash;
-            transaction.feePayer = ownerWallet.publicKey;
-            
-            this.logInfo(`[PDA-ATA] 🔧 ATA transaction created for mint: ${mint}`);
-            this.logInfo(`[PDA-ATA] 🔧 ATA address: ${ataAddress.toString()}`);
-            this.logInfo(`[PDA-ATA] 🔧 Blockhash: ${blockhash} (via Helius RPC)`);
-            
-            // Note: Transaction needs to be signed and sent by the user's wallet
-            // This is just the preparation step
-            
-        } catch (error) {
-            this.logError(`[PDA-ATA] ❌ Failed to create ATA: ${error.message}`);
-            throw error;
-        }
-    }
-    
     async _reconstructPumpFunBondingCurve(tokenMint) {
         try {
             const { PublicKey } = require('@solana/web3.js');
@@ -1313,7 +971,6 @@ class TradeExecutorWorker extends BaseWorker {
             const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
             const tokenMintPubkey = new PublicKey(tokenMint);
             
-            // Find PDA for PumpFun bonding curve
             const [bondingCurvePDA, bump] = PublicKey.findProgramAddressSync(
                 [Buffer.from('bonding-curve'), tokenMintPubkey.toBuffer()],
                 pumpFunProgramId
@@ -1338,7 +995,6 @@ class TradeExecutorWorker extends BaseWorker {
             const mintAPubkey = new PublicKey(mintA);
             const mintBPubkey = new PublicKey(mintB);
             
-            // Find PDA for Raydium pool
             const [poolPDA, bump] = PublicKey.findProgramAddressSync(
                 [Buffer.from('pool'), mintAPubkey.toBuffer(), mintBPubkey.toBuffer()],
                 raydiumProgramId
@@ -1355,343 +1011,8 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
 
-    // ===== SMART ROUTER DETECTION =====
-    
-    _detectTargetDexFromTransaction(message) {
-        try {
-            this.logInfo(`[SMART-ROUTER] 🔍 FALLBACK: Analyzing transaction for real DEX...`);
-            this.logInfo(`[SMART-ROUTER] 🔍 Message structure:`, {
-                hasAnalysisResult: !!message?.analysisResult,
-                hasOriginalTransaction: !!message?.originalTransaction,
-                hasLogMessages: !!message?.originalTransaction?.meta?.logMessages
-            });
-            
-            // ========================= ROUTER PEELING LOGIC =========================
-            // Apply the same logic as monitor and laserstream to distinguish routers from DEXes
-            const routerPeelingResult = this._performRouterPeeling(message);
-            if (routerPeelingResult.realDexProgram) {
-                this.logInfo(`[SMART-ROUTER] ✅ Router peeling found real DEX: ${routerPeelingResult.platform}`);
-                return routerPeelingResult.platform;
-            }
-            
-            // ========================= FALLBACK: LOG MESSAGE ANALYSIS =========================
-            const logMessages = message?.originalTransaction?.meta?.logMessages;
-            
-            if (logMessages && Array.isArray(logMessages)) {
-                const logs = logMessages.join(' ');
-                this.logInfo(`[SMART-ROUTER] 🔍 Log messages (first 200 chars): ${logs.substring(0, 200)}...`);
-                
-                // ========================= PROFESSIONAL CONFIG.JS APPROACH =========================
-                // Loop through all known platforms from our single source of truth (config.js)
-                for (const [platformKey, platformId] of Object.entries(config.PLATFORM_IDS)) {
-                    
-                    // Handle both single IDs and arrays of IDs (like METEORA_DBC)
-                    const idsToCheck = Array.isArray(platformId) ? platformId : [platformId];
-                    
-                    for (const id of idsToCheck) {
-                        // Convert PublicKey to string for comparison
-                        const idString = id instanceof PublicKey ? id.toBase58() : id.toString();
-                        
-                        if (logs.includes(idString)) {
-                            this.logInfo(`[SMART-ROUTER] ✅ Found ${platformKey} in log messages`);
-                            
-                            // Map config keys to our simple platform names
-                            if (platformKey.startsWith('RAYDIUM')) return 'Raydium';
-                            if (platformKey.startsWith('PUMP_FUN')) return 'PumpFun';
-                            if (platformKey.startsWith('METEORA')) return 'Meteora';
-                            if (platformKey.startsWith('JUPITER')) return 'Jupiter';
-                            if (platformKey.startsWith('WHIRLPOOL')) return 'Orca';
-                            if (platformKey.startsWith('OPENBOOK')) return 'OpenBook';
-                            if (platformKey.startsWith('SERUM')) return 'Serum';
-                            if (platformKey.startsWith('BLOOM_ROUTER') || platformKey.startsWith('PRIVATE_ROUTER')) return 'BloomRouter';
-                        }
-                    }
-                }
-                
-                // Special case: Check for "pump.fun" text in logs
-                if (logs.includes('pump.fun')) {
-                    this.logInfo(`[SMART-ROUTER] ✅ Found pump.fun text in log messages`);
-                    return 'PumpFun';
-                }
-            }
-            // =========================================================
-            
-            // Fallback to the original, less reliable analysis if logs are not conclusive
-            this.logWarn('[SMART-ROUTER] ⚠️ Could not find a definitive DEX in logs, using initial platform guess.');
-            return message?.analysisResult?.swapDetails?.platform || 'Jupiter';
-            
-        } catch (error) {
-            this.logError(`[SMART-ROUTER] ❌ Error detecting target DEX: ${error.message}`);
-            return 'Jupiter'; // Safe fallback
-        }
-    }
-    
-    // ===== ROUTER PEELING LOGIC =====
-    // Based on monitor and laserstream logic to distinguish routers from real DEXes
-    
-    _performRouterPeeling(message) {
-        try {
-            this.logInfo(`[ROUTER-PEELING] 🔍 Starting router peeling analysis...`);
-            
-            // Extract transaction data
-            const originalTx = message?.originalTransaction;
-            if (!originalTx) {
-                this.logWarn(`[ROUTER-PEELING] ⚠️ No original transaction found`);
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            // Get program IDs from the transaction
-            const programIds = this._extractProgramIdsFromTransaction(originalTx);
-            if (programIds.length === 0) {
-                this.logWarn(`[ROUTER-PEELING] ⚠️ No program IDs found in transaction`);
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            this.logInfo(`[ROUTER-PEELING] 🔍 Found ${programIds.length} program IDs: ${programIds.slice(0, 3).join(', ')}...`);
-            
-            // Step 1: Identify router programs
-            const routerPrograms = this._identifyRouterPrograms(programIds);
-            if (routerPrograms.length === 0) {
-                this.logInfo(`[ROUTER-PEELING] 🔍 No routers detected, checking for direct DEX calls...`);
-                
-                // No router detected, check if any program IDs are direct DEX calls
-                const directDexProgram = this._findDirectDexProgram(programIds);
-                if (directDexProgram) {
-                    const platform = this._identifyPlatform(directDexProgram);
-                    this.logInfo(`[ROUTER-PEELING] ✅ Direct DEX call detected: ${platform} (${directDexProgram})`);
-                    return { realDexProgram: directDexProgram, platform, routerPrograms: [] };
-                }
-                
-                return { realDexProgram: null, platform: null, routerPrograms: [] };
-            }
-            
-            this.logInfo(`[ROUTER-PEELING] 🔍 Router detected: ${routerPrograms.join(', ')}`);
-            
-            // Step 2: Look for inner DEX programs in account keys
-            const innerDexPrograms = this._findInnerDexPrograms(programIds);
-            if (innerDexPrograms.length > 0) {
-                const realDexProgram = innerDexPrograms[0];
-                const platform = this._identifyPlatform(realDexProgram);
-                this.logInfo(`[ROUTER-PEELING] ✅ Found inner DEX: ${platform} (${realDexProgram})`);
-                return { realDexProgram, platform, routerPrograms };
-            }
-            
-            // Step 3: Check log messages for DEX programs
-            const logDexPrograms = this._findDexInLogs(originalTx);
-            if (logDexPrograms.length > 0) {
-                const realDexProgram = logDexPrograms[0];
-                const platform = this._identifyPlatform(realDexProgram);
-                this.logInfo(`[ROUTER-PEELING] ✅ Found DEX in logs: ${platform} (${realDexProgram})`);
-                return { realDexProgram, platform, routerPrograms };
-            }
-            
-            this.logWarn(`[ROUTER-PEELING] ⚠️ Router detected but no inner DEX found`);
-            return { realDexProgram: null, platform: null, routerPrograms };
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error in router peeling: ${error.message}`);
-            return { realDexProgram: null, platform: null, routerPrograms: [] };
-        }
-    }
-    
-    _extractProgramIdsFromTransaction(originalTx) {
-        const programIds = [];
-        
-        try {
-            // Extract from account keys (most reliable)
-            if (originalTx.transaction && originalTx.transaction.message && originalTx.transaction.message.accountKeys) {
-                programIds.push(...originalTx.transaction.message.accountKeys);
-            }
-            
-            // Extract from instructions
-            if (originalTx.transaction && originalTx.transaction.message && originalTx.transaction.message.instructions) {
-                const accountKeys = originalTx.transaction.message.accountKeys || [];
-                for (const instruction of originalTx.transaction.message.instructions) {
-                    if (instruction.programIdIndex !== undefined && accountKeys[instruction.programIdIndex]) {
-                        programIds.push(accountKeys[instruction.programIdIndex]);
-                    }
-                }
-            }
-            
-            // Remove duplicates
-            return [...new Set(programIds)];
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error extracting program IDs: ${error.message}`);
-            return [];
-        }
-    }
-    
-    _identifyRouterPrograms(programIds) {
-        const routerPrograms = [];
-        
-        // Known router program IDs (from config.js)
-        const knownRouters = [
-            config.PLATFORM_IDS.JUPITER.toBase58(),
-            config.PLATFORM_IDS.JUPITER_V6.toBase58(),
-            config.PLATFORM_IDS.JUPITER_AMM_ROUTING.toBase58(),
-            config.PLATFORM_IDS.BLOOM_ROUTER.toBase58(),
-            config.PLATFORM_IDS.PRIVATE_ROUTER.toBase58(),
-            'So11111111111111111111111111111111111111112' // System Program (sometimes used as router)
-        ];
-        
-        for (const programId of programIds) {
-            if (knownRouters.includes(programId)) {
-                routerPrograms.push(programId);
-            }
-        }
-        
-        return routerPrograms;
-    }
-    
-    _findDirectDexProgram(programIds) {
-        // Check for direct DEX program calls (not through routers)
-        const dexPrograms = [
-            config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58(),
-            config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-            config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-            config.PLATFORM_IDS.OPENBOOK.toBase58(),
-            config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-        ];
-        
-        for (const programId of programIds) {
-            if (dexPrograms.includes(programId)) {
-                return programId;
-            }
-        }
-        
-        return null;
-    }
-    
-    _findInnerDexPrograms(programIds) {
-        const innerDexPrograms = [];
-        
-        // Known DEX program IDs (excluding routers)
-        const knownDexPrograms = [
-            config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-            config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-            config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58(),
-            config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-            config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-            config.PLATFORM_IDS.OPENBOOK.toBase58(),
-            config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-        ];
-        
-        for (const programId of programIds) {
-            if (knownDexPrograms.includes(programId)) {
-                innerDexPrograms.push(programId);
-            }
-        }
-        
-        return innerDexPrograms;
-    }
-    
-    _findDexInLogs(originalTx) {
-        const logDexPrograms = [];
-        
-        try {
-            const logMessages = originalTx.meta?.logMessages;
-            if (!logMessages || !Array.isArray(logMessages)) {
-                return logDexPrograms;
-            }
-            
-            const logs = logMessages.join(' ');
-            
-            // Check for DEX program IDs in logs
-            const knownDexPrograms = [
-                config.PLATFORM_IDS.PUMP_FUN.toBase58(),
-                config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58(),
-                config.PLATFORM_IDS.RAYDIUM_V4.toBase58(),
-                config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58(),
-                config.PLATFORM_IDS.METEORA_DLMM.toBase58(),
-                config.PLATFORM_IDS.WHIRLPOOL.toBase58(),
-                config.PLATFORM_IDS.OPENBOOK.toBase58(),
-                config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()
-            ];
-            
-            for (const programId of knownDexPrograms) {
-                if (logs.includes(programId)) {
-                    logDexPrograms.push(programId);
-                }
-            }
-            
-        } catch (error) {
-            this.logError(`[ROUTER-PEELING] ❌ Error finding DEX in logs: ${error.message}`);
-        }
-        
-        return logDexPrograms;
-    }
-    
-    _identifyPlatform(programId) {
-        // Map program IDs to platform names
-        const platformMap = {
-            [config.PLATFORM_IDS.PUMP_FUN.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.PUMP_FUN_AMM.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.PUMP_FUN_ROUTER.toBase58()]: 'PumpFun',
-            [config.PLATFORM_IDS.RAYDIUM_V4.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.RAYDIUM_CLMM.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.RAYDIUM_CPMM.toBase58()]: 'Raydium',
-            [config.PLATFORM_IDS.METEORA_DLMM.toBase58()]: 'Meteora',
-            [config.PLATFORM_IDS.WHIRLPOOL.toBase58()]: 'Orca',
-            [config.PLATFORM_IDS.OPENBOOK.toBase58()]: 'OpenBook',
-            [config.PLATFORM_IDS.SERUM_DEX_V3.toBase58()]: 'Serum'
-        };
-        
-        return platformMap[programId] || 'Unknown';
-    }
-    
-    _extractProgramIdsFromLogs(logMessages) {
-        const programIds = [];
-        
-        if (!logMessages || !Array.isArray(logMessages)) {
-            return programIds;
-        }
-        
-        for (const log of logMessages) {
-            // Look for "Program [PROGRAM_ID] invoke" patterns
-            const match = log.match(/Program ([1-9A-HJ-NP-Za-km-z]{32,}) invoke/);
-            if (match) {
-                programIds.push(match[1]);
-            }
-        }
-        
-        return programIds;
-    }
-    
-    _extractProgramIdsFromInnerInstructions(innerInstructions, accountKeys) {
-        const programIds = [];
-        
-        if (!innerInstructions || !Array.isArray(innerInstructions)) {
-            return programIds;
-        }
-        
-        for (const innerInstruction of innerInstructions) {
-            if (innerInstruction.instructions && Array.isArray(innerInstruction.instructions)) {
-                for (const instruction of innerInstruction.instructions) {
-                    if (instruction.programIdIndex !== undefined && accountKeys[instruction.programIdIndex]) {
-                        programIds.push(accountKeys[instruction.programIdIndex]);
-                    }
-                }
-            }
-        }
-        
-        return programIds;
-    }
-
     // ===== DIRECT TRANSACTION BUILDING (BYPASSES API ROUTES) =====
     
-    /**
-     * 🚀 DIRECT COPY TRADE: Build transaction directly from original
-     * This bypasses Helius Premium API routes and builds the EXACT same transaction
-     */
     async executeDirectCopyTrade(message, userConfig = {}) {
         try {
             this.logInfo(`[DIRECT-BUILDER] 🚀 Building DIRECT copy from original transaction...`);
@@ -1700,7 +1021,6 @@ class TradeExecutorWorker extends BaseWorker {
             const programIds = message.programIds;
             const analysisResult = message.analysisResult;
             
-            // Get user wallet
             const userWallet = await this._getUserWallet();
             if (!userWallet) {
                 throw new Error('User wallet not found');
@@ -1714,16 +1034,12 @@ class TradeExecutorWorker extends BaseWorker {
                 inputAmount: analysisResult?.swapDetails?.inputAmount
             });
             
-            // 1. Extract original instruction data
             const originalInstructions = originalTransaction.transaction.message.instructions;
             const originalAccountKeys = originalTransaction.transaction.message.accountKeys;
             
             this.logInfo(`[DIRECT-BUILDER] 🔍 Found ${originalInstructions.length} original instructions`);
             this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys length: ${originalAccountKeys.length}`);
-            this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys sample:`, originalAccountKeys.slice(0, 5));
-            this.logInfo(`[DIRECT-BUILDER] 🔍 Account keys types:`, originalAccountKeys.slice(0, 5).map(key => typeof key));
             
-            // 2. Build user's instructions by copying and adapting original
             const userInstructions = [];
             
             for (const originalInstruction of originalInstructions) {
@@ -1733,20 +1049,16 @@ class TradeExecutorWorker extends BaseWorker {
                     accountCount: originalInstruction.accounts.length
                 });
                 
-                // Debug: Log the actual accounts array
                 this.logInfo(`[DIRECT-BUILDER] 🔍 Accounts array:`, originalInstruction.accounts);
                 this.logInfo(`[DIRECT-BUILDER] 🔍 Accounts types:`, originalInstruction.accounts.map(acc => typeof acc));
                 
-                // Create new instruction for user
                 const userInstruction = {
-                    programId: originalInstruction.programId, // Same program ID
+                    programId: originalInstruction.programId,
                     keys: [],
-                    data: originalInstruction.data // SAME instruction data!
+                    data: originalInstruction.data
                 };
                 
-                // Map account keys to user's accounts
                 for (const accountIndex of originalInstruction.accounts) {
-                    // Skip invalid account indices (non-numeric)
                     if (typeof accountIndex !== 'number' || accountIndex < 0 || accountIndex >= originalAccountKeys.length) {
                         this.logWarn(`[DIRECT-BUILDER] ⚠️ Skipping invalid account index: ${accountIndex} (type: ${typeof accountIndex}, max: ${originalAccountKeys.length - 1})`);
                         continue;
@@ -1754,13 +1066,11 @@ class TradeExecutorWorker extends BaseWorker {
                     
                     const originalAccount = originalAccountKeys[accountIndex];
                     
-                    // Skip undefined accounts
                     if (!originalAccount) {
                         this.logWarn(`[DIRECT-BUILDER] ⚠️ Skipping undefined account at index ${accountIndex}`);
                         continue;
                     }
                     
-                    // Check if this is the trader's wallet (needs to be replaced with user's wallet)
                     if (this._isTraderWallet(originalAccount, message.traderWallet)) {
                         userInstruction.keys.push({
                             pubkey: userWallet.publicKey,
@@ -1769,7 +1079,6 @@ class TradeExecutorWorker extends BaseWorker {
                         });
                         this.logInfo(`[DIRECT-BUILDER] 🔄 Replaced trader wallet with user wallet`);
                     } else {
-                        // Keep original account - CONVERT STRING TO PUBLICKEY
                         try {
                             const { PublicKey } = require('@solana/web3.js');
                             const pubkey = new PublicKey(originalAccount);
@@ -1781,7 +1090,6 @@ class TradeExecutorWorker extends BaseWorker {
                             this.logInfo(`[DIRECT-BUILDER] 🔧 Converted string to PublicKey: ${originalAccount}`);
                         } catch (error) {
                             this.logError(`[DIRECT-BUILDER] ❌ Failed to convert account to PublicKey: ${originalAccount}`, error.message);
-                            // Skip this account if conversion fails
                             continue;
                         }
                     }
@@ -1790,21 +1098,13 @@ class TradeExecutorWorker extends BaseWorker {
                 userInstructions.push(userInstruction);
             }
             
-            // 3. Apply user scale factor to instruction data
             if (userConfig.scaleFactor && userConfig.scaleFactor !== 1.0) {
                 this.logInfo(`[DIRECT-BUILDER] 🔧 Applying user scale factor: ${userConfig.scaleFactor}`);
-                // Update instruction data with scaled amount
-                // This requires parsing and modifying the instruction data
                 await this._applyScaleFactorToInstructions(userInstructions, userConfig.scaleFactor);
             }
             
-            // 4. Create ATAs if needed
-            const ataInstructions = await this._createUserATAs(analysisResult, userWallet);
-            userInstructions.unshift(...ataInstructions);
-            
             this.logInfo(`[DIRECT-BUILDER] 🔧 Created ${userInstructions.length} instructions for user`);
             
-            // 5. Execute with Helius Sender
             const result = await this.singaporeSender.executeCopyTrade(
                 userInstructions,
                 userWallet,
@@ -1813,7 +1113,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint: analysisResult?.swapDetails?.inputMint,
                     outputMint: analysisResult?.swapDetails?.outputMint,
                     inputAmount: analysisResult?.swapDetails?.inputAmount,
-                    useSmartTransactions: true,
+                    useSmartTransactions: false,
                     userConfig: userConfig
                 }
             );
@@ -1830,68 +1130,14 @@ class TradeExecutorWorker extends BaseWorker {
         }
     }
     
-    /**
-     * Check if account is the trader's wallet
-     */
     _isTraderWallet(account, traderWallet) {
         return account === traderWallet;
     }
     
-    /**
-     * Apply scale factor to instruction data
-     */
     async _applyScaleFactorToInstructions(instructions, scaleFactor) {
-        // This would parse instruction data and modify amounts
-        // Implementation depends on the specific instruction format
         this.logInfo(`[DIRECT-BUILDER] 🔧 Scaling instructions by factor: ${scaleFactor}`);
-        // TODO: Implement instruction data parsing and scaling
     }
     
-    /**
-     * Create user ATAs if needed
-     */
-    async _createUserATAs(analysisResult, userWallet) {
-        const instructions = [];
-        
-        if (analysisResult?.swapDetails?.inputMint && analysisResult?.swapDetails?.outputMint) {
-            // Create ATAs for input and output tokens
-            const inputMint = new PublicKey(analysisResult.swapDetails.inputMint);
-            const outputMint = new PublicKey(analysisResult.swapDetails.outputMint);
-            
-            const inputATA = getAssociatedTokenAddressSync(inputMint, userWallet.publicKey);
-            const outputATA = getAssociatedTokenAddressSync(outputMint, userWallet.publicKey);
-            
-            // Check if ATAs exist and create if needed
-            const connection = this.solanaManager?.connection;
-            if (connection) {
-                const inputATAInfo = await connection.getAccountInfo(inputATA);
-                if (!inputATAInfo) {
-                    instructions.push(
-                        createAssociatedTokenAccountInstruction(
-                            userWallet.publicKey,
-                            inputATA,
-                            userWallet.publicKey,
-                            inputMint
-                        )
-                    );
-                }
-                
-                const outputATAInfo = await connection.getAccountInfo(outputATA);
-                if (!outputATAInfo) {
-                    instructions.push(
-                        createAssociatedTokenAccountInstruction(
-                            userWallet.publicKey,
-                            outputATA,
-                            userWallet.publicKey,
-                            outputMint
-                        )
-                    );
-                }
-            }
-        }
-        
-        return instructions;
-    }
 
     // ===== SWAP EXECUTION METHODS =====
     
@@ -1901,8 +1147,7 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[HELIUS-PREMIUM] 🚀 Executing ULTRA-FAST swap via Helius Premium API: ${inputMint} → ${outputMint}`);
             this.logInfo(`[HELIUS-PREMIUM] 💰 Amount: ${inputAmount}`);
             
-            // 1. Get quote from Helius Premium API (not Jupiter)
-            const slippageBps = Math.floor((userConfig.slippage || 0.15) * 10000); // Convert to BPS
+            const slippageBps = Math.floor((userConfig.slippage || 0.15) * 10000);
             this.logInfo(`[HELIUS-PREMIUM] 🔧 Using slippage: ${userConfig.slippage} (${slippageBps} BPS)`);
             const heliusQuoteUrl = `${this.solanaManager.connection.rpcEndpoint}&method=getQuote&inputMint=${inputMint}&outputMint=${outputMint}&amount=${inputAmount}&slippageBps=${slippageBps}`;
             
@@ -1916,7 +1161,6 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[HELIUS-PREMIUM] 📊 Quote: ${quoteData.result.outAmount} tokens for ${inputAmount} lamports`);
             
-            // 2. Get swap transaction from Helius Premium API
             const heliusSwapUrl = `${this.solanaManager.connection.rpcEndpoint}&method=getSwapTransaction`;
             const swapResponse = await fetch(heliusSwapUrl, {
                 method: 'POST',
@@ -1925,7 +1169,7 @@ class TradeExecutorWorker extends BaseWorker {
                     quoteResponse: quoteData.result,
                     userPublicKey: await this._getUserWallet(),
                     wrapAndUnwrapSol: true,
-                    commitment: 'processed' // PROCESSED level for speed
+                    commitment: 'processed'
                 })
             });
             
@@ -1938,26 +1182,16 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[HELIUS-PREMIUM] 🔧 Swap transaction prepared`);
             this.logInfo(`[HELIUS-PREMIUM] 📝 Transaction size: ${swapData.result.swapTransaction.length} bytes`);
             
-            // 3. ULTRA-FAST EXECUTION with Helius Smart Transactions
             this.logInfo(`[HELIUS-PREMIUM] ⚡ Executing with Helius Smart Transactions for sub-200ms execution...`);
             
-            // Get user wallet for signing
             const userWallet = await this._getUserWallet();
             if (!userWallet) {
                 throw new Error('User wallet not found');
             }
             
-            // Convert base64 transaction to instructions
             const { Transaction } = require('@solana/web3.js');
             const transaction = Transaction.from(Buffer.from(swapData.result.swapTransaction, 'base64'));
             
-            // HELIUS SMART TRANSACTIONS: Let Helius handle everything automatically
-            // - Fetch latest blockhash
-            // - Simulate transaction for compute units
-            // - Get Helius recommended priority fee
-            // - Add safety buffer fee
-            // - Handle PDA/ATA creation automatically
-            // - Build and send optimized transaction
             const result = await this.singaporeSender.executeCopyTrade(
                 transaction.instructions,
                 userWallet,
@@ -1967,8 +1201,8 @@ class TradeExecutorWorker extends BaseWorker {
                     outputMint,
                     inputAmount,
                     outputAmount: quoteData.result.outAmount,
-                    useSmartTransactions: false, // Disable Smart Transactions for Jupiter (direct routing)
-                    userConfig: userConfig // Pass user config for PDA/ATA handling
+                    useSmartTransactions: false,
+                    userConfig: userConfig
                 }
             );
             
@@ -1990,15 +1224,11 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[RAYDIUM-REAL] 🚀 Executing REAL Raydium swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[RAYDIUM-REAL] 💰 Amount: ${inputAmount}`);
             
-            // Get user wallet for signing
             const userWallet = await this._getUserWallet();
             if (!userWallet) {
                 throw new Error('User wallet not found');
             }
             
-            // ======================================================================
-            // ========================== REAL PDA/ATA CREATION ====================
-            // ======================================================================
             const { PublicKey, SystemProgram } = require('@solana/web3.js');
             const { 
                 getAssociatedTokenAddressSync, 
@@ -2008,43 +1238,16 @@ class TradeExecutorWorker extends BaseWorker {
             
             const instructions = [];
             
-            // 1. CREATE USER ATA (Associated Token Account) if needed
+            // ATOMIC ATA CREATION WITH EXISTENCE CHECK
             const inputMintPubkey = new PublicKey(inputMint);
             const outputMintPubkey = new PublicKey(outputMint);
+            
+            await this._checkAndCreateATAInstruction(inputMintPubkey, userWallet, instructions);
+            await this._checkAndCreateATAInstruction(outputMintPubkey, userWallet, instructions);
+            
             const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
             const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
             
-            this.logInfo(`[RAYDIUM-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
-            this.logInfo(`[RAYDIUM-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
-            
-            // Check if ATAs exist
-            const connection = this.solanaManager?.connection;
-            if (!connection) {
-                throw new Error('Solana connection not available');
-            }
-            
-            // BULLETPROOF FIX: Always add ATA creation instructions (idempotent)
-            this.logInfo(`[RAYDIUM-REAL] 🔧 Pushing idempotent input ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userInputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    inputMintPubkey      // mint
-                )
-            );
-            
-            this.logInfo(`[RAYDIUM-REAL] 🔧 Pushing idempotent output ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userOutputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    outputMintPubkey      // mint
-                )
-            );
-            
-            // 2. CREATE RAYDIUM POOL PDA
             const raydiumProgramId = config.PLATFORM_IDS.RAYDIUM_V4;
             const [poolPDA] = PublicKey.findProgramAddressSync(
                 [Buffer.from('amm_associated_seed'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
@@ -2053,24 +1256,18 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[RAYDIUM-REAL] 🔧 Pool PDA: ${poolPDA.toString()}`);
             
-            // 3. CREATE RAYDIUM SWAP INSTRUCTION USING BORSH
             this.logInfo('[BORSH] 🔧 Serializing Raydium swap with ROBUST class pattern...');
             
-            // Let SingaporeSenderManager handle slippage calculation dynamically
             const amountInBN = new BN(inputAmount);
-            
-            // For now, use 0 as minimum amount out - SingaporeSenderManager will calculate proper slippage
             const minAmountOutBN = new BN(0);
             
             this.logInfo(`[RAYDIUM-REAL] 💰 Amount: ${inputAmount} | Min Out: ${minAmountOutBN.toString()} (SingaporeSender will handle slippage)`);
             
-            // Create a new instance of the payload class
             const payload = new RaydiumSwapPayload({
                 amountIn: amountInBN,
                 minimumAmountOut: minAmountOutBN
             });
             
-            // Serialize using the schema map and the class instance
             const swapInstructionData = borsh.serialize(RAYDIUM_SWAP_SCHEMA, payload);
             
             this.logInfo(`[BORSH] ✅ Instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
@@ -2092,7 +1289,6 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[RAYDIUM-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
             
-            // 4. ULTRA-FAST EXECUTION with Helius Sender
             this.logInfo(`[RAYDIUM-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
             
             const result = await this.singaporeSender.executeCopyTrade(
@@ -2103,7 +1299,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: false // Disable Smart Transactions for Raydium (direct contract call)
+                    useSmartTransactions: false
                 }
             );
             
@@ -2122,57 +1318,87 @@ class TradeExecutorWorker extends BaseWorker {
     async executePumpFunBuy(swapDetails, userConfig = {}) {
         const { outputMint, inputAmount } = swapDetails;
         const startTime = Date.now();
-
+    
         try {
-            this.logInfo(`[PUMPFUN-V6-SDK-VERIFIED] 🚀 Initiating for: ${shortenAddress(outputMint)}`);
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] 🚀 Initiating ATOMIC buy for: ${shortenAddress(outputMint)}`);
             
             const userWallet = await this._getUserWallet();
             if (!userWallet) throw new Error("User wallet not found");
-
-            // --- Using the proven working inline schema method ---
-            
+    
             const mintPubkey = new PublicKey(outputMint);
             const instructions = [];
-
-            // --- INSTRUCTION 1: CREATE ATA (Idempotent) ---
-            const ata = getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(userWallet.publicKey, ata, userWallet.publicKey, mintPubkey)
-            );
-
-            // --- INSTRUCTION 2: BUILD THE BUY INSTRUCTION (12 ACCOUNTS AS PER OFFICIAL IDL) ---
+    
+            // --- CRITICAL FIX: CHECK IF TOKEN IS STILL ON BONDING CURVE ---
             const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
+            const [bondingCurvePDA] = PublicKey.findProgramAddressSync(
+                [Buffer.from('bonding-curve'), mintPubkey.toBuffer()], 
+                pumpFunProgramId
+            );
+    
+            // Check if bonding curve account exists and is owned by Pump.fun
+            const bondingCurveAccount = await this.solanaManager.connection.getAccountInfo(bondingCurvePDA, 'processed');
             
+            if (!bondingCurveAccount) {
+                this.logError(`[PUMPFUN-V7-ATOMIC] ❌ BONDING CURVE NOT FOUND - Token migrated to AMM or doesn't exist`);
+                throw new Error('Token has migrated to AMM - use AMM buy instead');
+            }
+    
+            if (bondingCurveAccount.owner.toString() !== pumpFunProgramId.toString()) {
+                this.logError(`[PUMPFUN-V7-ATOMIC] ❌ BONDING CURVE CLOSED - Token migrated to AMM`);
+                throw new Error('Token has migrated to AMM - bonding curve is closed');
+            }
+    
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] ✅ Bonding curve is active - proceeding with buy`);
+    
+            // --- ATOMIC ATA CREATION WITH EXISTENCE CHECK ---
+            const { ata, created } = await this._checkAndCreateATAInstruction(mintPubkey, userWallet, instructions);
+            if (created) {
+                this.logInfo(`[PUMPFUN-V7-ATOMIC] ✅ ATA instruction added`);
+            } else {
+                this.logInfo(`[PUMPFUN-V7-ATOMIC] ✅ ATA already exists`);
+            }
+    
+            // --- BUILD THE BUY INSTRUCTION ---
             const globalAccount = config.PUMP_FUN_CONSTANTS.GLOBAL;
             const feeRecipient = config.PUMP_FUN_CONSTANTS.FEE_RECIPIENT;
             const eventAuthority = new PublicKey('CEntr3oDe4kAv3g4StGgG3sCjwsUQu3JTT5sSxxHgas');
-
-            const [bondingCurvePDA] = PublicKey.findProgramAddressSync([Buffer.from('bonding-curve'), mintPubkey.toBuffer()], pumpFunProgramId);
-            const [associatedBondingCurvePDA] = PublicKey.findProgramAddressSync([bondingCurvePDA.toBuffer()], pumpFunProgramId);
+    
+            const [associatedBondingCurvePDA] = PublicKey.findProgramAddressSync(
+                [bondingCurvePDA.toBuffer()], 
+                pumpFunProgramId
+            );
             
-            // ========================= THE SDK-VERIFIED DISCRIMINATOR FIX ========================
-            // This is the correct, official discriminator from the pump.fun SDK IDL.
-            // All previous versions were generating this incorrectly. This is the final fix.
+            // Use CORRECT discriminator for buy instruction
             const discriminator = Buffer.from([102, 6, 61, 18, 1, 218, 235, 234]);
-            // =====================================================================================
-
-            const scaledSolCost = inputAmount;
             
-            // ========================= THE PROVEN WORKING SCHEMA ========================
-            // Using the inline schema method that has worked in all previous versions
+            // Use proper Pump.fun buy parameters
+            const tokenAmount = 0; // Buy as many tokens as possible
+            const maxSolCost = inputAmount; // Max SOL we're willing to spend
+    
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] 🔍 Buy params: Token Amount: ${tokenAmount}, Max SOL: ${maxSolCost}`);
+    
+            // CORRECT Borsh serialization for Pump.fun buy
             const argsBuffer = borsh.serialize(
-                { struct: { amount: 'u64', maxSolCost: 'u64' } },
                 { 
-                    amount: new BN(0), 
-                    maxSolCost: new BN(scaledSolCost)
+                    struct: { 
+                        amount: 'u64', 
+                        maxSolCost: 'u64',
+                        trackVolume: { option: 'bool' }
+                    } 
+                },
+                { 
+                    amount: new BN(tokenAmount),
+                    maxSolCost: new BN(maxSolCost),
+                    trackVolume: true
                 }
             );
-            // =================================================================================
+            
             const buyInstructionData = Buffer.concat([discriminator, argsBuffer]);
-
+    
+            // CORRECT account list for Pump.fun buy (12 accounts)
             const buyInstruction = {
                 programId: pumpFunProgramId,
-                keys: [ // The correct 12 accounts
+                keys: [
                     { pubkey: globalAccount, isSigner: false, isWritable: false },
                     { pubkey: feeRecipient, isSigner: false, isWritable: true },
                     { pubkey: mintPubkey, isSigner: false, isWritable: false },
@@ -2188,87 +1414,46 @@ class TradeExecutorWorker extends BaseWorker {
                 ],
                 data: buyInstructionData
             };
-
-        // ========================= TWO-STEP TRANSACTION APPROACH =========================
-        // Step 1: Create ATA with Helius tip
-        const heliusTipWallet = new PublicKey("2q5pghRs6arqVjRvT5gfgWfWcHWmw1ZuCzphgd5KfWGJ");
-        const tipAmount = 1000000; // 0.001 SOL (Helius minimum requirement)
-        
-        const tipInstruction = SystemProgram.transfer({
-            fromPubkey: userWallet.publicKey,
-            toPubkey: heliusTipWallet,
-            lamports: tipAmount
-        });
-        
-        // Step 1: ATA Creation + Tip
-        const createAtaInstruction = createAssociatedTokenAccountInstruction(
-            userWallet.publicKey, 
-            ata, 
-            userWallet.publicKey, 
-            mintPubkey
-        );
-        const ataInstructions = [createAtaInstruction, tipInstruction];
-        this.logInfo(`[PUMPFUN-2STEP] 🔧 Step 1: Creating ATA with Helius tip...`);
-        
-        const ataResult = await this.singaporeSender.executeCopyTrade(
-            ataInstructions,
-            userWallet,
-            { platform: 'PumpFun-ATA', inputAmount: 0, useSmartTransactions: false }
-        );
-        
-        if (!ataResult || !ataResult.success) {
-            // Check if the error is "account already exists", which is OK for us
-            if (ataResult.error && ataResult.error.includes("already in use")) {
-                this.logInfo(`[PUMPFUN-2STEP] ✅ ATA already exists. Proceeding.`);
-            } else {
-                throw new Error(`Failed to create ATA: ${ataResult.error || 'Unknown Error'}`);
-            }
-        } else {
-            this.logInfo(`[PUMPFUN-2STEP] ✅ ATA created successfully. Sig: ${shortenAddress(ataResult.signature)}`);
-        }
-        
-        // ========================= CRITICAL DELAY + VERIFICATION =========================
-        // Wait for ATA to be fully processed by the blockchain
-        this.logInfo(`[PUMPFUN-2STEP] ⏳ Waiting 5 seconds for ATA to be fully processed...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        // Verify ATA exists and is properly initialized
-        this.logInfo(`[PUMPFUN-2STEP] 🔍 Verifying ATA is ready...`);
-        const ataAccountInfo = await this.solanaManager.connection.getAccountInfo(ata);
-        if (!ataAccountInfo) {
-            throw new Error(`ATA verification failed: Account ${ata.toBase58()} not found after creation`);
-        }
-        this.logInfo(`[PUMPFUN-2STEP] ✅ ATA verified: ${ata.toBase58()} is ready`);
-        // ================================================================================
-        
-        // Step 2: Pump.fun Buy with Tip
-        this.logInfo(`[PUMPFUN-2STEP] 🚀 Step 2: Executing Pump.fun buy with tip...`);
-        const buyInstructions = [tipInstruction, buyInstruction];
-        
-        const executionResult = await this.singaporeSender.executeCopyTrade(
-            buyInstructions,
-            userWallet,
-            { platform: 'PumpFun', inputAmount: scaledSolCost, useSmartTransactions: false }
-        );
             
-        if (!executionResult || !executionResult.success) {
-            throw new Error(executionResult.error || 'The PumpFun buy transaction failed.');
-        }
-
-            this.logInfo(`[PUMPFUN-V6-SDK-VERIFIED] ✅ SUCCESS! Signature: ${executionResult.signature}`);
-
-            return {
-                ...executionResult,
-                amountSpentInLamports: scaledSolCost
+            instructions.push(buyInstruction);
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] ✅ Buy instruction added`);
+    
+            // --- SEND TRANSACTION ---
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] 📤 Sending atomic transaction with ${instructions.length} instructions...`);
+    
+            const executionResult = await this.singaporeSender.executeCopyTrade(
+                instructions,
+                userWallet,
+                { 
+                    platform: 'PumpFun', 
+                    inputAmount: inputAmount, 
+                    useSmartTransactions: false 
+                }
+            );
+            
+            if (!executionResult || !executionResult.success) {
+                throw new Error(executionResult.error || 'PumpFun buy transaction failed');
+            }
+    
+            this.logInfo(`[PUMPFUN-V7-ATOMIC] ✅✅✅ SUCCESS! Signature: ${executionResult.signature}`);
+            return { 
+                ...executionResult, 
+                amountSpentInLamports: inputAmount 
             };
-
+    
         } catch (error) {
-            this.logError(`[PUMPFUN-V6-SDK-VERIFIED] ❌ SWAP FAILED: ${error.message}`, { stack: error.stack });
+            this.logError(`[PUMPFUN-V7-ATOMIC] ❌ BUY FAILED: ${error.message}`, { stack: error.stack });
+            
+            // Check if it's an AMM migration error and suggest solution
+            if (error.message.includes('migrated to AMM') || error.message.includes('bonding curve')) {
+                this.logInfo(`[PUMPFUN-V7-ATOMIC] 💡 TIP: Token has migrated to AMM - use executePumpFunAmmBuy instead`);
+            }
+            
             return { 
                 success: false, 
                 error: error.message, 
-                signature: null,
-                executionTime: Date.now() - startTime
+                signature: null, 
+                executionTime: Date.now() - startTime 
             };
         }
     }
@@ -2283,40 +1468,29 @@ class TradeExecutorWorker extends BaseWorker {
             const userWallet = await this._getUserWallet();
             if (!userWallet) throw new Error("User wallet not found");
 
-            // --- Using the proven working inline schema method ---
-            
             const mintPubkey = new PublicKey(outputMint);
             const instructions = [];
 
-            // --- INSTRUCTION 1: BUILD THE SELL INSTRUCTION (14 ACCOUNTS AS PER OFFICIAL IDL) ---
+            // ATOMIC ATA CREATION WITH EXISTENCE CHECK
+            await this._checkAndCreateATAInstruction(mintPubkey, userWallet, instructions);
+
+            // --- INSTRUCTION 2: BUILD THE SELL INSTRUCTION (14 ACCOUNTS AS PER OFFICIAL IDL) ---
             const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
             
-            // --- LOAD REQUIRED CONSTANTS ---
             const globalAccount = config.PUMP_FUN_CONSTANTS.GLOBAL;
             const feeRecipient = config.PUMP_FUN_CONSTANTS.FEE_RECIPIENT;
             const eventAuthority = new PublicKey('CEntr3oDe4kAv3g4StGgG3sCjwsUQu3JTT5sSxxHgas');
             const feeProgram = config.PUMP_FUN_CONSTANTS.FEE_PROGRAM;
 
-            // --- CALCULATE REQUIRED PDAs ---
             const [bondingCurvePDA] = PublicKey.findProgramAddressSync([Buffer.from('bonding-curve'), mintPubkey.toBuffer()], pumpFunProgramId);
             const [associatedBondingCurvePDA] = PublicKey.findProgramAddressSync([bondingCurvePDA.toBuffer()], pumpFunProgramId);
             
-            // --- CALCULATE ADDITIONAL PDAs FOR SELL (14 ACCOUNTS) ---
-            // Creator vault PDA (requires bonding curve creator - we'll use user as fallback)
             const [creatorVaultPDA] = PublicKey.findProgramAddressSync([Buffer.from("creator-vault"), userWallet.publicKey.toBuffer()], pumpFunProgramId);
-            
-            // Fee config PDA
             const [feeConfigPDA] = PublicKey.findProgramAddressSync([Buffer.from("fee_config"), pumpFunProgramId.toBuffer()], feeProgram);
             
-            // --- GET USER'S TOKEN BALANCE ---
-            const ata = getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey);
-            
-            // --- PREPARE INSTRUCTION DATA ---
-            const tokenAmountToSell = inputAmount; // Amount of tokens to sell
-            const minSolOutput = Math.floor(tokenAmountToSell * 0.95); // 5% slippage tolerance
-            
-            // ========================= THE PROVEN WORKING SCHEMA ========================
-            // Using the inline schema method that has worked in all previous versions
+            const tokenAmountToSell = inputAmount;
+            const minSolOutput = Math.floor(tokenAmountToSell * 0.95);
+
             const argsBuffer = borsh.serialize(
                 { struct: { amount: 'u64', minSolOutput: 'u64' } },
                 { 
@@ -2324,29 +1498,26 @@ class TradeExecutorWorker extends BaseWorker {
                     minSolOutput: new BN(minSolOutput)
                 }
             );
-            // =================================================================================
-            const discriminator = Buffer.from([51, 230, 133, 164, 1, 127, 131, 173]); // From official IDL
+            const discriminator = Buffer.from([51, 230, 133, 164, 1, 127, 131, 173]);
             const sellInstructionData = Buffer.concat([discriminator, argsBuffer]);
 
-            // --- BUILD THE SELL INSTRUCTION WITH 14 ACCOUNTS ---
-            // This is the correct list according to the pump.json file for SELL
             const sellInstruction = {
                 programId: pumpFunProgramId,
                 keys: [
-                    { pubkey: globalAccount, isSigner: false, isWritable: false },           // 1. global
-                    { pubkey: feeRecipient, isSigner: false, isWritable: true },            // 2. fee_recipient
-                    { pubkey: mintPubkey, isSigner: false, isWritable: false },             // 3. mint
-                    { pubkey: bondingCurvePDA, isSigner: false, isWritable: true },        // 4. bonding_curve
-                    { pubkey: associatedBondingCurvePDA, isSigner: false, isWritable: true }, // 5. associated_bonding_curve
-                    { pubkey: ata, isSigner: false, isWritable: true },                     // 6. associated_user
-                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },      // 7. user
-                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // 8. system_program
-                    { pubkey: creatorVaultPDA, isSigner: false, isWritable: true },         // 9. creator_vault ⭐ EXTRA
-                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },       // 10. token_program
-                    { pubkey: eventAuthority, isSigner: false, isWritable: false },          // 11. event_authority
-                    { pubkey: pumpFunProgramId, isSigner: false, isWritable: false },      // 12. program
-                    { pubkey: feeConfigPDA, isSigner: false, isWritable: false },          // 13. fee_config ⭐ EXTRA
-                    { pubkey: feeProgram, isSigner: false, isWritable: false },            // 14. fee_program ⭐ EXTRA
+                    { pubkey: globalAccount, isSigner: false, isWritable: false },
+                    { pubkey: feeRecipient, isSigner: false, isWritable: true },
+                    { pubkey: mintPubkey, isSigner: false, isWritable: false },
+                    { pubkey: bondingCurvePDA, isSigner: false, isWritable: true },
+                    { pubkey: associatedBondingCurvePDA, isSigner: false, isWritable: true },
+                    { pubkey: getAssociatedTokenAddressSync(mintPubkey, userWallet.publicKey), isSigner: false, isWritable: true },
+                    { pubkey: userWallet.publicKey, isSigner: true, isWritable: true },
+                    { pubkey: SystemProgram.programId, isSigner: false, isWritable: false },
+                    { pubkey: creatorVaultPDA, isSigner: false, isWritable: true },
+                    { pubkey: TOKEN_PROGRAM_ID, isSigner: false, isWritable: false },
+                    { pubkey: eventAuthority, isSigner: false, isWritable: false },
+                    { pubkey: pumpFunProgramId, isSigner: false, isWritable: false },
+                    { pubkey: feeConfigPDA, isSigner: false, isWritable: false },
+                    { pubkey: feeProgram, isSigner: false, isWritable: false },
                 ],
                 data: sellInstructionData
             };
@@ -2354,7 +1525,6 @@ class TradeExecutorWorker extends BaseWorker {
 
             this.logInfo(`[PUMPFUN-SELL-V1] ✅ IDL-VERIFIED SELL transaction created with 14 accounts.`);
             
-            // --- SEND THE TRANSACTION ---
             const executionResult = await this.singaporeSender.executeCopyTrade(
                 instructions,
                 userWallet,
@@ -2382,159 +1552,19 @@ class TradeExecutorWorker extends BaseWorker {
             };
         }
     }
-
     
-    async findAMMPool(mintPubkey) {
-        this.logInfo(`[AMM-FINDER-V2] 🔍 Searching for AMM pool for mint: ${shortenAddress(mintPubkey.toBase58())}`);
+    async executePumpFunTrade(swapDetails, userConfig, tradeType) {
         try {
-            const ammProgramId = config.DEX_PROGRAM_IDS.PUMP_FUN_AMM;
+            this.logInfo(`[PUMPFUN-DIRECT] 🚀 Direct Pump.fun ${tradeType.toUpperCase()} for token: ${shortenAddress(swapDetails.outputMint)}`);
             
-            // ========================= DOCUMENTED OFFSET CALCULATION ========================
-            // AMM Pool Account Structure (based on IDL):
-            // - pool_bump: u8 (1 byte)
-            // - index: u16 (2 bytes) 
-            // - creator: Pubkey (32 bytes)
-            // - base_mint: Pubkey (32 bytes) ← TARGET FIELD at offset 35
-            // - quote_mint: Pubkey (32 bytes)
-            // - ... other fields
-            const MEMCMP_OFFSET_FOR_BASE_MINT = 35; // 1 + 2 + 32 = 35 bytes
-            // ===========================================================================
-            
-            const response = await fetch(this.solanaManager.connection.rpcEndpoint, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    jsonrpc: '2.0',
-                    id: 'zapbot-find-amm-pool',
-                    method: 'getProgramAccounts',
-                    params: [
-                        ammProgramId.toBase58(),
-                        {
-                            encoding: 'base64',
-                            filters: [
-                                { 
-                                    memcmp: { 
-                                        offset: MEMCMP_OFFSET_FOR_BASE_MINT, 
-                                        bytes: mintPubkey.toBase58() 
-                                    } 
-                                }
-                            ]
-                        }
-                    ]
-                })
-            });
-    
-            const data = await response.json();
-            if (data.error) {
-                this.logError(`[AMM-FINDER-V2] ❌ RPC error: ${data.error.message}`);
-                return null;
-            }
-            
-            if (!data.result || data.result.length === 0) {
-                this.logWarn(`[AMM-FINDER-V2] ⚠️ No AMM pool found for mint: ${shortenAddress(mintPubkey.toBase58())}`);
-                return null;
-            }
-    
-            // Handle multiple pools (shouldn't happen, but safe)
-            const poolAccountAddress = new PublicKey(data.result[0].pubkey);
-            this.logInfo(`[AMM-FINDER-V2] ✅ Found AMM pool: ${shortenAddress(poolAccountAddress.toBase58())}`);
-            return poolAccountAddress;
-    
-        } catch (error) {
-            this.logError(`[AMM-FINDER-V2] ❌ Error finding AMM pool: ${error.message}`);
-            return null;
-        }
-    }
-
-    // ====================================================================
-    // ====== MIGRATION DETECTION SYSTEM =================================
-    // ====================================================================
-    
-    async isTokenMigrated(mintAddress) {
-        try {
-            this.logInfo(`[MIGRATION-CHECK] 🔍 Checking phase for: ${shortenAddress(mintAddress)}`);
-            const mintPubkey = new PublicKey(mintAddress);
-            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN;
-            
-            const [bondingCurvePDA] = PublicKey.findProgramAddressSync(
-                [Buffer.from('bonding-curve'), mintPubkey.toBuffer()], 
-                pumpFunProgramId
-            );
-            
-            this.logInfo(`[MIGRATION-CHECK] 🔍 Bonding curve PDA: ${shortenAddress(bondingCurvePDA.toBase58())}`);
-            
-            // ========================= IMPROVED MIGRATION DETECTION =========================
-            // First, check if bonding curve account exists
-            const bondingCurveAccount = await this.solanaManager.connection.getAccountInfo(bondingCurvePDA);
-            
-            if (bondingCurveAccount === null) {
-                this.logInfo(`[MIGRATION-CHECK] 🔍 Bonding curve account is null. Checking if AMM pool exists...`);
-                
-                // If bonding curve is null, check if AMM pool exists to confirm migration
-                const ammPoolAddress = await this.findAMMPool(mintPubkey);
-                
-                if (ammPoolAddress) {
-                    this.logInfo(`[MIGRATION-CHECK] ✅ CONFIRMED MIGRATED: Found AMM pool at ${shortenAddress(ammPoolAddress.toBase58())}`);
-                    return { isMigrated: true, phase: 'AMM', poolAccount: ammPoolAddress, reason: 'Found AMM pool account.' };
-                } else {
-                    // Bonding curve is null but no AMM pool found - this could be a new token or error
-                    this.logWarn(`[MIGRATION-CHECK] ⚠️ Bonding curve null but no AMM pool found. Assuming bonding curve phase.`);
-                    return { isMigrated: false, phase: 'BondingCurve', reason: 'Bonding curve null but no AMM pool found - likely still in bonding curve.' };
-                }
+            if (tradeType === 'buy') {
+                return await this.executePumpFunBuy(swapDetails, userConfig);
             } else {
-                // Bonding curve account exists - definitely not migrated
-                this.logInfo(`[MIGRATION-CHECK] ✅ NOT MIGRATED: Bonding curve account is active.`);
-                return { isMigrated: false, phase: 'BondingCurve', reason: 'Bonding curve account still exists.' };
-            }
-            // =============================================================================
-            
-        } catch (error) {
-            this.logError(`[MIGRATION-CHECK] ❌ Migration check failed. Defaulting to Bonding Curve phase.`, { stack: error.stack });
-            return { isMigrated: false, phase: 'BondingCurve', reason: `Error during check: ${error.message}` };
-        }
-    }
-
-    // ====================================================================
-    // ====== SMART ROUTING SYSTEM =======================================
-    // ====================================================================
-    
-      async executePumpFunTrade(swapDetails, userConfig, tradeType) {
-        try {
-            this.logInfo(`[PUMPFUN-SMART-ROUTER] 🚀 Smart routing for ${tradeType.toUpperCase()} of token: ${shortenAddress(swapDetails.outputMint)}`);
-            
-            // --- STEP 1: CHECK MIGRATION STATUS ---
-            const tokenMint = tradeType === 'buy' ? swapDetails.outputMint : swapDetails.inputMint;
-            const migrationStatus = await this.isTokenMigrated(tokenMint);
-            this.logInfo(`[PUMPFUN-SMART-ROUTER] 📊 Token Phase: ${migrationStatus.phase}. Reason: ${migrationStatus.reason}`);
-            
-            // --- STEP 2: ROUTE TO APPROPRIATE HANDLER ---
-            if (!migrationStatus.isMigrated) {
-                this.logInfo(`[PUMPFUN-SMART-ROUTER] 🎯 Routing to BONDING CURVE handler...`);
-                if (tradeType === 'buy') {
-                    return await this.executePumpFunBuy(swapDetails, userConfig);
-                } else {
-                    return await this.executePumpFunSell(swapDetails, userConfig);
-                }
-            } else {
-                 this.logInfo(`[PUMPFUN-SMART-ROUTER] 🎯 Routing to AMM handler...`);
-                 
-                 // Try to find AMM pool first
-                 const poolAccount = await this.findAMMPool(new PublicKey(tokenMint));
-                 
-                 if (poolAccount) {
-                    throw new Error(`Token ${tokenMint} has migrated, but its AMM pool address could not be found. Aborting trade.`);
-                     if (tradeType === 'buy') {
-                         return await this.executePumpFunAmmBuy(swapDetails, userConfig, poolAccount);
-                     } else {
-                         return await this.executePumpFunAmmSell(swapDetails, userConfig, poolAccount);
-                     }
-                } else {
-                    throw new Error(`Token ${shortenAddress(swapDetails.outputMint)} has migrated, but its AMM pool address could not be found. Aborting trade.`);
-                }
+                return await this.executePumpFunSell(swapDetails, userConfig);
             }
         } catch (error) {
-            this.logError(`[PUMPFUN-SMART-ROUTER] ❌ Smart routing failed: ${error.message}`, { stack: error.stack });
-            throw error; // Re-throw the error to be caught by the master executor
+            this.logError(`[PUMPFUN-DIRECT] ❌ Direct execution failed: ${error.message}`, { stack: error.stack });
+            throw error;
         }
     }
     
@@ -2543,15 +1573,11 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[ORCA-REAL] 🚀 Executing REAL Orca swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[ORCA-REAL] 💰 Amount: ${inputAmount}`);
             
-            // Get user wallet for signing
             const userWallet = await this._getUserWallet();
             if (!userWallet) {
                 throw new Error('User wallet not found');
             }
             
-            // ======================================================================
-            // ========================== REAL PDA/ATA CREATION ====================
-            // ======================================================================
             const { PublicKey, SystemProgram } = require('@solana/web3.js');
             const { 
                 getAssociatedTokenAddressSync, 
@@ -2561,43 +1587,15 @@ class TradeExecutorWorker extends BaseWorker {
             
             const instructions = [];
             
-            // 1. CREATE USER ATA (Associated Token Account) if needed
             const inputMintPubkey = new PublicKey(inputMint);
             const outputMintPubkey = new PublicKey(outputMint);
+            
+            await this._checkAndCreateATAInstruction(inputMintPubkey, userWallet, instructions);
+            await this._checkAndCreateATAInstruction(outputMintPubkey, userWallet, instructions);
+            
             const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
             const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
             
-            this.logInfo(`[ORCA-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
-            this.logInfo(`[ORCA-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
-            
-            // Check if ATAs exist
-            const connection = this.solanaManager?.connection;
-            if (!connection) {
-                throw new Error('Solana connection not available');
-            }
-            
-            // BULLETPROOF FIX: Always add ATA creation instructions (idempotent)
-            this.logInfo(`[ORCA-REAL] 🔧 Pushing idempotent input ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userInputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    inputMintPubkey      // mint
-                )
-            );
-            
-            this.logInfo(`[ORCA-REAL] 🔧 Pushing idempotent output ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userOutputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    outputMintPubkey      // mint
-                )
-            );
-            
-            // 2. CREATE ORCA WHIRLPOOL PDA
             const orcaProgramId = config.PLATFORM_IDS.WHIRLPOOL;
             const [whirlpoolPDA] = PublicKey.findProgramAddressSync(
                 [Buffer.from('whirlpool'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
@@ -2606,50 +1604,13 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[ORCA-REAL] 🔧 Whirlpool PDA: ${whirlpoolPDA.toString()}`);
             
-            // 3. CREATE ORCA SWAP INSTRUCTION USING BORSH
             this.logInfo('[BORSH] 🔧 Serializing Orca swap instruction using Borsh schema...');
             
-            // Define the structure of the instruction data (Orca has more complex structure)
-            const OrcaSwapInstruction = {
-                discriminator: 'u8',
-                amountIn: 'u64',
-                minimumAmountOut: 'u64',
-                swapDirection: 'u8',
-                swapMode: 'u8',
-                referral: 'u8',
-                openOrders: 'u8',
-                minOrderSize: 'u8',
-                maxOrderSize: 'u8',
-                maxOrderLifetime: 'u8',
-                slippageTolerance: 'u8',
-                priceImpactTolerance: 'u8',
-                maxPriceImpact: 'u8'
-            };
-            
-            // Create the data payload object
-            const payload = {
-                discriminator: 7,
-                amountIn: new BN(inputAmount), // Amount in
-                minimumAmountOut: new BN(0),   // Minimum amount out (slippage handled by user)
-                swapDirection: 0,              // A to B
-                swapMode: 0,                   // Exact in
-                referral: 0,                   // No referral
-                openOrders: 0,                 // No open orders
-                minOrderSize: 0,               // Min order size
-                maxOrderSize: 0,               // Max order size
-                maxOrderLifetime: 0,           // Max order lifetime
-                slippageTolerance: 0,          // Slippage tolerance
-                priceImpactTolerance: 0,       // Price impact tolerance
-                maxPriceImpact: 0              // Max price impact
-            };
-            
-            // Create Orca payload using class pattern
             const orcaPayload = new OrcaSwapPayload({
                 amountIn: new BN(inputAmount),
                 minimumAmountOut: new BN(0)
             });
             
-            // Serialize using class schema
             const swapInstructionData = borsh.serialize(ORCA_SWAP_SCHEMA, orcaPayload);
             
             this.logInfo(`[BORSH] ✅ Orca instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
@@ -2671,7 +1632,6 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[ORCA-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
             
-            // 4. ULTRA-FAST EXECUTION with Helius Sender
             this.logInfo(`[ORCA-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
             
             const result = await this.singaporeSender.executeCopyTrade(
@@ -2682,7 +1642,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: false // Disable Smart Transactions for Orca (direct contract call)
+                    useSmartTransactions: false
                 }
             );
             
@@ -2704,15 +1664,11 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[METEORA-REAL] 🚀 Executing REAL Meteora swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[METEORA-REAL] 💰 Amount: ${inputAmount}`);
             
-            // Get user wallet for signing
             const userWallet = await this._getUserWallet();
             if (!userWallet) {
                 throw new Error('User wallet not found');
             }
             
-            // ======================================================================
-            // ========================== REAL PDA/ATA CREATION ====================
-            // ======================================================================
             const { PublicKey, SystemProgram } = require('@solana/web3.js');
             const { 
                 getAssociatedTokenAddressSync, 
@@ -2722,43 +1678,15 @@ class TradeExecutorWorker extends BaseWorker {
             
             const instructions = [];
             
-            // 1. CREATE USER ATA (Associated Token Account) if needed
             const inputMintPubkey = new PublicKey(inputMint);
             const outputMintPubkey = new PublicKey(outputMint);
+            
+            await this._checkAndCreateATAInstruction(inputMintPubkey, userWallet, instructions);
+            await this._checkAndCreateATAInstruction(outputMintPubkey, userWallet, instructions);
+            
             const userInputAta = getAssociatedTokenAddressSync(inputMintPubkey, userWallet.publicKey);
             const userOutputAta = getAssociatedTokenAddressSync(outputMintPubkey, userWallet.publicKey);
             
-            this.logInfo(`[METEORA-REAL] 🔧 User Input ATA: ${userInputAta.toString()}`);
-            this.logInfo(`[METEORA-REAL] 🔧 User Output ATA: ${userOutputAta.toString()}`);
-            
-            // Check if ATAs exist
-            const connection = this.solanaManager?.connection;
-            if (!connection) {
-                throw new Error('Solana connection not available');
-            }
-            
-            // BULLETPROOF FIX: Always add ATA creation instructions (idempotent)
-            this.logInfo(`[METEORA-REAL] 🔧 Pushing idempotent input ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userInputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    inputMintPubkey      // mint
-                )
-            );
-            
-            this.logInfo(`[METEORA-REAL] 🔧 Pushing idempotent output ATA creation instruction...`);
-            instructions.push(
-                createAssociatedTokenAccountInstruction(
-                    userWallet.publicKey, // payer
-                    userOutputAta,        // associated token account
-                    userWallet.publicKey, // owner
-                    outputMintPubkey      // mint
-                )
-            );
-            
-            // 2. CREATE METEORA DLMM POOL PDA
             const meteoraProgramId = config.PLATFORM_IDS.METEORA_DLMM;
             const [dlmmPoolPDA] = PublicKey.findProgramAddressSync(
                 [Buffer.from('dlmm_pool'), inputMintPubkey.toBuffer(), outputMintPubkey.toBuffer()],
@@ -2767,30 +1695,13 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[METEORA-REAL] 🔧 DLMM Pool PDA: ${dlmmPoolPDA.toString()}`);
             
-            // 3. CREATE METEORA SWAP INSTRUCTION USING BORSH
             this.logInfo('[BORSH] 🔧 Serializing Meteora swap instruction using Borsh schema...');
             
-            // Define the structure of the instruction data
-            const MeteoraSwapInstruction = {
-                discriminator: 'u8',
-                amountIn: 'u64',
-                minimumAmountOut: 'u64'
-            };
-            
-            // Create the data payload object
-            const payload = {
-                discriminator: 12,
-                amountIn: new BN(inputAmount), // Amount in
-                minimumAmountOut: new BN(0)    // Minimum amount out (slippage handled by user)
-            };
-            
-            // Create Meteora payload using class pattern
             const meteoraPayload = new MeteoraSwapPayload({
                 amountIn: new BN(inputAmount),
                 minimumAmountOut: new BN(0)
             });
             
-            // Serialize using class schema
             const swapInstructionData = borsh.serialize(METEORA_SWAP_SCHEMA, meteoraPayload);
             
             this.logInfo(`[BORSH] ✅ Meteora instruction data serialized successfully. Buffer length: ${swapInstructionData.length}`);
@@ -2812,7 +1723,6 @@ class TradeExecutorWorker extends BaseWorker {
             
             this.logInfo(`[METEORA-REAL] 🔧 Created ${instructions.length} instructions with REAL PDA/ATA logic`);
             
-            // 4. ULTRA-FAST EXECUTION with Helius Sender
             this.logInfo(`[METEORA-REAL] ⚡ Executing with Helius Sender for sub-200ms execution...`);
             
             const result = await this.singaporeSender.executeCopyTrade(
@@ -2823,7 +1733,7 @@ class TradeExecutorWorker extends BaseWorker {
                     inputMint,
                     outputMint,
                     inputAmount,
-                    useSmartTransactions: false // Disable Smart Transactions for Meteora (direct contract call)
+                    useSmartTransactions: false
                 }
             );
             
@@ -2844,11 +1754,8 @@ class TradeExecutorWorker extends BaseWorker {
             this.logInfo(`[OPENBOOK] 🔄 Executing OpenBook swap: ${inputMint} → ${outputMint}`);
             this.logInfo(`[OPENBOOK] 💰 Amount: ${inputAmount}`);
             
-            // Use OpenBook FREE API (no premium required)
-            // 1. Find OpenBook market using free API
             const marketUrl = `https://api.openbook-solana.com/v1/markets`;
             
-            // 2. Calculate swap using free SDK
             this.logInfo(`[OPENBOOK] 🔗 Using OpenBook FREE API`);
             this.logInfo(`[OPENBOOK] ✅ OpenBook swap executed successfully`);
             

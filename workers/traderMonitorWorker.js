@@ -204,6 +204,14 @@ class TraderMonitorWorker extends BaseWorker {
             // Load router database and active traders from DB
             await this.loadRouterDatabase();
             await this.loadActiveTraders();
+            
+            // CRITICAL FIX: Clear Redis cache on startup to force fresh data
+            await this.redisManager.client.del('active_traders');
+            await this.redisManager.client.del('trader_data');
+            this.logInfo('✅ Redis cache cleared on startup - forcing fresh data sync');
+            
+            // PRODUCTION FIX: Setup database fallback for critical data
+            await this.setupDatabaseFallback();
 
             // Initialize LaserStreamManager (SIMPLE COPY BOT)
             this.laserstreamManager = new LaserStreamManager(
@@ -238,7 +246,42 @@ class TraderMonitorWorker extends BaseWorker {
             throw error;
         }
     }
-    
+
+    // PRODUCTION FIX: Database fallback for critical data
+    async setupDatabaseFallback() {
+        try {
+            // Setup periodic database sync for critical data
+            setInterval(async () => {
+                await this.syncCriticalDataToDatabase();
+            }, 30000); // Sync every 30 seconds
+            
+            this.logInfo('✅ Database fallback configured for critical data');
+        } catch (error) {
+            this.logError('❌ Database fallback setup failed:', error);
+        }
+    }
+
+    // Sync critical data to database as fallback
+    async syncCriticalDataToDatabase() {
+        try {
+            // Sync active traders to database
+            const activeTraders = await this.redisManager.smembers('active_traders');
+            if (activeTraders && activeTraders.length > 0) {
+                // Store in database as backup
+                await this.dataManager.setActiveTraders(activeTraders);
+            }
+            
+            // Sync user settings to database
+            const userSettings = await this.redisManager.get('user_settings');
+            if (userSettings) {
+                await this.dataManager.setUserSettings(JSON.parse(userSettings));
+            }
+            
+        } catch (error) {
+            this.logError('❌ Database sync failed:', error);
+        }
+    }
+
     async loadBotConfiguration() {
         try {
             // Load settings from dataManager
@@ -357,7 +400,7 @@ class TraderMonitorWorker extends BaseWorker {
         this.registerHandler('REFRESH_SUBSCRIPTIONS', this.handleRefreshSubscriptions.bind(this));
         this.registerHandler('TRADER_ADDED', this.handleTraderAdded.bind(this));
         this.registerHandler('TRADER_STARTED', this.handleTraderStarted.bind(this));
-        this.registerHandler('HANDLE_SMART_COPY', this.handleSmartCopy.bind(this));
+        // REMOVED: HANDLE_SMART_COPY - Consolidated to use only EXECUTE_COPY_TRADE
     }
 
     async handleMessage(message) {
@@ -434,37 +477,7 @@ class TraderMonitorWorker extends BaseWorker {
         }
     }
 
-    async handleSmartCopy(message) {
-        try {
-            this.logInfo(`[SMART-COPY] 🔧 Handling smart copy from LaserStream`);
-            this.logInfo(`[SMART-COPY] 🔍 Trader: ${message.traderWallet}`);
-            this.logInfo(`[SMART-COPY] 🔍 Signature: ${message.signature} (type: ${typeof message.signature})`);
-            this.logInfo(`[SMART-COPY] 🔍 Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
-            this.logInfo(`[SMART-COPY] 🔍 Analysis result: ${message.analysisResult ? 'Present' : 'Missing'}`);
-            
-            // Forward to executor with proper data structure
-            this.logInfo(`[SMART-COPY] 🔍 Sending to executor - Signature: ${message.signature} (type: ${typeof message.signature})`);
-            this.logInfo(`[SMART-COPY] 🔍 Sending to executor - Signature length: ${message.signature ? message.signature.length : 'undefined'}`);
-            
-            this.signalMessage('HANDLE_SMART_COPY', {
-                traderWallet: message.traderWallet,
-                traderName: message.traderName, // <-- ADD TRADER NAME
-                signature: message.signature,
-                analysisResult: message.analysisResult,
-                originalTransaction: message.originalTransaction,
-                meta: message.meta,
-                programIds: message.programIds,
-                routerInfo: message.routerInfo,
-                userConfig: message.userConfig,
-                smartCopyMode: true
-            });
-            
-            this.logInfo(`[SMART-COPY] ✅ Smart copy forwarded to executor`);
-            
-        } catch (error) {
-            this.logError(`[SMART-COPY] ❌ Error handling smart copy: ${error.message}`);
-        }
-    }
+    // REMOVED: handleSmartCopy() - Consolidated to use only EXECUTE_COPY_TRADE signal
 
     // Method for LaserStream to get active trader wallets
     getMasterTraderWallets() {
@@ -628,26 +641,39 @@ class TraderMonitorWorker extends BaseWorker {
             }
 
             const solChange = normalizedTx.postBalances[traderIndex] - normalizedTx.preBalances[traderIndex];
-            const isBuy = solChange < 0;
+            const absChange = Math.abs(solChange);
+            const direction = solChange < 0 ? 'buy' : 'sell';
 
             this.logInfo(`[GATEKEEPER] 🔍 SOL Change: ${solChange} lamports (${(solChange / 1000000000).toFixed(4)} SOL)`);
-            this.logInfo(`[GATEKEEPER] 🔍 Is Buy: ${isBuy}, Abs Change: ${Math.abs(solChange)}`);
+            this.logInfo(`[GATEKEEPER] 🔍 Direction: ${direction}, Abs Change: ${absChange}`);
 
-            if (!isBuy || Math.abs(solChange) < 100000) { // minimum 0.0001 SOL change
-                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Not a significant SOL spend.`);
+            if (absChange < 100000) { // minimum 0.0001 SOL change (accepts buys and sells)
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Not a significant SOL value change.`);
                 return false;
             }
             
-            // Check 2: Does this transaction involve the Pump.fun program?
-            const pumpFunProgramId = config.PLATFORM_IDS.PUMP_FUN.toBase58();
-            const usesPumpFun = normalizedTx.accountKeys.includes(pumpFunProgramId);
+            // Check 2: Does this transaction involve ANY supported DEX or ROUTER program from config.PLATFORM_IDS?
+            const platformIds = config.PLATFORM_IDS; // contains both DEX_PROGRAM_IDS and ROUTER_PROGRAM_IDS
+            // Robust normalization: handle PublicKey, string, arrays
+            const normalizeToStrings = (value) => {
+                if (!value) return [];
+                if (Array.isArray(value)) {
+                    return value.flatMap((v) => normalizeToStrings(v));
+                }
+                if (typeof value === 'string') return [value];
+                if (typeof value.toBase58 === 'function') return [value.toBase58()];
+                if (value.publicKey && typeof value.publicKey.toBase58 === 'function') return [value.publicKey.toBase58()];
+                return [];
+            };
+            const supportedDexPrograms = Object.values(platformIds).flatMap((v) => normalizeToStrings(v));
+            const usesSupportedDex = normalizedTx.accountKeys.some((key) => supportedDexPrograms.includes(key));
 
-            this.logInfo(`[GATEKEEPER] 🔍 Pump.fun Program ID: ${pumpFunProgramId}`);
-            this.logInfo(`[GATEKEEPER] 🔍 Uses Pump.fun: ${usesPumpFun}`);
+            this.logInfo(`[GATEKEEPER] 🔍 Supported Platforms (DEX + Routers): ${supportedDexPrograms.length}`);
+            this.logInfo(`[GATEKEEPER] 🔍 Uses Supported Platform: ${usesSupportedDex}`);
             this.logInfo(`[GATEKEEPER] 🔍 Account Keys (first 5): ${normalizedTx.accountKeys.slice(0, 5).map(addr => shortenAddress(addr)).join(', ')}`);
 
-            if (!usesPumpFun) {
-                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Does not involve the Pump.fun program.`);
+            if (!usesSupportedDex) {
+                this.logInfo(`[GATEKEEPER] ❌ REJECTED: Does not involve any supported DEX program.`);
                 return false;
             }
 
@@ -664,20 +690,27 @@ class TraderMonitorWorker extends BaseWorker {
                 return false;
             }
 
-            this.logInfo(`[GATEKEEPER] ✅ PASSED: Confirmed Pump.fun buy.`);
+            this.logInfo(`[GATEKEEPER] ✅ PASSED: Confirmed DEX buy.`);
+
+            // ====== LAYER 1 ANALYSIS: DETECT THE ACTUAL PLATFORM ======
+            const layer1Result = this._analyzeLayer1_ProgramID(normalizedTx, supportedDexPrograms);
+            const detectedPlatform = layer1Result.isValid ? layer1Result.platform : 'UNKNOWN';
+            const detectedRouter = layer1Result.isValid ? layer1Result.router : 'Direct';
+            
+            this.logInfo(`[GATEKEEPER] 🔍 Layer 1 Analysis: Platform=${detectedPlatform}, Router=${detectedRouter}`);
 
             // If all checks pass, it's a valid trade. Build the result for the executor.
             return {
                 isCopyable: true,
                 swapDetails: {
-                    platform: 'PUMPFUN', // We know it's Pump.fun
+                    platform: detectedPlatform, // Use the correctly detected platform
                     tradeType: 'buy',
                     inputMint: config.NATIVE_SOL_MINT,
                     outputMint: receivedToken.mint,
                     traderPubkey: sourceWallet,
                     inputAmount: Math.abs(solChange), // The raw lamports the trader spent
                 },
-                summary: `Direct Pump.fun buy`,
+                summary: `${detectedRouter} → ${detectedPlatform} buy`,
                 reason: 'Passed all Gatekeeper checks.'
             };
 

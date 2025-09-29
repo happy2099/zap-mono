@@ -18,17 +18,19 @@ class RedisManager {
         // In-memory cache for trade-ready tokens (Quantum Cache target)
         this.tradeReadyCache = new Map();
         
-        // TTL configurations (in seconds)
+        // TTL configurations (in seconds) - PRODUCTION OPTIMIZED
         this.TTL = {
-            TRADE_DATA: 15 * 60,       // 15 minutes for pre-built trade info
+            TRADE_DATA: 5 * 60,        // 5 minutes for pre-built trade info
             LAUNCHPAD_POOL: 20,        // 20 seconds for rapidly changing launchpad data
-            PRESIGNED_TX: 5 * 60,      // 5 minutes for a ready-to-fire transaction
-            POSITIONS: 30 * 60,        // 30 minutes
-            POOL_STATES: 5 * 60,       // 5 minutes
-            TRANSACTION_CACHE: 60 * 60, // 1 hour
-            USER_SESSIONS: 24 * 60 * 60, // 24 hours
-            ACTIVE_TRADERS: 24 * 60 * 60, // 24 hours (CRITICAL FIX: Prevent trader data expiration)
-            TRADE_QUEUE: 10 * 60       // 10 minutes
+            PRESIGNED_TX: 2 * 60,      // 2 minutes for a ready-to-fire transaction
+            POSITIONS: 10 * 60,        // 10 minutes (positions change frequently)
+            POOL_STATES: 2 * 60,       // 2 minutes (pool states change rapidly)
+            TRANSACTION_CACHE: 15 * 60, // 15 minutes (shorter for VPS)
+            USER_SESSIONS: 2 * 60 * 60, // 2 hours (shorter for VPS)
+            ACTIVE_TRADERS: 2 * 60,    // 2 minutes (CRITICAL: Force refresh trader data)
+            TRADE_QUEUE: 5 * 60,       // 5 minutes
+            USER_SETTINGS: 1 * 60,     // 1 minute (user settings change frequently)
+            PORTFOLIO_DATA: 5 * 60      // 5 minutes (portfolio data changes frequently)
         };
     }
 
@@ -73,6 +75,9 @@ class RedisManager {
                 await this.client.connect();
                 this.isConnected = true;
                 console.log('✅ RedisManager initialized successfully');
+                
+                // PRODUCTION FIX: Setup memory management for VPS
+                await this.setupMemoryManagement();
             } catch (error) {
                 console.warn('⚠️ Redis connection failed:', error.message);
                 throw error; // Re-throw to be handled by startup script
@@ -81,6 +86,46 @@ class RedisManager {
         } catch (error) {
             console.error('❌ RedisManager initialization failed:', error);
             throw error;
+        }
+    }
+
+    // PRODUCTION FIX: Memory management for VPS
+    async setupMemoryManagement() {
+        try {
+            // Set Redis memory policy for VPS
+            await this.client.configSet('maxmemory-policy', 'allkeys-lru');
+            await this.client.configSet('maxmemory', '256mb'); // Adjust based on VPS
+            
+            // Start periodic cleanup
+            setInterval(async () => {
+                await this.cleanupExpiredKeys();
+            }, 60000); // Clean every minute
+            
+            console.log('✅ Redis memory management configured for VPS');
+        } catch (error) {
+            console.warn('⚠️ Redis memory management setup failed:', error.message);
+        }
+    }
+
+    // Cleanup expired keys to prevent memory bloat
+    async cleanupExpiredKeys() {
+        try {
+            const keys = await this.client.keys('*');
+            let cleaned = 0;
+            
+            for (const key of keys) {
+                const ttl = await this.client.ttl(key);
+                if (ttl === -1) { // Key has no expiration
+                    await this.client.del(key);
+                    cleaned++;
+                }
+            }
+            
+            if (cleaned > 0) {
+                console.log(`🧹 Redis cleanup: Removed ${cleaned} expired keys`);
+            }
+        } catch (error) {
+            console.warn('⚠️ Redis cleanup failed:', error.message);
         }
     }
 
